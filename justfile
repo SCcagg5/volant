@@ -25,6 +25,17 @@ insta-accept:
 golden:
     "$(uv tool dir)/ansible-core/bin/python" crates/volant/tests/golden/generate.py
 
+# Regenerate the parity matrix's reference names (tests/parity/reference.json) with the
+# reference ansible-core and the pinned `ansible` package's collections. Needs `uv`.
+parity-reference:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    py="$(uv tool dir)/ansible-core/bin/python"
+    pin="$(cat crates/volant/tests/parity/ANSIBLE_PACKAGE)"
+    dir="target/parity/ansible-$pin"
+    [ -d "$dir/ansible_collections" ] || uv pip install --python "$py" --target "$dir" --no-deps "ansible==$pin"
+    "$py" crates/volant/tests/parity/generate.py "$dir"
+
 # Everything CI runs, in the same order
 check: fmt lint test
 
@@ -100,6 +111,10 @@ docs-modules:
 # Regenerate the keywords reference page from the keyword tables
 docs-keywords:
     VOLANT_UPDATE_DOCS=1 cargo test -p volant the_keyword_page_matches_the_tables
+
+# Regenerate the parity page from the engine and tests/parity/reference.json
+docs-parity:
+    VOLANT_UPDATE_DOCS=1 cargo test -p volant --test parity the_parity_page_matches_the_engine
 
 # Serve the documentation site with live reload (needs Node.js)
 docs-dev:
