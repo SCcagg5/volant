@@ -7994,12 +7994,21 @@ fn shell_executable_selects_the_interpreter() {
 /// answering it. Every start appends a line to `starts.log`,
 /// which is what counts them.
 fn fake_python(dir: &Path) -> std::path::PathBuf {
+    fake_python_answering(
+        dir,
+        &[br#"{"zip_b64":"UEsDBA==","modules":{"lineinfile":{"module_fqn":"ansible.modules.lineinfile","profile":"legacy","rlimit_nofile":1024,"extensions":{}}}}"#],
+    )
+}
+
+/// [`fake_python`], answering each request of the run in turn with the next of `answers`.
+fn fake_python_answering(dir: &Path, answers: &[&[u8]]) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
-    let answer = br#"{"zip_b64":"UEsDBA==","modules":{"lineinfile":{"module_fqn":"ansible.modules.lineinfile","profile":"legacy","rlimit_nofile":1024,"extensions":{}}}}"#;
+    // The helper's first answer is to the plugin directories the controller hands it before
+    // anything else, which it takes with an empty frame.
     let mut frame = Vec::new();
-    for body in [&b"{}"[..], &answer[..]] {
-        frame.extend_from_slice(&u32::try_from(body.len()).unwrap().to_be_bytes());
-        frame.extend_from_slice(body);
+    for answer in std::iter::once(&b"{}"[..]).chain(answers.iter().copied()) {
+        frame.extend_from_slice(&u32::try_from(answer.len()).unwrap().to_be_bytes());
+        frame.extend_from_slice(answer);
     }
     std::fs::write(dir.join("answer.bin"), &frame).unwrap();
     let script = dir.join("python");
@@ -8391,11 +8400,11 @@ fn a_module_in_the_playbook_s_library_or_a_role_s_runs() {
         "{text}"
     );
     // Measured there too: a word that is not `key=value` fails the task with "Action 'pb_probe'
-    // does not support raw params."; Volant refuses the run with it before the first
-    // connection, once the name resolved.
+    // does not support raw params." while the play runs, `ignore_errors` takes it, and the
+    // play it fails exits 2.
     std::fs::write(
         dir.join("stray.yml"),
-        "- hosts: localhost\n  gather_facts: false\n  tasks:\n    - pb_probe: word=a stray\n",
+        "- hosts: localhost\n  gather_facts: false\n  tasks:\n    - pb_probe: word=a stray\n      ignore_errors: true\n    - pb_probe: word=a stray\n",
     )
     .expect("the play");
     let out = volant_within_env(
@@ -8406,10 +8415,12 @@ fn a_module_in_the_playbook_s_library_or_a_role_s_runs() {
             ("XDG_CACHE_HOME", cache.to_str().expect("a path")),
         ],
     );
-    let text = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(out.status.code(), Some(4), "{text}");
-    assert!(
-        text.contains("Action 'pb_probe' does not support raw params."),
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(2), "{text}");
+    assert_eq!(
+        text.matches(r#"fatal: [localhost]: FAILED! => {"changed": false, "msg": "Task failed: Action 'pb_probe' does not support raw params."}"#)
+            .count(),
+        2,
         "{text}"
     );
     std::fs::remove_dir_all(&dir).expect("the probe directory is removed");
@@ -8929,4 +8940,233 @@ fn the_tag_options_reach_ansible_run_tags_and_ansible_skip_tags() {
         );
     }
     std::fs::remove_dir_all(&dir).expect("the probe directory is removed");
+}
+
+/// `failed_when` reads the facts its own task returned: measured on ansible-core 2.19.12,
+/// `set_fact: {seen: 1}` passes `failed_when: seen is not defined`, and an `include_vars`
+/// passes a `failed_when` naming a variable its file defines.
+///
+/// What would make this red: the conditions judged against the variables the task started with,
+/// which fails both tasks.
+#[test]
+fn failed_when_sees_the_fact_its_own_set_fact_returned() {
+    let dir = std::env::temp_dir().join(format!("volant-ownfacts-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    std::fs::write(dir.join("inv.ini"), "probe ansible_connection=local\n").expect("an inventory");
+    std::fs::write(dir.join("iv.yml"), "ivar: 1\n").expect("a vars file");
+    let play = dir.join("play.yml");
+    std::fs::write(
+        &play,
+        "- hosts: all\n  gather_facts: false\n  tasks:\n\
+         \x20   - set_fact: {seen: 1}\n\
+         \x20     failed_when: seen is not defined\n\
+         \x20   - include_vars: {file: iv.yml}\n\
+         \x20     failed_when: ivar is not defined\n",
+    )
+    .expect("a playbook");
+    let out = volant(&[
+        "playbook",
+        "-i",
+        dir.join("inv.ini").to_str().expect("a path"),
+        play.to_str().expect("a path"),
+    ]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(text.contains("ok=2 "), "{text}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A task `failed_when` fails, whose result has no `msg`, prints and registers the reference's
+/// `Task failed: Action failed: Unknown error.`. Measured on ansible-core 2.19.12 with the same
+/// play: the line below, and `r1.msg` the same sentence. The reference also prints an `[ERROR]:`
+/// line with an `Origin:` block, which this engine prints for no failure.
+///
+/// What would make this red: the `msg` left off, which prints the line without it and leaves
+/// `r1.msg` undefined.
+#[test]
+fn a_failed_when_failure_without_a_msg_reports_an_unknown_error() {
+    let dir = std::env::temp_dir().join(format!("volant-unknownerr-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    std::fs::write(dir.join("inv.ini"), "probe ansible_connection=local\n").expect("an inventory");
+    let play = dir.join("play.yml");
+    std::fs::write(
+        &play,
+        "- hosts: all\n  gather_facts: false\n  tasks:\n\
+         \x20   - set_fact: {a: 1}\n\
+         \x20     failed_when: true\n\
+         \x20     register: r1\n\
+         \x20     ignore_errors: true\n\
+         \x20   - debug: {var: r1.msg}\n",
+    )
+    .expect("a playbook");
+    let out = volant(&[
+        "playbook",
+        "-i",
+        dir.join("inv.ini").to_str().expect("a path"),
+        play.to_str().expect("a path"),
+    ]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(
+        text.contains(r#"fatal: [probe]: FAILED! => {"ansible_facts": {"a": 1}, "changed": false, "failed_when_result": true, "msg": "Task failed: Action failed: Unknown error."}"#),
+        "{text}"
+    );
+    assert!(
+        text.contains(r#""r1.msg": "Task failed: Action failed: Unknown error.""#),
+        "{text}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A word that is not `key=value` on a collection module, or on a `library/` module, fails that
+/// task while the play runs, as the reference does, rather than stopping the run before it
+/// starts. Measured on
+/// ansible-core 2.19.12 with a collection beside the playbook: the `fatal:` line below,
+/// `ignore_errors` and `rescue` both take the failure, a `when: false` still skips, and the play
+/// ends at exit 2. The helper here is a fake: the refusal comes before anything is sent.
+///
+/// What would make this red: the pre-flight refusing the word, which exits 4 before `PLAY [`.
+#[test]
+fn a_raw_argument_on_a_collection_module_fails_only_that_task() {
+    let dir = std::env::temp_dir().join(format!("volant-rawparams-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    let python = fake_python_answering(
+        &dir,
+        &[
+            br#"{"resolved":{"lib_probe":{"module":"lib_probe","collection":null},"ns.coll.m":{"module":"ns.coll.m","collection":["ns.coll","1.0.0"]}}}"#,
+            br#"{"zip_b64":"UEsDBA==","modules":{"lib_probe":{"module_fqn":"ansible.legacy.lib_probe","profile":"legacy","rlimit_nofile":1024,"extensions":{}},"ns.coll.m":{"module_fqn":"ansible_collections.ns.coll.plugins.modules.m","profile":"legacy","rlimit_nofile":1024,"extensions":{}}}}"#,
+        ],
+    );
+    std::fs::write(dir.join("inv.ini"), "probe ansible_connection=local\n").expect("an inventory");
+    let play = dir.join("play.yml");
+    std::fs::write(
+        &play,
+        "- hosts: all\n  gather_facts: false\n  tasks:\n\
+         \x20   - ns.coll.m: v=1 stray\n\
+         \x20     register: r1\n\
+         \x20     ignore_errors: true\n\
+         \x20   - debug: {var: r1.exception}\n\
+         \x20   - block:\n\
+         \x20       - ns.coll.m: v=1 stray\n\
+         \x20     rescue:\n\
+         \x20       - debug: {msg: \"rescued {{ ansible_failed_result.msg }}\"}\n\
+         \x20   - ns.coll.m: v=1 stray\n\
+         \x20     when: false\n\
+         \x20   - lib_probe: v=1 stray\n\
+         \x20     ignore_errors: true\n\
+         \x20   - ns.coll.m: v=1 stray\n\
+         \x20   - debug: {msg: never}\n",
+    )
+    .expect("a playbook");
+    let out = volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            play.to_str().expect("a path"),
+        ],
+        DEFAULT_DEADLINE,
+        &[("VOLANT_PYTHON", python.to_str().expect("a path"))],
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{text}\n{err}");
+    let line = r#"fatal: [probe]: FAILED! => {"changed": false, "msg": "Task failed: Action 'ns.coll.m' does not support raw params."}"#;
+    assert_eq!(text.matches(line).count(), 3, "{text}");
+    assert!(
+        text.contains(r#"fatal: [probe]: FAILED! => {"changed": false, "msg": "Task failed: Action 'lib_probe' does not support raw params."}"#),
+        "{text}"
+    );
+    assert!(text.contains("...ignoring"), "{text}");
+    assert!(
+        text.contains(r#""r1.exception": "(traceback unavailable)""#),
+        "{text}"
+    );
+    assert!(
+        text.contains("rescued Task failed: Action 'ns.coll.m' does not support raw params."),
+        "{text}"
+    );
+    assert!(text.contains("skipping: [probe]"), "{text}");
+    assert!(!text.contains("never"), "{text}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A word that is not `key=value` on a core module that takes no raw parameters fails that task
+/// while the play runs. Measured on ansible-core 2.19.12: `ping: foo` fails with `Action
+/// 'ansible.builtin.ping' does not support raw params.`, `debug: foo` and `copy: foo` the same
+/// way under their own names, `ignore_errors` and `rescue` take it, and the play exits 2. The
+/// three cover the three roads a task takes: a Python module, a controller-side module and an
+/// action plugin. The helper is a fake: nothing is sent.
+///
+/// What would make this red: the loader refusing the word (`expected key=value`, exit 4 before
+/// `PLAY [`), or any of the three roads running the task anyway.
+#[test]
+fn a_raw_argument_on_a_core_module_fails_only_that_task() {
+    let dir = std::env::temp_dir().join(format!("volant-rawcore-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    let entry = |name: &str| {
+        format!(
+            r#""{name}":{{"module_fqn":"ansible.modules.{name}","profile":"legacy","rlimit_nofile":1024,"extensions":{{}}}}"#
+        )
+    };
+    let answer = format!(
+        r#"{{"zip_b64":"UEsDBA==","modules":{{{}}}}}"#,
+        ["ping", "copy", "stat", "file"].map(entry).join(",")
+    );
+    let python = fake_python_answering(&dir, &[answer.as_bytes()]);
+    std::fs::write(dir.join("inv.ini"), "probe ansible_connection=local\n").expect("an inventory");
+    let play = dir.join("play.yml");
+    std::fs::write(
+        &play,
+        "- hosts: all\n  gather_facts: false\n  tasks:\n\
+         \x20   - ping: foo\n\
+         \x20     register: r1\n\
+         \x20     ignore_errors: true\n\
+         \x20   - debug: {var: r1.exception}\n\
+         \x20   - block:\n\
+         \x20       - debug: foo\n\
+         \x20     rescue:\n\
+         \x20       - debug: {msg: \"rescued {{ ansible_failed_result.msg }}\"}\n\
+         \x20   - copy: foo\n\
+         \x20     ignore_errors: true\n\
+         \x20   - ping: foo\n\
+         \x20   - debug: {msg: never}\n",
+    )
+    .expect("a playbook");
+    let out = volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            play.to_str().expect("a path"),
+        ],
+        DEFAULT_DEADLINE,
+        &[("VOLANT_PYTHON", python.to_str().expect("a path"))],
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{text}\n{err}");
+    let line = |module: &str| {
+        format!(
+            r#"fatal: [probe]: FAILED! => {{"changed": false, "msg": "Task failed: Action 'ansible.builtin.{module}' does not support raw params."}}"#
+        )
+    };
+    assert_eq!(text.matches(&line("ping")).count(), 2, "{text}");
+    assert_eq!(text.matches(&line("copy")).count(), 1, "{text}");
+    assert!(
+        text.contains(r#""r1.exception": "(traceback unavailable)""#),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "rescued Task failed: Action 'ansible.builtin.debug' does not support raw params."
+        ),
+        "{text}"
+    );
+    assert!(!text.contains("never"), "{text}");
+    let _ = std::fs::remove_dir_all(&dir);
 }

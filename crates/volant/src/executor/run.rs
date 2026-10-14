@@ -135,6 +135,100 @@ pub(super) async fn run_local(
     Some(result)
 }
 
+/// The names a `set_fact` sets, each with its value and whether it is data from a managed host.
+///
+/// Its keys are rendered, as ansible-core's `set_fact` action renders them ("a rare case where
+/// key templating is allowed"), and each rendered name must be a variable name: a string that
+/// is an ASCII identifier and not one of Jinja's `true`/`false`/`none` (either case) or `not`.
+/// Measured on ansible-core 2.19.12: `{"k_{{ n }}": 1}` sets `k_dyn`; a name rendering to
+/// `bad-name`, `''` or a literal `bad-lit` fails with `Task failed: Invalid variable name
+/// 'bad-name'.`; one rendering to `1` with `Invalid variable name '1' of type 'int'.`; an
+/// undefined name with `Task failed: ` and the render's error; `if` is a valid name; and nothing
+/// but `cacheable` fails with `No key/value pairs provided, at least one is required for this
+/// action to succeed`, without the prefix. A name is data when its value was, or when its own
+/// render read a managed host.
+///
+/// Rendered once per item and kept on it, so that every reader - the module itself, the
+/// conditions, the facts written after the task - sees the same names with the same trust: a key
+/// built from `random` or a `lookup('pipe', ...)` renders differently each time, and matching a
+/// second render against the first would lose which name holds a managed host's value.
+pub(super) fn set_fact_names<'a>(
+    item: &'a Item,
+    templar: &Templar,
+) -> Result<Vec<(String, &'a Value, bool)>, TaskResult> {
+    let rendered = item.set_fact_names.get_or_init(|| {
+        let mut names = Vec::new();
+        for key in item.args.keys().filter(|k| *k != "cacheable") {
+            let (name, tainted) = templar
+                .render_value_tainted(&Value::String(key.clone()), &item.vars)
+                .map_err(|e| TaskResult::failed_with(format!("Task failed: {}", e.0)))?;
+            if let Some(why) = invalid_variable_name(&name) {
+                return Err(TaskResult::failed_with(format!("Task failed: {why}")));
+            }
+            let Value::String(name) = name else {
+                unreachable!("a valid variable name is a string")
+            };
+            names.push((
+                key.clone(),
+                name,
+                tainted || item.args_untrusted.contains(key),
+            ));
+        }
+        if names.is_empty() {
+            return Err(TaskResult::failed_with(
+                "No key/value pairs provided, at least one is required for this action to succeed",
+            ));
+        }
+        Ok(names)
+    });
+    let names = rendered.as_ref().map_err(Clone::clone)?;
+    Ok(names
+        .iter()
+        .map(|(key, name, data)| (name.clone(), &item.args[key], *data))
+        .collect())
+}
+
+/// The names a `set_fact` item sets that are data, as [`set_fact_names`] renders them; empty for
+/// any other module.
+fn set_fact_data(task: &PlayTask, item: &Item, templar: &Templar) -> BTreeSet<String> {
+    if short_name(&task.module) != "set_fact" {
+        return BTreeSet::new();
+    }
+    set_fact_names(item, templar)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(_, _, data)| *data)
+        .map(|(name, _, _)| name)
+        .collect()
+}
+
+/// ansible-core's `validate_variable_name`: why this value cannot name a variable, or `None`.
+fn invalid_variable_name(name: &Value) -> Option<String> {
+    let valid = |s: &str| {
+        s.chars()
+            .next()
+            .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+            && s.chars().all(|c| c == '_' || c.is_ascii_alphanumeric())
+            && !["true", "false", "none", "True", "False", "None", "not"].contains(&s)
+    };
+    let (shown, kind) = match name {
+        Value::String(s) if valid(s) => return None,
+        Value::String(s) => (format!(" '{s}'"), ""),
+        Value::Number(n) if n.is_f64() => (format!(" '{n}'"), "float"),
+        Value::Number(n) => (format!(" '{n}'"), "int"),
+        Value::Bool(b) => (format!(" '{}'", if *b { "True" } else { "False" }), "bool"),
+        Value::Null => (" 'None'".to_string(), "NoneType"),
+        Value::Array(_) => (String::new(), "list"),
+        Value::Object(_) => (String::new(), "dict"),
+    };
+    let of = if kind.is_empty() {
+        String::new()
+    } else {
+        format!(" of type '{kind}'")
+    };
+    Some(format!("Invalid variable name{shown}{of}."))
+}
+
 /// Every controller-side module but `pause`, none of which waits.
 fn local_result(
     task: &PlayTask,
@@ -168,11 +262,13 @@ fn local_result(
         "include_vars" => return run_include_vars(item, step, store),
         "set_fact" => {
             // Written by `record_local_facts` once the task is judged.
-            let facts: Map<String, Value> = item
-                .args
-                .iter()
-                .filter(|(k, _)| *k != "cacheable")
-                .map(|(k, v)| (k.clone(), v.clone()))
+            let names = match set_fact_names(item, templar) {
+                Ok(names) => names,
+                Err(failed) => return failed,
+            };
+            let facts: Map<String, Value> = names
+                .into_iter()
+                .map(|(name, value, _)| (name, value.clone()))
                 .collect();
             r.insert("ansible_facts".into(), Value::Object(facts));
             r.insert("changed".into(), json!(false));
@@ -632,14 +728,14 @@ pub(super) fn finish(
 ) -> TaskResult {
     // A run that hit the `timeout` keyword is reported as it stands. In ansible-core 2.19.12 the
     // timeout is an exception raised out of the handler's run, past everything that would have
-    // judged the result, so `failed_when: false` cannot make a pass of it.
-    if timed_out(&result) {
+    // judged the result, so `failed_when: false` cannot make a pass of it. A refused raw
+    // argument is raised before the handler runs, and stands the same way.
+    if timed_out(&result) || raw_params_refusal(task).is_some() {
         return result;
     }
-    match apply_conditions(task, item, result, templar) {
-        Ok(r) => r,
-        Err(e) => TaskResult::failed_with(e.0),
-    }
+    let mut r = apply_conditions(task, item, result, templar);
+    settle_failure(&mut r);
+    r
 }
 
 /// Whether a result is the one [`TaskResult::timed_out`] builds: a failure carrying the period
@@ -665,27 +761,126 @@ fn apply_conditions(
     item: &Item,
     mut result: TaskResult,
     templar: &Templar,
-) -> Result<TaskResult, TemplateError> {
+) -> TaskResult {
     result.settle_failed();
     if task.changed_when.is_empty() && task.failed_when.is_empty() {
-        return Ok(result);
+        return result;
     }
+    let vars = condition_vars(task, item, &result, templar);
+    if !task.changed_when.is_empty() {
+        match all_hold(&task.changed_when, &vars, templar) {
+            Ok(changed) => result.0.insert("changed".into(), json!(changed)),
+            Err(e) => return unevaluable(result, "changed", &e),
+        };
+    }
+    if !task.failed_when.is_empty() {
+        let failed = match all_hold(&task.failed_when, &vars, templar) {
+            Ok(failed) => failed,
+            Err(e) => return unevaluable(result, "failed", &e),
+        };
+        result.0.insert("failed_when_result".into(), json!(failed));
+        // Over a non-zero rc too: the condition has spoken.
+        result.0.insert("failed".into(), json!(failed));
+        // Measured on ansible-core 2.19.12: `command: "false"` under `failed_when: false`
+        // registers `failed_when_suppressed_exception: "(traceback unavailable)"` and no
+        // `exception`.
+        if !failed && let Some(exception) = result.0.remove("exception") {
+            result
+                .0
+                .insert("failed_when_suppressed_exception".into(), exception);
+        }
+    }
+    result
+}
+
+/// A result whose `changed_when` or `failed_when` could not be evaluated, as ansible-core's
+/// `_execute` leaves it: every key the module returned kept, `failed` set, and the error under
+/// `changed_when_result` or `failed_when_result`, the conditions after it not evaluated. Its `msg`
+/// is then [`settle_failure`]'s. Measured on ansible-core 2.19.12: `command: "true"` under
+/// `failed_when: nosuch == 1` registers `failed_when_result: "Error while evaluating conditional:
+/// 'nosuch' is undefined"` beside its `rc` and its empty `msg`; `changed_when: a.nokey` registers
+/// `changed_when_result` and never reads a `failed_when: true` behind it; a syntax error reads
+/// `Syntax error in template: unexpected '*'`. The prefixes are the reference's; what follows them
+/// is this engine's wording of the same fault.
+fn unevaluable(mut result: TaskResult, condition: &str, err: &TemplateError) -> TaskResult {
+    let text = match err.0.strip_prefix("syntax error: ") {
+        Some(rest) => format!("Syntax error in template: {rest}"),
+        None => format!("Error while evaluating conditional: {}", err.0),
+    };
+    result.0.insert("failed".into(), json!(true));
+    result
+        .0
+        .insert(format!("{condition}_when_result"), json!(text));
+    result
+}
+
+/// The variables `changed_when`, `failed_when` and `until` read for one result: the item's, with
+/// the facts the result returned laid over them, then the registered name and `result`.
+///
+/// ansible-core's `TaskExecutor._execute` updates its copy of the variables with
+/// `result['ansible_facts']` before it judges, and registers the result again after that, so a
+/// fact never hides the registered name. `set_fact` and `include_vars` write theirs as they are,
+/// unless `delegate_facts` sends them to the delegate, which leaves them out of sight here; any
+/// other module's go through [`HostVars::returned_facts`], `delegate_facts` or not. `debug` is
+/// the one module whose facts are never read. Measured on ansible-core 2.19.12: `set_fact:
+/// {seen: 1}` passes `failed_when: seen is not defined`, a module's fact wins over a `-e` of the
+/// same name, and a delegated `set_fact` under `delegate_facts: true` does not see its own fact.
+fn condition_vars(
+    task: &PlayTask,
+    item: &Item,
+    result: &TaskResult,
+    templar: &Templar,
+) -> HostVars {
     let mut vars = item.vars.clone();
+    if let Some(facts) = result.0.get("ansible_facts").and_then(Value::as_object) {
+        let delegated =
+            task.delegate_to.as_deref().is_some_and(|to| !to.is_empty()) && task.delegates_facts();
+        match short_name(&task.module) {
+            "debug" => {}
+            "set_fact" | "include_vars" if delegated => {}
+            // The trust `record_local_facts` gives the same names once they are written.
+            name @ ("set_fact" | "include_vars") => {
+                let data = set_fact_data(task, item, templar);
+                for (key, value) in facts {
+                    if name == "set_fact" && data.contains(key) {
+                        vars.insert_untrusted(key.clone(), value.clone());
+                    } else {
+                        vars.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+            _ => vars.returned_facts(facts),
+        }
+    }
     if let Some(reg) = &task.register {
         vars.insert_untrusted(reg.clone(), Value::Object(result.0.clone()));
     }
     vars.insert_untrusted("result".into(), Value::Object(result.0.clone()));
-    if !task.changed_when.is_empty() {
-        let changed = all_hold(&task.changed_when, &vars, templar)?;
-        result.0.insert("changed".into(), json!(changed));
+    vars
+}
+
+/// What ansible-core's `maybe_raise_on_result` leaves on a failed final result, once the
+/// conditions and `until` are done with it: `exception: "(traceback unavailable)"`, and a `msg`
+/// when the result carries none. Measured on ansible-core 2.19.12: a `set_fact`, a `ping` and a
+/// `ping` loop item under `failed_when: true`, and a `ping` whose `until: false` ran out, all
+/// register `msg: "Task failed: Action failed: Unknown error."`; a `debug` keeps its own `msg`
+/// and a `command` its empty one. `until` never sees that `msg`: `until: r.msg is defined` over
+/// `failed_when: true` retries. A module result that already carried a truthy `exception` was
+/// normalised as the module's error, and reads `Module failed` instead.
+fn settle_failure(result: &mut TaskResult) {
+    if result.failed() {
+        let by = match result.0.get("exception") {
+            Some(e) if !python_falsy(e) => "Module",
+            _ => "Action",
+        };
+        result
+            .0
+            .entry("msg")
+            .or_insert_with(|| json!(format!("Task failed: {by} failed: Unknown error.")));
+        result
+            .0
+            .insert("exception".into(), json!("(traceback unavailable)"));
     }
-    if !task.failed_when.is_empty() {
-        let failed = all_hold(&task.failed_when, &vars, templar)?;
-        result.0.insert("failed_when_result".into(), json!(failed));
-        // Over a non-zero rc too: the condition has spoken.
-        result.0.insert("failed".into(), json!(failed));
-    }
-    Ok(result)
 }
 
 fn all_hold(
@@ -1089,12 +1284,11 @@ pub(super) fn until_holds(
     if retry.until.is_empty() {
         return Ok(!result.failed());
     }
-    let mut vars = item.vars.clone();
-    if let Some(reg) = &task.register {
-        vars.insert_untrusted(reg.clone(), Value::Object(result.0.clone()));
-    }
-    vars.insert_untrusted("result".into(), Value::Object(result.0.clone()));
-    all_hold(&retry.until, &vars, templar)
+    all_hold(
+        &retry.until,
+        &condition_vars(task, item, result, templar),
+        templar,
+    )
 }
 
 /// What one run of a retried task decides.
@@ -1129,16 +1323,20 @@ pub(super) fn judge_attempt(
     // could not be evaluated hands back a result of its own.
     let mut raw = raw;
     raw.0.insert("attempts".into(), json!(attempt));
-    let mut r = finish(task, item, raw, templar);
+    let mut r = apply_conditions(task, item, raw, templar);
     r.0.insert("attempts".into(), json!(attempt));
     match until_holds(task, item, &r, retry, templar) {
         Err(e) => return Attempt::Done(TaskResult::failed_with(conditional_error(&e))),
-        Ok(true) => return Attempt::Done(r),
+        Ok(true) => {
+            settle_failure(&mut r);
+            return Attempt::Done(r);
+        }
         Ok(false) => {}
     }
     if attempt > retry.retries {
         r.0.insert("attempts".into(), json!(retry.retries));
         r.0.insert("failed".into(), json!(true));
+        settle_failure(&mut r);
         return Attempt::Done(r);
     }
     Attempt::Again(retry.retries + 1 - attempt)
@@ -1168,17 +1366,52 @@ pub(super) fn step_tasks(
     results: &mut [Option<TaskResult>],
 ) -> Vec<(usize, Task)> {
     let mut out = Vec::new();
+    let refused = raw_params_refusal(task);
     for (ii, item) in items.iter().enumerate() {
         // A skipped item already has its result and never had a task.
         if item.skipped.is_some() {
             continue;
         }
-        match python {
-            Ok(python) => out.push((ii, protocol_task(task, item, *python))),
-            Err(failure) => results[ii] = Some(failure.clone()),
+        match (&refused, python) {
+            (Some(failure), _) | (None, Err(failure)) => results[ii] = Some(failure.clone()),
+            (None, Ok(python)) => out.push((ii, protocol_task(task, item, *python))),
         }
     }
     out
+}
+
+/// What each item of a task reports when its module's string argument left words that are not
+/// `key=value`, the module not reading it as a command line or as raw parameters.
+///
+/// Measured on ansible-core 2.19.12 with `ns.coll.m: v=1 stray`: the task fails when it runs,
+/// after its `when` and item by item in a loop, registering `{changed: false, exception:
+/// "(traceback unavailable)", failed: true, msg: "Task failed: Action 'ns.coll.m' does not
+/// support raw params."}`; `ignore_errors` and `rescue` take it, and a play it fails exits 2.
+/// It is the task's `post_validate` raising, before any attempt, so neither `failed_when:
+/// false` nor `retries` changes it. A string that is one template is left to the pre-flight.
+///
+/// A builtin is named by its resolved FQCN, as the reference names it: `ping: foo` and
+/// `ansible.legacy.ping: foo` both fail with `Action 'ansible.builtin.ping' does not support raw
+/// params.` (measured, like `debug`, `file`, `copy`, `assert`, `fail`, `stat` and `lineinfile`).
+pub(super) fn raw_params_refusal(task: &PlayTask) -> Option<TaskResult> {
+    crate::playbook::stray_raw_params(task)
+        .filter(|raw| !crate::playbook::possibly_all_template(raw))?;
+    let action = if crate::python::is_resolved_name(&task.module) {
+        task.module.clone()
+    } else {
+        format!("ansible.builtin.{}", short_name(&task.module))
+    };
+    let mut r = Map::new();
+    r.insert("changed".into(), json!(false));
+    r.insert("exception".into(), json!("(traceback unavailable)"));
+    r.insert("failed".into(), json!(true));
+    r.insert(
+        "msg".into(),
+        json!(format!(
+            "Task failed: Action '{action}' does not support raw params."
+        )),
+    );
+    Some(TaskResult(r))
 }
 
 /// The variables of the host a task's module actually runs on: the delegate's when the task has
@@ -2540,6 +2773,7 @@ pub(super) fn record_local_facts(
     items: &[Item],
     hosts: &[String],
     results: &[(Option<Value>, TaskResult)],
+    templar: &Templar,
 ) {
     let set_fact = match short_name(&task.module) {
         "set_fact" => true,
@@ -2553,9 +2787,10 @@ pub(super) fn record_local_facts(
         let Some(facts) = result.0.get("ansible_facts").and_then(Value::as_object) else {
             continue;
         };
+        let data = set_fact_data(task, item, templar);
         for (key, value) in facts {
             for host in hosts {
-                if set_fact && item.args_untrusted.contains(key) {
+                if set_fact && data.contains(key) {
                     vars.set_untrusted_fact(host, key, value.clone());
                 } else {
                     vars.set_fact(host, key, value.clone());
@@ -2732,6 +2967,7 @@ mod tests {
                 environment: BTreeMap::new(),
                 ignore_errors: None,
                 skipped: None,
+                set_fact_names: std::sync::OnceLock::new(),
             };
             // Arguments are deliberately empty: what is asserted is that the name is known, not
             // that the module does its work. A module that needs an argument says so in its own
@@ -2766,6 +3002,7 @@ mod tests {
             environment: BTreeMap::new(),
             ignore_errors: None,
             skipped: None,
+            set_fact_names: std::sync::OnceLock::new(),
         }
     }
 
@@ -2992,6 +3229,142 @@ mod tests {
         );
     }
 
+    /// A `set_fact` renders its keys and refuses a rendered name that cannot name a variable, in
+    /// the words ansible-core 2.19.12 uses for each case measured; a name built from a managed
+    /// host's value is data.
+    ///
+    /// What would make this red: the keys left unrendered (`k_{{ n }}` set as written), the name
+    /// check dropped or loosened (`bad-name`, `1` or `not` accepted), `if` refused, the
+    /// type named wrongly, the empty case accepted, or a name read from a host left trusted.
+    #[tokio::test]
+    async fn a_set_fact_renders_its_keys_and_checks_the_names() {
+        let host = || {
+            let mut v = hvars(json!({"n": "dyn"}));
+            v.insert_untrusted("h".into(), json!("from_host"));
+            v
+        };
+        let r = local_with("set_fact", json!({"k_{{ n }}": 1, "if": 2}), host()).await;
+        assert_eq!(
+            r.0["ansible_facts"],
+            json!({"k_dyn": 1, "if": 2}),
+            "{:?}",
+            r.0
+        );
+        for (key, msg) in [
+            (
+                "{{ 'bad-name' }}",
+                "Task failed: Invalid variable name 'bad-name'.",
+            ),
+            ("bad-lit", "Task failed: Invalid variable name 'bad-lit'."),
+            ("{{ '' }}", "Task failed: Invalid variable name ''."),
+            (
+                "{{ 1 }}",
+                "Task failed: Invalid variable name '1' of type 'int'.",
+            ),
+            (
+                "{{ 1.5 }}",
+                "Task failed: Invalid variable name '1.5' of type 'float'.",
+            ),
+            (
+                "{{ [1] }}",
+                "Task failed: Invalid variable name of type 'list'.",
+            ),
+            (
+                "{{ True }}",
+                "Task failed: Invalid variable name 'True' of type 'bool'.",
+            ),
+            (
+                "{{ None }}",
+                "Task failed: Invalid variable name 'None' of type 'NoneType'.",
+            ),
+            ("not", "Task failed: Invalid variable name 'not'."),
+            ("None", "Task failed: Invalid variable name 'None'."),
+        ] {
+            let r = local_with("set_fact", json!({ key: 1 }), host()).await;
+            assert!(r.failed(), "{key}: {:?}", r.0);
+            assert_eq!(r.0["msg"], json!(msg), "{key}");
+        }
+        let r = local_with("set_fact", json!({"cacheable": true}), host()).await;
+        assert_eq!(
+            r.0["msg"],
+            json!(
+                "No key/value pairs provided, at least one is required for this action to succeed"
+            )
+        );
+        let r = local_with("set_fact", json!({"{{ nosuch }}": 1}), host()).await;
+        assert!(msg(&r).starts_with("Task failed: "), "{:?}", r.0);
+
+        let templar = Templar::new(PathBuf::from("."));
+        let mut t = task("set_fact");
+        t.args = vars(json!({"k_{{ h }}": 1, "plain": 2}));
+        let item = Item {
+            args: t.args.clone(),
+            vars: host(),
+            ..local_item(json!({}))
+        };
+        let data = set_fact_data(&t, &item, &templar);
+        assert_eq!(data, BTreeSet::from(["k_from_host".to_string()]));
+    }
+
+    /// A `set_fact` key that renders to another name each time it is rendered keeps the value
+    /// under it data: the names are rendered once per item and every reader gets that render.
+    /// Measured on ansible-core 2.19.12, a key built from `random` runs; here a `pipe` lookup
+    /// counting its own runs stands in for it.
+    ///
+    /// What would make this red: a reader rendering the keys again, which gets `t_2` where the
+    /// module wrote `t_1`, matches nothing, and writes the managed host's value as trusted - text
+    /// the controller would then render - besides running the lookup once per reader.
+    #[cfg(unix)]
+    #[test]
+    fn a_set_fact_key_that_renders_anew_keeps_its_value_data() {
+        let dir = std::env::temp_dir().join(format!("volant-keyonce-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let counter = dir.join("runs");
+        let templar = Templar::new(PathBuf::from("."));
+        let key = format!(
+            "t_{{{{ lookup('pipe', 'echo x >> {c}; wc -l < {c}') | trim }}}}",
+            c = counter.display()
+        );
+        let mut t = task("set_fact");
+        t.args = vars(json!({ key.clone(): "{{ ro.stdout }}" }));
+        let item = Item {
+            args: vars(json!({ key.clone(): "{{ lookup('pipe', 'id') }}" })),
+            args_untrusted: BTreeSet::from([key.clone()]),
+            ..local_item(json!({}))
+        };
+        let names = set_fact_names(&item, &templar).expect("the key renders");
+        assert_eq!(names[0].0, "t_1");
+        assert!(names[0].2, "the value came from a managed host");
+        assert_eq!(set_fact_names(&item, &templar).unwrap()[0].0, "t_1");
+        let facts = json!({"t_1": "{{ lookup('pipe', 'id') }}"});
+        let result = TaskResult(vars(json!({"ansible_facts": facts, "changed": false})));
+        let mut store = one_host_store();
+        record_local_facts(
+            &mut store,
+            &t,
+            std::slice::from_ref(&item),
+            &["h1".to_string()],
+            &[(None, result.clone())],
+            &templar,
+        );
+        assert!(
+            store
+                .untrusted_of("h1", &crate::vars::Scope::default())
+                .contains("t_1")
+        );
+        let mut judged = t.clone();
+        judged.failed_when = vec!["false".into()];
+        let vars = condition_vars(&judged, &item, &result, &templar);
+        assert!(vars.untrusted.contains("t_1"));
+        assert_eq!(
+            std::fs::read_to_string(&counter).unwrap().lines().count(),
+            1,
+            "the key's lookup ran once"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// A failed controller-side task registers `exception: "(traceback unavailable)"`, as an
     /// agent's does: the reference's `TaskExecutor._execute` normalises every task's final
     /// result with `maybe_raise_on_result`, wherever it ran. One that succeeds carries none.
@@ -3213,6 +3586,7 @@ mod tests {
                 environment: BTreeMap::new(),
                 ignore_errors: None,
                 skipped: None,
+                set_fact_names: std::sync::OnceLock::new(),
             };
             validate_argument_spec(&item)
         };
@@ -3374,9 +3748,10 @@ mod tests {
             environment: BTreeMap::new(),
             ignore_errors: None,
             skipped: None,
+            set_fact_names: std::sync::OnceLock::new(),
         };
         let failed = |r: Value| {
-            let r = apply_conditions(&t, &item, result(r), &templar).unwrap();
+            let r = apply_conditions(&t, &item, result(r), &templar);
             r.0.get("failed").cloned()
         };
         assert_eq!(failed(json!({"ping": "pong"})), Some(json!(false)));
@@ -3400,7 +3775,7 @@ mod tests {
         assert_eq!(failed(json!({"failed": null})), Some(json!(null)));
         let mut t = task("command");
         t.failed_when = vec!["false".into()];
-        let r = apply_conditions(&t, &item, result(json!({"rc": 0})), &templar).unwrap();
+        let r = apply_conditions(&t, &item, result(json!({"rc": 0})), &templar);
         assert_eq!(r.0.get("failed"), Some(&json!(false)), "{:?}", r.0);
     }
 
@@ -3424,6 +3799,7 @@ mod tests {
             environment: BTreeMap::new(),
             ignore_errors: None,
             skipped: None,
+            set_fact_names: std::sync::OnceLock::new(),
         };
         let plain = task("command");
         let mut quiet = task("command");
@@ -3452,7 +3828,7 @@ mod tests {
         ];
         let mut stats = crate::stats::Stats::default();
         for (t, shape, ignore_errors, rescuable) in tasks {
-            let r = apply_conditions(t, &item, result(shape), &templar).unwrap();
+            let r = apply_conditions(t, &item, result(shape), &templar);
             stats.record("h", classify(&r, ignore_errors, rescuable), r.changed());
         }
         let h = stats.host("h");
@@ -3476,14 +3852,14 @@ mod tests {
             environment: BTreeMap::new(),
             ignore_errors: None,
             skipped: None,
+            set_fact_names: std::sync::OnceLock::new(),
         };
         let r = apply_conditions(
             &t,
             &item,
             result(json!({"rc": 1, "changed": true})),
             &templar,
-        )
-        .unwrap();
+        );
         assert!(!r.failed(), "{:?}", r.0);
         assert_eq!(r.0["failed_when_result"], json!(false));
         let r = apply_conditions(
@@ -3491,9 +3867,254 @@ mod tests {
             &item,
             result(json!({"rc": 99, "changed": true})),
             &templar,
-        )
-        .unwrap();
+        );
         assert!(r.failed());
+    }
+
+    /// `changed_when`, `failed_when` and `until` read the facts the task itself returned, laid
+    /// out as ansible-core 2.19.12's `TaskExecutor._execute` lays them before judging: a module's
+    /// flat and cleaned, its namespaced copy one level down; a `set_fact`'s as written, unless
+    /// `delegate_facts` sends them away; the registered name above them all.
+    ///
+    /// What would make this red: the conditions reading the item's variables alone (`x` is
+    /// undefined), the restricted names left in (`ansible_host` reads `evil`), the namespace
+    /// merged one level up as the store merges it, a delegated `set_fact` seeing its fact, or a
+    /// fact written after the registered name, which hides it.
+    #[test]
+    fn failed_when_changed_when_and_until_read_the_facts_the_task_returned() {
+        let templar = Templar::new(std::env::temp_dir());
+        let item = bare_item();
+        let returned = || {
+            result(
+                json!({"changed": false, "ansible_facts": {"x": 1, "ansible_y": 2, "ansible_host": "evil"}}),
+            )
+        };
+        let mut t = task("ns.coll.facts");
+        t.failed_when = vec![
+            "x != 1 or ansible_y != 2 or ansible_facts.ansible_facts.y != 2 or ansible_facts.y is defined or ansible_host is defined"
+                .into(),
+        ];
+        t.changed_when = vec!["x == 1".into()];
+        let r = finish(&t, &item, returned(), &templar);
+        assert!(!r.failed(), "{:?}", r.0);
+        assert_eq!(r.0["changed"], json!(true), "{:?}", r.0);
+        t.until = vec!["x == 1".into()];
+        let retry = retry_plan(&t, Some(&item), &templar)
+            .unwrap()
+            .expect("a retry plan");
+        assert!(until_holds(&t, &item, &returned(), &retry, &templar).unwrap());
+
+        let mut t = task("ns.coll.facts");
+        t.register = Some("x".into());
+        t.failed_when = vec!["x is not mapping".into()];
+        assert!(!finish(&t, &item, returned(), &templar).failed());
+
+        let seen = || result(json!({"changed": false, "ansible_facts": {"seen": 1}}));
+        let mut t = task("set_fact");
+        t.failed_when = vec!["seen is not defined".into()];
+        assert!(!finish(&t, &item, seen(), &templar).failed());
+        t.delegate_to = Some("h2".into());
+        t.delegate_facts = Some(true);
+        assert!(finish(&t, &item, seen(), &templar).failed());
+    }
+
+    /// A `changed_when` or `failed_when` that cannot be evaluated keeps the module's keys, sets
+    /// `failed`, files the error under its own `_when_result` and evaluates nothing after it, as
+    /// ansible-core 2.19.12 does; the `msg` is the unknown error when the module sent none.
+    ///
+    /// What would make this red: the result replaced by one carrying the error as its `msg` (the
+    /// behaviour this replaced), the error filed under the other condition's key, `failed_when`
+    /// evaluated behind a broken `changed_when`, or the syntax prefix lost.
+    #[test]
+    fn a_condition_that_cannot_be_evaluated_keeps_the_result() {
+        let templar = Templar::new(std::env::temp_dir());
+        let item = bare_item();
+        let ran = || result(json!({"changed": true, "msg": "", "rc": 0}));
+        let mut t = task("command");
+        t.failed_when = vec!["nosuch == 1".into()];
+        let r = finish(&t, &item, ran(), &templar);
+        assert!(r.failed(), "{:?}", r.0);
+        assert_eq!(r.0["rc"], json!(0), "{:?}", r.0);
+        assert_eq!(r.0["msg"], json!(""), "{:?}", r.0);
+        assert_eq!(r.0["exception"], json!("(traceback unavailable)"));
+        let why = r.0["failed_when_result"].as_str().unwrap_or_default();
+        assert!(
+            why.starts_with("Error while evaluating conditional: "),
+            "{why}"
+        );
+
+        let mut t = task("command");
+        t.changed_when = vec!["nosuch.key".into()];
+        t.failed_when = vec!["false".into()];
+        let r = finish(&t, &item, ran(), &templar);
+        assert!(r.failed(), "{:?}", r.0);
+        assert!(!r.0.contains_key("failed_when_result"), "{:?}", r.0);
+        assert_eq!(r.0["changed"], json!(true), "{:?}", r.0);
+        let why = r.0["changed_when_result"].as_str().unwrap_or_default();
+        assert!(
+            why.starts_with("Error while evaluating conditional: "),
+            "{why}"
+        );
+
+        let mut t = task("ping");
+        t.failed_when = vec!["1 +* 2".into()];
+        let r = finish(
+            &t,
+            &item,
+            result(json!({"changed": false, "ping": "pong"})),
+            &templar,
+        );
+        assert_eq!(r.0["ping"], json!("pong"), "{:?}", r.0);
+        assert_eq!(
+            r.0["msg"],
+            json!("Task failed: Action failed: Unknown error.")
+        );
+        let why = r.0["failed_when_result"].as_str().unwrap_or_default();
+        assert!(why.starts_with("Syntax error in template: "), "{why}");
+    }
+
+    /// A task `failed_when` fails, whose result carries no `msg`, gets the one ansible-core's
+    /// `maybe_raise_on_result` gives it, and `exception` with it; a `msg` it has, even empty,
+    /// stays. `failed_when: false` over a failure moves `exception` aside. `until` reads the
+    /// result before any of that, and a run that ran out gets the same `msg`.
+    ///
+    /// What would make this red: the `msg` left off (the registered result has none), written
+    /// over one the module sent, `exception` left off, the suppressed exception kept as
+    /// `exception`, or the `msg` settled before `until` reads the result.
+    #[test]
+    fn a_failed_when_failure_with_no_msg_is_an_unknown_error() {
+        let templar = Templar::new(std::env::temp_dir());
+        let item = bare_item();
+        let mut t = task("set_fact");
+        t.failed_when = vec!["true".into()];
+        let r = finish(
+            &t,
+            &item,
+            result(json!({"changed": false, "ansible_facts": {"a": 1}})),
+            &templar,
+        );
+        assert_eq!(
+            r.0,
+            json!({"ansible_facts": {"a": 1}, "changed": false, "exception": "(traceback unavailable)", "failed": true, "failed_when_result": true, "msg": "Task failed: Action failed: Unknown error."})
+                .as_object()
+                .unwrap()
+                .clone()
+        );
+        let r = finish(
+            &t,
+            &item,
+            result(json!({"changed": true, "msg": "", "rc": 0})),
+            &templar,
+        );
+        assert_eq!(r.0["msg"], json!(""), "{:?}", r.0);
+        // A module result that carried a truthy `exception` of its own reads `Module failed`.
+        let r = finish(
+            &t,
+            &item,
+            result(json!({"changed": false, "exception": "(traceback unavailable)"})),
+            &templar,
+        );
+        assert_eq!(
+            r.0["msg"],
+            json!("Task failed: Module failed: Unknown error."),
+            "{:?}",
+            r.0
+        );
+
+        let mut t = task("command");
+        t.failed_when = vec!["false".into()];
+        let r = finish(
+            &t,
+            &item,
+            result(
+                json!({"changed": true, "exception": "(traceback unavailable)", "failed": true, "msg": "non-zero return code", "rc": 1}),
+            ),
+            &templar,
+        );
+        assert!(!r.0.contains_key("exception"), "{:?}", r.0);
+        assert_eq!(
+            r.0["failed_when_suppressed_exception"],
+            json!("(traceback unavailable)")
+        );
+
+        let mut t = task("ping");
+        t.register = Some("a".into());
+        t.failed_when = vec!["true".into()];
+        t.until = vec!["a.msg is defined".into()];
+        t.retries = Some("1".into());
+        let retry = retry_plan(&t, Some(&item), &templar)
+            .unwrap()
+            .expect("a retry plan");
+        let pong = || result(json!({"changed": false, "ping": "pong"}));
+        assert!(matches!(
+            judge_attempt(&t, &item, pong(), 1, &retry, &templar),
+            Attempt::Again(_)
+        ));
+        let Attempt::Done(r) = judge_attempt(&t, &item, pong(), 2, &retry, &templar) else {
+            panic!("the last attempt ends the loop");
+        };
+        assert_eq!(
+            r.0["msg"],
+            json!("Task failed: Action failed: Unknown error.")
+        );
+        assert_eq!(r.0["exception"], json!("(traceback unavailable)"));
+    }
+
+    /// A collection module whose string argument left a word that is not `key=value` fails each
+    /// item it runs, in the reference's words, before anything is sent; `when` still skips it,
+    /// and `failed_when: false` cannot pass it. A free-form collection module and a string that
+    /// is one template are not refused here.
+    ///
+    /// What would make this red: the refusal left to the pre-flight (the run stops at exit 4
+    /// before it starts), the task sent anyway, a skipped item refused, or `finish` judging the
+    /// refusal.
+    #[test]
+    fn a_raw_argument_on_a_collection_module_fails_the_task_when_it_runs() {
+        let templar = Templar::new(std::env::temp_dir());
+        let mut t = task("ns.coll.m");
+        t.args.insert("v".into(), json!("1"));
+        t.args.insert("_raw_params".into(), json!("stray"));
+        t.failed_when = vec!["false".into()];
+        let mut items = [bare_item(), bare_item()];
+        items[1].skipped = Some(TaskResult::default());
+        let mut results = vec![None, None];
+        let sent = step_tasks(&t, &items, &Ok(None), &mut results);
+        assert!(sent.is_empty(), "{sent:?}");
+        let refused = results[0].clone().expect("the item that runs reports");
+        assert!(results[1].is_none(), "a skipped item keeps its skip");
+        let expected = json!({"changed": false, "exception": "(traceback unavailable)", "failed": true, "msg": "Task failed: Action 'ns.coll.m' does not support raw params."});
+        assert_eq!(Value::Object(refused.0.clone()), expected);
+        let judged = finish(&t, &items[0], refused, &templar);
+        assert_eq!(Value::Object(judged.0), expected);
+
+        for (module, action) in [
+            ("ping", "ansible.builtin.ping"),
+            ("ansible.legacy.ping", "ansible.builtin.ping"),
+            ("debug", "ansible.builtin.debug"),
+            ("copy", "ansible.builtin.copy"),
+        ] {
+            let mut t = task(module);
+            t.args.insert("_raw_params".into(), json!("foo"));
+            let refused = raw_params_refusal(&t).expect(module);
+            assert_eq!(
+                refused.0["msg"],
+                json!(format!(
+                    "Task failed: Action '{action}' does not support raw params."
+                ))
+            );
+        }
+        for (module, raw) in [
+            ("ansible.windows.win_shell", "Get-Service foo"),
+            ("ns.coll.m", "{{ d }}"),
+            ("ping", "{{ d }}"),
+            ("command", "echo hi"),
+            ("set_fact", "foo"),
+            ("include_vars", "v.yml"),
+        ] {
+            let mut t = task(module);
+            t.args.insert("_raw_params".into(), json!(raw));
+            assert!(raw_params_refusal(&t).is_none(), "{module}: {raw}");
+        }
     }
 
     /// A `run_once` step's registered variable and facts are written for every live host of the
@@ -5990,7 +6611,17 @@ mod tests {
             panic!("the failure satisfies `until`");
         };
         assert!(r.failed(), "{r:?}");
-        assert!(msg(&r).contains("undefined"), "{r:?}");
+        let why = r.0["changed_when_result"].as_str().unwrap_or_default();
+        assert!(
+            why.starts_with("Error while evaluating conditional: "),
+            "{r:?}"
+        );
+        assert!(why.contains("undefined"), "{r:?}");
+        assert_eq!(
+            msg(&r),
+            "Task failed: Action failed: Unknown error.",
+            "{r:?}"
+        );
         assert_eq!(r.0["attempts"], json!(1), "{r:?}");
     }
 
@@ -6395,6 +7026,7 @@ mod tests {
             environment: BTreeMap::new(),
             ignore_errors: None,
             skipped: None,
+            set_fact_names: std::sync::OnceLock::new(),
         }
     }
 

@@ -460,6 +460,46 @@ pub fn is_meta(task: &PlayTask) -> bool {
 pub(crate) const FREE_FORM_COLLECTION_MODULES: &[&str] =
     &["ansible.windows.win_command", "ansible.windows.win_shell"];
 
+/// The builtin actions ansible-core 2.19.12 lets keep a string argument that is not `key=value`
+/// (`_BUILTIN_RAW_PARAM_MODULES_SIMPLE` in `parsing/mod_args.py`); its free-form modules are
+/// [`is_free_form`]'s. `set_fact: foo` sets a fact named `_raw_params` there, and here.
+const BUILTIN_RAW_PARAM_MODULES: [&str; 9] = [
+    "include_vars",
+    "include_tasks",
+    "include_role",
+    "import_tasks",
+    "import_role",
+    "add_host",
+    "group_by",
+    "set_fact",
+    "meta",
+];
+
+/// What the loader kept of a module's string argument that is not `key=value`, when the module
+/// does not read that string as a command line or as its own raw parameters.
+pub(crate) fn stray_raw_params(task: &PlayTask) -> Option<&str> {
+    let takes_it = if crate::python::is_resolved_name(&task.module) {
+        FREE_FORM_COLLECTION_MODULES.contains(&task.module.as_str())
+    } else {
+        is_free_form(&task.module) || BUILTIN_RAW_PARAM_MODULES.contains(&short_name(&task.module))
+    };
+    if takes_it {
+        return None;
+    }
+    task.args
+        .get("_raw_params")
+        .and_then(Value::as_str)
+        .filter(|raw| !raw.is_empty())
+}
+
+/// ansible-core's `is_possibly_all_template`: a string that opens with a Jinja override header,
+/// or that opens and closes with Jinja delimiters, whichever pair.
+pub(crate) fn possibly_all_template(text: &str) -> bool {
+    text.starts_with("#jinja2:")
+        || (["{%", "{{", "{#"].iter().any(|m| text.starts_with(m))
+            && ["%}", "}}", "#}"].iter().any(|m| text.ends_with(m)))
+}
+
 /// Whether the module's string form is one command line rather than `key=value` pairs.
 ///
 /// The three registries answer for their own rows, so a module moving between them keeps the
@@ -1285,6 +1325,28 @@ fn conditions(yaml: &Yaml, key: &str, context: &str) -> anyhow::Result<Vec<Strin
 fn module_args(module: &str, value: &Yaml) -> anyhow::Result<Map<String, Value>> {
     let mut args = Map::new();
     match value {
+        // A `set_fact` key YAML reads as a number, a boolean or null keeps that type into the
+        // name check, as the reference's does: `{1: x}` fails with `Invalid variable name '1' of
+        // type 'int'.`, `{true: x}` with `'True' of type 'bool'`. Written as the template of
+        // that value, the key renders back to it where the keys are rendered.
+        Yaml::Mapping(entries) if short_name(module) == "set_fact" => {
+            for (key, value) in entries {
+                let key = match key {
+                    Yaml::Value(Scalar::Integer(i)) => format!("{{{{ {i} }}}}"),
+                    Yaml::Value(Scalar::FloatingPoint(f)) => {
+                        format!("{{{{ {:?} }}}}", f.into_inner())
+                    }
+                    Yaml::Value(Scalar::Boolean(true)) => "{{ True }}".to_string(),
+                    Yaml::Value(Scalar::Boolean(false)) => "{{ False }}".to_string(),
+                    Yaml::Value(Scalar::Null) => "{{ None }}".to_string(),
+                    other => other
+                        .as_str()
+                        .ok_or_else(|| anyhow::anyhow!("mapping keys must be strings"))?
+                        .to_string(),
+                };
+                args.insert(key, to_json(value)?);
+            }
+        }
         Yaml::Mapping(_) => {
             if let Value::Object(map) = to_json(value)? {
                 args = map;
@@ -1315,13 +1377,16 @@ fn module_args(module: &str, value: &Yaml) -> anyhow::Result<Map<String, Value>>
                 args.insert("_raw_params".into(), Value::String(raw));
             }
         }
+        // A builtin's: a word that is not `key=value` is kept the same way and fails the task
+        // when it runs, unless the action takes raw parameters. Only a string `parse_kv` cannot
+        // split stops the load, as it stops the reference's (`failed at splitting arguments`).
         Yaml::Value(Scalar::String(s)) => {
             let (options, raw) = crate::splitter::parse_kv(s)?;
-            if let Some(word) = raw {
-                bail!("expected key=value, found '{word}'");
-            }
             for (k, v) in options {
                 args.insert(k, Value::String(v));
+            }
+            if let Some(raw) = raw {
+                args.insert("_raw_params".into(), Value::String(raw));
             }
         }
         Yaml::Value(Scalar::Null) => {}
@@ -1687,6 +1752,63 @@ mod tests {
             got.sort();
             assert_eq!(got, want, "{module}: {text}");
         }
+    }
+
+    /// A `set_fact` key YAML types as a number, a boolean or null is kept as the template of that
+    /// value, so the name check sees the type the reference sees; a string key is kept as written.
+    ///
+    /// What would make this red: the key turned into its text, which the check then reads as the
+    /// name `1` rather than an `int`.
+    #[test]
+    fn a_set_fact_key_keeps_the_type_yaml_gave_it() {
+        let pb = parse(
+            "- hosts: all\n  tasks:\n    - set_fact: {1: a, 1.5: b, 2.0: f, true: c, ~: d, k: e}\n",
+            "x.yml",
+        )
+        .unwrap();
+        let keys: Vec<&str> = first(&pb).args.keys().map(String::as_str).collect();
+        assert_eq!(
+            keys,
+            [
+                "{{ 1 }}",
+                "{{ 1.5 }}",
+                "{{ 2.0 }}",
+                "{{ True }}",
+                "{{ None }}",
+                "k"
+            ]
+        );
+    }
+
+    /// A builtin's word that is not `key=value` is kept for the task to fail on when it runs, as
+    /// the reference's `ping: foo` fails at run time; a string `parse_kv` cannot split still stops
+    /// the load, as the reference's `failed at splitting arguments` does at exit 4.
+    ///
+    /// What would make this red: the word refused at load again (`expected key=value`), or an
+    /// unbalanced quote accepted.
+    #[test]
+    fn a_builtin_module_keeps_a_word_that_is_not_key_value() {
+        let pb = parse(
+            "- hosts: all
+  tasks:
+    - ping: data=x foo
+",
+            "x.yml",
+        )
+        .unwrap();
+        let task = first(&pb);
+        assert_eq!(task.args["_raw_params"], "foo");
+        assert_eq!(task.args["data"], "x");
+        assert!(
+            parse(
+                "- hosts: all
+  tasks:
+    - ping: \"a='open\"
+",
+                "x.yml"
+            )
+            .is_err()
+        );
     }
 
     /// Measured on ansible-core 2.19.12: `set_fact: a={{ base ~ '/x' }}` sets `a` to `/tmp/x`,
