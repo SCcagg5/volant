@@ -640,6 +640,131 @@ pub fn os_error(err: &io::Error, path: &str) -> String {
     format!("[Errno {errno}] {text}: {}", bytes_repr(path))
 }
 
+/// `AnsibleModule._clean_args(args)`, the `cmd` of a failed `run_command`: the word after one
+/// that starts `pass` (after up to two `-`) masked, or the part after its `=`, every other word
+/// run through `heuristic_log_sanitize`, then each word `shlex.quote`d.
+pub fn clean_args(words: &[&str]) -> String {
+    let mut clean = Vec::new();
+    let mut masked = false;
+    for word in words {
+        if masked {
+            masked = false;
+            clean.push("********".to_string());
+            continue;
+        }
+        let bare = word
+            .strip_prefix("--")
+            .or_else(|| word.strip_prefix('-'))
+            .unwrap_or(word);
+        if bare.starts_with("pass") {
+            if let Some(at) = word.find('=') {
+                clean.push(format!("{}=********", &word[..at]));
+                continue;
+            }
+            masked = true;
+        }
+        clean.push(heuristic_log_sanitize(word));
+    }
+    clean
+        .iter()
+        .map(|word| shlex_quote(word))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `heuristic_log_sanitize` without `no_log_values`: the password of every `user:password@host`
+/// and `scheme://user:password@host` in `data` becomes `********`. It also eats text that only
+/// looks like one, as the reference does.
+fn heuristic_log_sanitize(data: &str) -> String {
+    let data: Vec<char> = data.chars().collect();
+    let find = |needle: &[char], from: usize, to: usize| -> Option<usize> {
+        let to = to.min(data.len());
+        (from..to).find(|&i| i + needle.len() <= to && data[i..i + needle.len()] == *needle)
+    };
+    let rfind = |needle: &[char], to: usize| -> Option<usize> {
+        let to = to.min(data.len());
+        (0..to)
+            .rev()
+            .find(|&i| i + needle.len() <= to && data[i..i + needle.len()] == *needle)
+    };
+    // Pieces in the order the reference inserts them at the front: reversed at the end.
+    let mut pieces: Vec<String> = Vec::new();
+    let text = |from: usize, to: usize| data[from..to].iter().collect::<String>();
+    let mut begin = data.len();
+    let mut prev_begin = begin;
+    loop {
+        let Some(end) = rfind(&['@'], begin) else {
+            pieces.push(text(0, begin));
+            break;
+        };
+        let mut sep = None;
+        let mut sep_search_end = end;
+        while sep.is_none() {
+            begin = rfind(&[':', '/', '/'], sep_search_end).unwrap_or(0);
+            sep = find(&[':'], begin + 3, end);
+            if sep.is_none() {
+                if begin == 0 {
+                    pieces.push(text(0, prev_begin));
+                    break;
+                }
+                sep_search_end = begin;
+            }
+        }
+        let Some(sep) = sep else { break };
+        pieces.push(text(end, prev_begin));
+        pieces.push("********".into());
+        pieces.push(text(begin, sep + 1));
+        prev_begin = begin;
+    }
+    pieces.reverse();
+    pieces.concat()
+}
+
+/// The `exception` `fail_json(exception=ex)` sends for the `OSError` `Popen` raised, measured on
+/// ansible-core 2.19.12 (tracebacks off, the default): an error summary whose chained event is
+/// `str(ex)`. That text is Python's `[Errno N] strerror`, with the program as bytes when `exec`
+/// failed; a failed `fork` (`EAGAIN`, `ENOMEM`) names no file. The wording comes from this libc,
+/// so the chained message is not byte for byte the host Python's for every errno.
+pub fn popen_error(errno: i32, program: &str) -> Value {
+    let text = io::Error::from_raw_os_error(errno).to_string();
+    let strerror = match strerror(errno) {
+        Some(strerror) => strerror,
+        None => text.split(" (os error").next().unwrap_or(&text),
+    };
+    let cause = if errno == libc::EAGAIN || errno == libc::ENOMEM {
+        format!("[Errno {errno}] {strerror}")
+    } else {
+        format!("[Errno {errno}] {strerror}: {}", bytes_repr(program))
+    };
+    serde_json::json!({
+        "__ansible_type": "ErrorSummary",
+        "event": {
+            "__ansible_type": "Event",
+            "msg": "Error executing command.",
+            "chain": {
+                "__ansible_type": "EventChain",
+                "msg_reason": "<<< caused by >>>",
+                "traceback_reason": "The above exception was the direct cause of the following error:",
+                "follow": true,
+                "event": {"__ansible_type": "Event", "msg": cause},
+            },
+        },
+    })
+}
+
+/// `shlex.quote`.
+pub fn shlex_quote(word: &str) -> String {
+    if !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c))
+    {
+        word.to_string()
+    } else {
+        format!("'{}'", word.replace('\'', "'\"'\"'"))
+    }
+}
+
 /// glibc's `strerror` for the errors file operations meet.
 pub fn strerror(errno: i32) -> Option<&'static str> {
     Some(match errno {
@@ -662,7 +787,7 @@ pub fn strerror(errno: i32) -> Option<&'static str> {
 }
 
 /// Python's `repr()` of `text` encoded as bytes.
-fn bytes_repr(text: &str) -> String {
+pub fn bytes_repr(text: &str) -> String {
     let quote = if text.contains('\'') && !text.contains('"') {
         '"'
     } else {
@@ -946,6 +1071,34 @@ mod tests {
     #[cfg(target_os = "linux")]
     use super::super::setup::unbounded;
     use super::*;
+
+    /// `heuristic_log_sanitize` answers as the reference's does (measured on 2.19.12), quirks included.
+    #[test]
+    fn credentials_are_masked_as_the_reference_masks_them() {
+        for (text, want) in [
+            ("https://u:secret@h/x", "https://u:********@h/x"),
+            ("user:pw@host:path", "user:********@host:path"),
+            ("a@b", "a@b"),
+            ("x://a:b@c/y://d:e@f", "x://a:********@c/y://d:********@f"),
+            ("ssh://git@host/r", "ssh:********@host/r"),
+            ("p:q@r@s", "p:q@r@s"),
+            ("http://u:p@h/@z", "http://u:********@z"),
+            ("\u{e9}:\u{fc}@x", "\u{e9}:\u{fc}@x"),
+            ("a:b@", "a:b@"),
+        ] {
+            assert_eq!(heuristic_log_sanitize(text), want, "{text}");
+        }
+    }
+
+    /// The program in a `Popen` error is printed as a Python bytes literal.
+    #[test]
+    fn a_program_name_is_printed_as_bytes() {
+        let cause = popen_error(2, "/tmp/it's\\a\u{e9}")["event"]["chain"]["event"]["msg"].clone();
+        assert_eq!(
+            cause,
+            json!(r#"[Errno 2] No such file or directory: b"/tmp/it's\\a\xc3\xa9""#)
+        );
+    }
 
     /// The invocation resolves aliases and defaults, hands back unknown arguments, and prints OS errors like Python.
     #[test]
