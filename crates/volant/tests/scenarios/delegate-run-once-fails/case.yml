@@ -1,0 +1,4 @@
+# A failing run_once task ends the play for the other hosts, rescued or not.
+runs:
+  - args: [-i, inv.ini, run-once-fails.yml]
+  - args: [-i, inv.ini, run-once-rescued.yml]

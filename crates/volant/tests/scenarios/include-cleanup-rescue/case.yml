@@ -1,0 +1,2 @@
+# A rescue inside a cleanup leaves the rest of the cleanup to run.
+args: [-i, inv.ini, cleanup-rescue.yml]

@@ -1,0 +1,2 @@
+# An include that includes itself is bounded by the reference's recursion limit.
+args: [-i, inv.ini, self-include.yml]

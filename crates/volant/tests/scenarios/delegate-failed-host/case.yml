@@ -1,0 +1,2 @@
+# A host that failed is still a valid delegate.
+args: [-i, inv.ini, delegate-failed-host.yml]

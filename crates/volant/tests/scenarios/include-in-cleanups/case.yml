@@ -1,0 +1,2 @@
+# An include in a rescue and one in an always are both reached.
+args: [-i, inv.ini, cleanup.yml]

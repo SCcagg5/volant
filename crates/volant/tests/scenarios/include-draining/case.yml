@@ -1,0 +1,2 @@
+# A failed host runs the rest of its always behind an include.
+args: [-i, inv.ini, draining.yml]

@@ -1,0 +1,2 @@
+# A rescue takes a failure raised inside an include.
+args: [-i, inv.ini, in-block.yml]

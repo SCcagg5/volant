@@ -1,0 +1,5 @@
+# A templated ignore_errors decides on a task and on an include statement.
+runs:
+  - args: [-i, inv.ini, ignore-templated.yml, -e, "cmd_lenient=true inc_lenient=true"]
+  - args: [-i, inv.ini, ignore-templated.yml, -e, "cmd_lenient=false inc_lenient=true"]
+  - args: [-i, inv.ini, ignore-templated.yml, -e, "cmd_lenient=true inc_lenient=false"]

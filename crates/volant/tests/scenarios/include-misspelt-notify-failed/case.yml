@@ -1,0 +1,2 @@
+# A failed task's misspelt notify does not end the run.
+args: [-i, inv.ini, notify-typo-failed.yml]
