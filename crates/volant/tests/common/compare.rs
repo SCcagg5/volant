@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! What the native module goldens (`golden.rs`) and the native end-to-end tests (`ssh_e2e.rs`)
-//! share: reading a run's results and profile, comparing two results key by key under an index
-//! entry, holding a case to the path the index names, and the lock over the machine state the
-//! native cases change. Each includer declares `setup_exits` beside this module.
+//! How a module golden is compared, the one vocabulary `reference.rs`, `reference_modules.rs`
+//! and `ssh_e2e.rs` share: reading a run's results and profile, comparing a result with its
+//! recording under its `index.json` entry, holding a case to the path the index names, and the
+//! lock over the machine state the module play changes. Each includer declares `setup_exits`
+//! beside this module.
 #[cfg(target_os = "linux")]
 use serde_json::Map;
 use serde_json::Value;
@@ -152,7 +153,7 @@ pub fn compare_native(
         };
         let (reference, ours) = (want.get(key), got.get(key));
         // `action` is the JSON callback's copy of the task's module name, which no module
-        // returns (see `DROPPED` in golden.rs). An `_ansible_` key only the recording has is executor
+        // returns. An `_ansible_` key only the recording has is executor
         // bookkeeping the JSON callback shows and the reference strips from both a registered
         // value and a `-vvv` line (`strip_internal_keys`): `_ansible_no_log`, and `setup`'s
         // `_ansible_verbose_override`.
@@ -537,4 +538,239 @@ pub fn unit_after(read: &Value) -> Result<Value, String> {
             .map(|(key, value)| (key.to_string(), Value::from(value)))
             .collect(),
     ))
+}
+
+/// Where the generator's `module` kind records: one file per case, `index.json` saying how each is
+/// compared, and `play.json`, the play that ran them.
+pub const MODULE_GOLDEN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/module");
+
+/// A file of `MODULE_GOLDEN`, parsed.
+pub fn module_file(name: &str) -> Value {
+    let path = std::path::Path::new(MODULE_GOLDEN).join(name);
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{} is readable: {e}", path.display()));
+    serde_json::from_str(&text).unwrap_or_else(|e| panic!("{} parses: {e}", path.display()))
+}
+
+/// The recorded play's tasks in order, its block and `always` flattened.
+pub fn play_tasks(play: &Value) -> Vec<&Value> {
+    let mut tasks = Vec::new();
+    for task in play[0]["tasks"].as_array().into_iter().flatten() {
+        if task.get("block").is_some() {
+            for part in ["block", "always"] {
+                tasks.extend(
+                    task.get(part)
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten(),
+                );
+            }
+        } else {
+            tasks.push(task);
+        }
+    }
+    tasks
+}
+
+/// The account this test runs as, resolved now: a `shape` recording holds a placeholder where the
+/// generating account was, and a result naming `root` or `nobody` must still compare wrong.
+#[cfg(target_os = "linux")]
+pub struct Identity {
+    pub uid: Value,
+    pub gid: Value,
+    pub user: Value,
+    pub group: Value,
+}
+
+#[cfg(target_os = "linux")]
+pub fn identity() -> Identity {
+    let out = std::process::Command::new("sh")
+        .args(["-c", "id -u; id -g; id -un; id -gn"])
+        .output()
+        .expect("id runs");
+    let text = String::from_utf8_lossy(&out.stdout);
+    let fields: Vec<&str> = text.lines().map(str::trim).collect();
+    let [uid, gid, user, group] = fields[..] else {
+        panic!("id printed four lines, got {fields:?}");
+    };
+    Identity {
+        uid: Value::from(uid.parse::<u64>().expect("a numeric uid")),
+        gid: Value::from(gid.parse::<u64>().expect("a numeric gid")),
+        user: Value::from(user),
+        group: Value::from(group),
+    }
+}
+
+/// The eight ownership keys, and which part of the running account each one must equal.
+#[cfg(target_os = "linux")]
+fn ownership<'a>(path: &str, id: &'a Identity) -> Option<&'a Value> {
+    match path {
+        "owner" | "stat.pw_name" => Some(&id.user),
+        "group" | "stat.gr_name" => Some(&id.group),
+        "uid" | "stat.uid" => Some(&id.uid),
+        "gid" | "stat.gid" => Some(&id.gid),
+        _ => None,
+    }
+}
+
+/// What a `shape` index entry loosens: `by_type` paths compared by kind (`may_be_null` ones also
+/// pass when either side is `null`), and `known` paths that must still differ.
+#[cfg(target_os = "linux")]
+struct ShapeRules {
+    by_type: Vec<String>,
+    may_be_null: Vec<String>,
+    known: Vec<String>,
+}
+
+#[cfg(target_os = "linux")]
+fn strings(spec: &Value, field: &str) -> Vec<String> {
+    spec[field]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect()
+}
+
+/// A `shape` case's result against its recording: `invocation` and `action` dropped, the ownership
+/// keys against the running account, the index entry's loosened paths as it says, every other key
+/// by value. A `known` difference that stopped differing, or that neither side has, fails, and so
+/// does a `required` path our side lacks.
+#[cfg(target_os = "linux")]
+pub fn compare_shape(
+    case: &str,
+    spec: &Value,
+    want: &Map<String, Value>,
+    got: &Map<String, Value>,
+    id: &Identity,
+    failures: &mut Vec<String>,
+) {
+    let rules = ShapeRules {
+        by_type: strings(spec, "by_type"),
+        may_be_null: strings(spec, "may_be_null"),
+        known: strings(spec, "known"),
+    };
+    let mut spent = Vec::new();
+    let mut walk = ShapeWalk {
+        case,
+        id,
+        rules: &rules,
+        spent: &mut spent,
+        failures,
+    };
+    walk.keys("", want, got);
+    for path in &rules.known {
+        if !spent.contains(path) {
+            failures.push(format!(
+                "case {case}: key {path}: listed as a known difference but neither side has it - \
+                 delete it from `known`"
+            ));
+        }
+    }
+    let ours = Value::Object(got.clone());
+    for path in strings(spec, "required") {
+        if path
+            .split('.')
+            .try_fold(&ours, |v, key| v.get(key))
+            .is_none()
+        {
+            failures.push(format!(
+                "case {case}: key {path}: ours has none, and it is required"
+            ));
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+struct ShapeWalk<'a> {
+    case: &'a str,
+    id: &'a Identity,
+    rules: &'a ShapeRules,
+    spent: &'a mut Vec<String>,
+    failures: &'a mut Vec<String>,
+}
+
+#[cfg(target_os = "linux")]
+impl ShapeWalk<'_> {
+    fn keys(&mut self, prefix: &str, want: &Map<String, Value>, got: &Map<String, Value>) {
+        let case = self.case;
+        let mut keys: Vec<&String> = want.keys().chain(got.keys()).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        for key in keys {
+            let path = if prefix.is_empty() {
+                key.clone()
+            } else {
+                format!("{prefix}.{key}")
+            };
+            let (reference, ours) = (want.get(key), got.get(key));
+            if prefix.is_empty() && ["invocation", "action"].contains(&key.as_str()) {
+                continue;
+            }
+            if self.rules.known.contains(&path) {
+                self.spent.push(path.clone());
+                if matches!((reference, ours), (Some(r), Some(o)) if same(r, o)) {
+                    self.failures.push(format!(
+                        "case {case}: key {path}: listed as a known difference but no longer \
+                         differs - delete it from `known` (reference {reference:?}, ours {ours:?})"
+                    ));
+                }
+                continue;
+            }
+            if IF_BOTH.contains(&path.as_str()) && (reference.is_none() || ours.is_none()) {
+                continue;
+            }
+            let (Some(reference), Some(ours)) = (reference, ours) else {
+                self.failures.push(format!(
+                    "case {case}: key {path}: reference {reference:?}, ours {ours:?}"
+                ));
+                continue;
+            };
+            if let Some(mine) = ownership(&path, self.id) {
+                if !same(ours, mine) {
+                    self.failures.push(format!(
+                        "case {case}: key {path}: this account is {mine}, ours reported {ours}"
+                    ));
+                }
+                continue;
+            }
+            if self.rules.by_type.contains(&path) {
+                let kind = |v: &Value| std::mem::discriminant(v);
+                let nullable = self.rules.may_be_null.contains(&path)
+                    && (reference.is_null() || ours.is_null());
+                if !nullable && kind(reference) != kind(ours) {
+                    self.failures.push(format!(
+                        "case {case}: key {path}: reference {reference} and ours {ours} are not \
+                         even the same kind of value"
+                    ));
+                }
+                continue;
+            }
+            match (reference, ours) {
+                (Value::Object(want), Value::Object(got)) => self.keys(&path, want, got),
+                _ if same(reference, ours) => {}
+                _ => self.failures.push(format!(
+                    "case {case}: key {path}: reference {reference}, ours {ours}"
+                )),
+            }
+        }
+    }
+}
+
+/// A `shape` case's registered value, as the reference's callback shows it: without the
+/// `failed: false` the executor sets on every registered result.
+#[cfg(target_os = "linux")]
+pub fn shape_result(case: &str, results: &Map<String, Value>) -> Result<Value, String> {
+    let mut registered = results
+        .get(&format!("registered-{case}"))
+        .and_then(|shown| shown.get("last"))
+        .cloned()
+        .ok_or("no registered value: the task did not run, or did not report")?;
+    let map = registered
+        .as_object_mut()
+        .ok_or("the registered value is not a mapping")?;
+    if map.get("failed") == Some(&Value::Bool(false)) {
+        map.remove("failed");
+    }
+    Ok(registered)
 }

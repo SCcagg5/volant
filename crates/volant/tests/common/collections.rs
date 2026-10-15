@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The collection version rule `golden.rs` and `ssh_e2e.rs` both apply before they run a
+//! The collection version rule `reference_modules.rs` and `ssh_e2e.rs` both apply before they run a
 //! collection module: what `golden/COLLECTIONS` pins, read back from a controller python.
 
 /// The versions `COLLECTIONS` pins: the three real collections, plus `netaddr`, which is not a

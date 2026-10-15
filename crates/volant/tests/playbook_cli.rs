@@ -4,6 +4,12 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::process::{Command, Output};
 
+#[path = "common/process.rs"]
+mod process;
+
+#[path = "common/python.rs"]
+mod python;
+
 fn fixture(name: &str) -> String {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
@@ -104,38 +110,7 @@ fn volant_within_full(
     if let Some(dir) = cwd {
         command.current_dir(dir);
     }
-    if stdin_line.is_some() {
-        command.stdin(std::process::Stdio::piped());
-    }
-    let mut child = command
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .expect("volant starts");
-    if let Some(line) = stdin_line {
-        use std::io::Write as _;
-        child
-            .stdin
-            .take()
-            .expect("volant's standard input")
-            .write_all(line.as_bytes())
-            .expect("the password reaches volant");
-    }
-    let started = std::time::Instant::now();
-    loop {
-        match child.try_wait().expect("volant is waitable") {
-            Some(_) => return child.wait_with_output().expect("volant output"),
-            None if started.elapsed() >= deadline => {
-                let _ = child.kill();
-                let out = child.wait_with_output().expect("volant output");
-                panic!(
-                    "volant did not finish within {deadline:?}, so a host is still waiting:\n{}",
-                    String::from_utf8_lossy(&out.stdout)
-                );
-            }
-            None => std::thread::sleep(std::time::Duration::from_millis(25)),
-        }
-    }
+    process::run_within(&mut command, deadline, stdin_line.map(str::as_bytes))
 }
 
 fn settings() -> insta::Settings {
@@ -361,7 +336,7 @@ fn retries_are_rendered_per_item() {
     assert_eq!(out.status.code(), Some(0), "{text}");
     check(&text, &["remote", "local"], 0);
     // `copy` names a Python module, which the run builds before it starts.
-    let Some(python) = ansible_core_python() else {
+    let Some(python) = python::reference_python().map(|p| p.display().to_string()) else {
         return;
     };
     let out = volant_within_env(
@@ -1798,7 +1773,7 @@ fn a_banner_shows_the_name_as_it_rendered_at_its_step() {
 /// the file before the `shell` ran and writes `old`.
 #[test]
 fn a_lookup_reads_the_controller_after_the_tasks_in_front_of_it() {
-    let Some(python) = ansible_core_python() else {
+    let Some(python) = python::reference_python().map(|p| p.display().to_string()) else {
         return;
     };
     let dir = std::env::temp_dir().join(format!("volant-lookup-cut-{}", std::process::id()));
@@ -1847,7 +1822,7 @@ fn a_lookup_reads_the_controller_after_the_tasks_in_front_of_it() {
 /// `old`.
 #[test]
 fn a_task_behind_a_fact_writing_module_renders_the_new_facts() {
-    let Some(python) = ansible_core_python() else {
+    let Some(python) = python::reference_python().map(|p| p.display().to_string()) else {
         return;
     };
     let dir = std::env::temp_dir().join(format!("volant-facts-cut-{}", std::process::id()));
@@ -6365,7 +6340,7 @@ fn limit_narrows_before_the_batches_are_cut() {
 /// they were before (`"none True True"`).
 #[test]
 fn a_remote_result_under_delegate_facts_lands_on_the_delegate() {
-    let Some(python) = ansible_core_python() else {
+    let Some(python) = python::reference_python().map(|p| p.display().to_string()) else {
         return;
     };
     let out = volant_within_env(
@@ -8358,7 +8333,7 @@ fn library_module(dir: &Path, name: &str, field: &str) {
 /// refused before the controller's ansible-core was asked.
 #[test]
 fn a_module_in_the_playbook_s_library_or_a_role_s_runs() {
-    let Some(python) = ansible_core_python() else {
+    let Some(python) = python::reference_python().map(|p| p.display().to_string()) else {
         return;
     };
     let dir = probe_dir("library-modules");
@@ -8465,7 +8440,7 @@ fn kept_unions(cache: &Path) -> Vec<(std::path::PathBuf, std::time::SystemTime)>
 /// loads the union holding ansible-core's `ping` and prints `pong`.
 #[test]
 fn a_module_written_in_the_playbook_s_library_rebuilds_a_kept_union() {
-    let Some(python) = ansible_core_python() else {
+    let Some(python) = python::reference_python().map(|p| p.display().to_string()) else {
         return;
     };
     let dir = probe_dir("library-cache");
@@ -8545,7 +8520,7 @@ fn a_module_written_in_the_playbook_s_library_rebuilds_a_kept_union() {
 /// taken off the registered values along with the line.
 #[test]
 fn a_warning_repeated_by_two_items_prints_once() {
-    let Some(python) = ansible_core_python() else {
+    let Some(python) = python::reference_python().map(|p| p.display().to_string()) else {
         return;
     };
     let dir = probe_dir("warning-once");
@@ -8669,7 +8644,7 @@ fn ping_run(python: &str, cache: &Path, playbooks: &[&Path]) -> (Option<i32>, Ve
 /// role ships run for an earlier playbook's task.
 #[test]
 fn library_directories_join_the_search_in_the_reference_s_order() {
-    let Some(python) = ansible_core_python() else {
+    let Some(python) = python::reference_python().map(|p| p.display().to_string()) else {
         return;
     };
     let root = probe_dir("library-order");
@@ -8756,7 +8731,7 @@ fn library_directories_join_the_search_in_the_reference_s_order() {
 /// playbook's `setup`.
 #[test]
 fn a_library_module_answers_its_short_name_and_never_ansible_builtin() {
-    let Some(python) = ansible_core_python() else {
+    let Some(python) = python::reference_python().map(|p| p.display().to_string()) else {
         return;
     };
     let dir = probe_dir("library-builtin");
@@ -8780,45 +8755,6 @@ fn a_library_module_answers_its_short_name_and_never_ansible_builtin() {
     std::fs::remove_dir_all(&dir).expect("the probe directory is removed");
 }
 
-/// A controller interpreter with ansible-core, which a task an action plugin backs needs for its
-/// sub-tasks: `VOLANT_PYTHON` when it is set, else the one beside an `ansible-playbook` on `PATH`
-/// (where a `uv tool` or `pipx` install puts it), else `python3`. `None` after saying why, so a
-/// machine without ansible-core skips loudly; with `VOLANT_PYTHON` set there is no skip, and an
-/// interpreter that cannot import ansible-core fails the test.
-fn ansible_core_python() -> Option<String> {
-    let explicit = std::env::var("VOLANT_PYTHON").ok();
-    let mut candidates: Vec<String> = explicit.iter().cloned().collect();
-    if explicit.is_none() {
-        let probe = Command::new("sh")
-            .args(["-c", "command -v ansible-playbook"])
-            .output()
-            .expect("command -v runs");
-        let named = String::from_utf8_lossy(&probe.stdout).trim().to_string();
-        if let Ok(real) = std::fs::canonicalize(&named)
-            && let Some(bin) = real.parent()
-        {
-            candidates.push(bin.join("python3").display().to_string());
-            candidates.push(bin.join("python").display().to_string());
-        }
-        candidates.push("python3".into());
-    }
-    for python in &candidates {
-        let imports = Command::new(python)
-            .args(["-c", "import ansible.release"])
-            .output()
-            .is_ok_and(|out| out.status.success());
-        if imports {
-            return Some(python.clone());
-        }
-    }
-    assert!(
-        explicit.is_none(),
-        "VOLANT_PYTHON cannot import ansible-core: {candidates:?}"
-    );
-    eprintln!("skipped: no interpreter with ansible-core among {candidates:?}. Set VOLANT_PYTHON.");
-    None
-}
-
 /// `retries` on a task an action plugin backs, through the real driver on the local connection.
 /// Measured on ansible-core 2.19.12 with the same two tasks on `localhost`: a `copy` that
 /// succeeds under `retries: 3` reports `attempts=1` and no retry line; a `copy` into a directory
@@ -8830,7 +8766,7 @@ fn ansible_core_python() -> Option<String> {
 /// retried.
 #[test]
 fn a_task_an_action_plugin_backs_retries_through_the_driver() {
-    let Some(python) = ansible_core_python() else {
+    let Some(python) = python::reference_python().map(|p| p.display().to_string()) else {
         return;
     };
     let dir = probe_dir("plugin-retries");
@@ -8889,7 +8825,7 @@ fn a_task_an_action_plugin_backs_retries_through_the_driver() {
 /// it, which connects a new agent for the next task, with a new process id.
 #[test]
 fn a_task_an_action_plugin_backs_leaves_the_link_for_the_next_task() {
-    let Some(python) = ansible_core_python() else {
+    let Some(python) = python::reference_python().map(|p| p.display().to_string()) else {
         return;
     };
     let dir = probe_dir("plugin-link");

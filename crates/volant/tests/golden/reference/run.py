@@ -14,13 +14,13 @@ from . import GOLDEN, REFERENCE
 # Read by every run instead of the account's own `~/.ansible.cfg`, unless a scenario brings one.
 EMPTY_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ansible.cfg")
 CALLBACKS = os.path.join(GOLDEN, "callback_plugins")
-# Kept from the caller, as golden.rs keeps them: the `ssh` job installs the pinned collections
+# Kept from the caller, as reference_modules.rs keeps them: the `ssh` job installs the pinned collections
 # outside every default path and names them here.
 FORWARDED = ("ANSIBLE_COLLECTIONS_PATH", "ANSIBLE_COLLECTIONS_PATHS")
 # The native play is the longest run: under a minute on the development machine.
 DEADLINE = 300
 # Held from the machine checks to the last read-back of the module play: its directories, accounts,
-# unit and package are the whole machine's, and golden.rs takes the same lock. Under the account's
+# unit and package are the whole machine's, and reference_modules.rs takes the same lock. Under the account's
 # own home, where no other account can create it first.
 NATIVE_LOCK = os.path.join(os.path.expanduser("~"), ".cache", "volant-golden-native.lock")
 
