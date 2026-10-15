@@ -7,8 +7,10 @@ path an enabled native has to take, and `module/play.json` is the play that ran.
 
 An index entry's `compare` is `exact` (key by key, `invocation` kept: a native produces it too),
 `live` (against a reference run made next to the native one, the recording giving only the shape)
-or `shape` (the key set and the type of each value, `invocation` dropped: the modules with no
-native, compared by golden.rs's python module, action plugin and collection tests). `volatile`
+or `shape` (`invocation` dropped, the ownership keys against the running account, the paths in
+`by_type` by kind, those in `may_be_null` also when either side is null, those in `known` required
+to still differ, those in `required` required on Volant's side, every other key by value: the
+modules with no native). `volatile`
 lists the dotted paths whose value is not compared; `patterns` maps a path to the regex its value
 must match instead (a backup's name); `unordered` lists the paths whose value is a list of units in
 no fixed order, compared as `sorted(value.split(" "))` on both sides. `branch` is what the
@@ -158,7 +160,7 @@ BACKUP_SUFFIX = r"\.\d+\.\d{4}-\d{2}-\d{2}@\d{2}:\d{2}:\d{2}~$"
 # shape of an entry; the full lists would also name every package and unit of the machine that
 # ran the generator. One unit per `service_facts` branch: `list-units` (`cron.service`, whose
 # status `list-unit-files` replaces, and `systemd-journald.service`), the SysV listing (`cron`) and
-# the template units only `list-unit-files` names (`LIVE_KEEP_SUFFIX`). golden.rs keeps the same.
+# the template units only `list-unit-files` names (`LIVE_KEEP_SUFFIX`). reference_modules.rs keeps the same.
 LIVE_KEEP = {
     "packages": ("bash",),
     "services": ("cron.service", "systemd-journald.service", "cron"),
@@ -754,64 +756,84 @@ def _record():
     # The modules no native answers, recorded for their keys and the type of each value. Last, so
     # that no task name before them moves, and in directories of their own, which the play empties
     # first.
-    def shape(name, module, args, branch, keywords=None, become=False):
+    def shape(name, module, args, branch, keywords=None, become=False, by_type=(), may_be_null=(), known=(), required=()):
         case(name, module, args, branch, "python", SHAPE_WHY, "shape", become=become, keywords=keywords)
+        if name in index:
+            index[name].update(
+                by_type=list(by_type), may_be_null=list(may_be_null), known=list(known), required=list(required)
+            )
 
     for directory in (PYTHON_TMP, ACTION_TMP, COLLECTION_TMP):
         setup("file", {"path": directory, "state": "absent"})
         setup("file", {"path": directory, "state": "directory", "mode": "0755"})
     setup("copy", {"content": STAT_TARGET_CONTENT, "dest": STAT_TARGET, "mode": "0644"})
-    shape("python-ping", "ping", {}, same)
+    # Compared by kind: they move between runs, filesystems or machines (`version` is `null` where
+    # the filesystem has no inode generation, as on a tmpfs `/tmp`).
+    python_by_type = ["size"] + [f"stat.{key}" for key in (
+        "atime", "attr_flags", "attributes", "block_size", "blocks", "charset", "checksum", "ctime", "dev",
+        "inode", "mimetype", "mtime", "nlink", "size", "version",
+    )]
+    python_rules = {"by_type": python_by_type, "may_be_null": ["stat.version"]}
+    shape("python-ping", "ping", {}, same, **python_rules)
     # STAT_TARGET, not a file of the machine: /etc/hostname's checksum would be a confirmable hash
     # of the machine's name.
-    shape("python-stat", "stat", {"path": STAT_TARGET}, same)
-    shape("python-file", "file", {"path": f"{PYTHON_TMP}/golden-file", "state": "touch", "mode": "0644"}, changed)
-    shape("python-lineinfile", "lineinfile", {"path": f"{PYTHON_TMP}/golden-line", "line": "hello", "create": True}, added)
+    shape("python-stat", "stat", {"path": STAT_TARGET}, same, **python_rules)
+    shape("python-file", "file", {"path": f"{PYTHON_TMP}/golden-file", "state": "touch", "mode": "0644"}, changed, **python_rules)
+    shape("python-lineinfile", "lineinfile", {"path": f"{PYTHON_TMP}/golden-line", "line": "hello", "create": True}, added, **python_rules)
 
+    # `cache_update_time` moves with every `apt update`; `status`'s key set with the systemd version,
+    # so a running unit's own four keys are required instead (`required`). `copy-force-false`'s
+    # `src` is the reference's deleted controller temporary file, which Volant never writes
+    # (`known`: an entry that stops differing fails the comparison).
+    action_rules = {"by_type": ["cache_update_time", "status"]}
     hello, motd, bundle = _ensure_action_fixtures()
     dest_dir = f"{ACTION_TMP}/dir"
     unpacked_dir = f"{ACTION_TMP}/unpacked"
     new = {"src": hello, "dest": f"{ACTION_TMP}/new.txt", "mode": "0644"}
-    shape("action-copy-new", "copy", new, changed)
-    shape("action-copy-same", "copy", new, same)
-    shape("action-copy-content", "copy", {"content": "x\n", "dest": f"{ACTION_TMP}/content.txt", "mode": "0644"}, changed)
-    shape("action-copy-force-false", "copy", {"content": "y\n", "dest": f"{ACTION_TMP}/content.txt", "force": False}, same)
+    shape("action-copy-new", "copy", new, changed, **action_rules)
+    shape("action-copy-same", "copy", new, same, **action_rules)
+    shape("action-copy-content", "copy", {"content": "x\n", "dest": f"{ACTION_TMP}/content.txt", "mode": "0644"}, changed, **action_rules)
+    shape("action-copy-force-false", "copy", {"content": "y\n", "dest": f"{ACTION_TMP}/content.txt", "force": False}, same, known=["src"], **action_rules)
     # Explicit modes on both directories: `unarchive-local` reports its destination's.
     setup("file", {"path": dest_dir, "state": "directory", "mode": "0775"})
-    shape("action-copy-dest-dir", "copy", {"src": hello, "dest": f"{dest_dir}/", "mode": "0644"}, changed)
+    shape("action-copy-dest-dir", "copy", {"src": hello, "dest": f"{dest_dir}/", "mode": "0644"}, changed, **action_rules)
     shape(
         "action-copy-validate-fail",
         "copy",
         {"content": "", "dest": f"{ACTION_TMP}/invalid.txt", "validate": "test -s %s"},
-        failed("failed to validate"),
-    )
+        failed("failed to validate"), **action_rules)
     shape(
         "action-copy-remote-src",
         "copy",
         {"src": f"{ACTION_TMP}/new.txt", "dest": f"{ACTION_TMP}/remote.txt", "remote_src": True, "mode": "0644"},
-        changed,
-    )
+        changed, **action_rules)
     template_vars = {"vars": {"who": "golden", "extra": True}}
     motd_new = {"src": motd, "dest": f"{ACTION_TMP}/motd", "mode": "0644"}
-    shape("action-template-new", "template", motd_new, changed, template_vars)
-    shape("action-template-same", "template", motd_new, same, template_vars)
+    shape("action-template-new", "template", motd_new, changed, template_vars, **action_rules)
+    shape("action-template-same", "template", motd_new, same, template_vars, **action_rules)
     shape(
         "action-template-lstrip",
         "template",
         {"src": motd, "dest": f"{ACTION_TMP}/motd-lstrip", "mode": "0644", "lstrip_blocks": True},
         changed,
-        template_vars,
+        template_vars, **action_rules)
+    shape("action-package-present", "package", {"name": "bash", "state": "present"}, same, become=True, **action_rules)
+    shape(
+        "action-service-started",
+        "service",
+        {"name": "systemd-journald", "state": "started"},
+        same,
+        become=True,
+        required=[f"status.{key}" for key in ("Id", "LoadState", "ActiveState", "SubState")],
+        **action_rules,
     )
-    shape("action-package-present", "package", {"name": "bash", "state": "present"}, same, become=True)
-    shape("action-service-started", "service", {"name": "systemd-journald", "state": "started"}, same, become=True)
     setup("file", {"path": unpacked_dir, "state": "directory", "mode": "0775"})
-    shape("action-unarchive-local", "unarchive", {"src": bundle, "dest": unpacked_dir}, changed)
+    shape("action-unarchive-local", "unarchive", {"src": bundle, "dest": unpacked_dir}, changed, **action_rules)
     shape(
         "action-unarchive-creates",
         "unarchive",
         {"src": bundle, "dest": unpacked_dir, "creates": f"{unpacked_dir}/inside.txt"},
-        same,
-    )
+        same, **action_rules)
 
     # `sysctl_file` alone, with `sysctl_set` and `reload` false: no kernel effect. `ini_file` is a
     # module of another collection, so the pair also shows the union carrying two collections.
@@ -873,7 +895,7 @@ def _record():
             # anchor and an alias.
             with open(playbook, "w", encoding="utf-8") as f:
                 json.dump(play, f, indent=1)
-            # callback_plugins/golden_json.py, which golden.rs also loads: `ansible.builtin.json`
+            # callback_plugins/golden_json.py, which reference_modules.rs also loads: `ansible.builtin.json`
             # is `ansible.posix`'s in ansible-core 2.19, and the replay must not need it.
             result = run(["ansible-playbook", "-i", "localhost,", playbook], extra_env={"ANSIBLE_STDOUT_CALLBACK": "golden_json"})
     finally:
@@ -895,6 +917,9 @@ def _record():
             result.pop("invocation", None)
             result = redact.systemd_values(redact.staged_paths(redact.accounts(result, redact.SHAPE_ACCOUNT)))
             uncut = result
+            # A directory's size is whatever its filesystem says: compared by kind.
+            if result.get("state") == "directory" and "size" in result and "size" not in spec["by_type"]:
+                spec["by_type"].append("size")
         else:
             result = redact.in_strings(redact.staged_paths(found[name]), to_placeholder)
             result = redact.accounts(result, redact.NATIVE_ACCOUNT)
@@ -956,7 +981,7 @@ def _record():
     for name, result in results.items():
         write_json(os.path.join(DESTINATION, f"{name}.json"), result)
     write_json(os.path.join(DESTINATION, "index.json"), index)
-    # The play itself, which golden.rs replays under Volant: the setup tasks, the read-backs and
+    # The play itself, which reference_modules.rs replays under Volant: the setup tasks, the read-backs and
     # the order the cases meet each other's state in are nowhere else.
     write_json(os.path.join(DESTINATION, "play.json"), redact.in_strings(play, to_placeholder), sort_keys=False, indent=1)
     for stale in sorted(set(os.listdir(DESTINATION)) - {f"{name}.json" for name in index} - {"index.json", "play.json"}):

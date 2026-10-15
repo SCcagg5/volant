@@ -9,10 +9,17 @@
     "branch": {
       "changed": true
     },
+    "by_type": [
+      "cache_update_time",
+      "status"
+    ],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [],
     "module": "copy",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -27,10 +34,17 @@
     "branch": {
       "changed": true
     },
+    "by_type": [
+      "cache_update_time",
+      "status"
+    ],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [],
     "module": "copy",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -45,10 +59,19 @@
     "branch": {
       "changed": false
     },
+    "by_type": [
+      "cache_update_time",
+      "status"
+    ],
     "compare": "shape",
     "expect": "python",
+    "known": [
+      "src"
+    ],
+    "may_be_null": [],
     "module": "copy",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -63,10 +86,17 @@
     "branch": {
       "changed": true
     },
+    "by_type": [
+      "cache_update_time",
+      "status"
+    ],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [],
     "module": "copy",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -82,10 +112,17 @@
     "branch": {
       "changed": true
     },
+    "by_type": [
+      "cache_update_time",
+      "status"
+    ],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [],
     "module": "copy",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -100,10 +137,17 @@
     "branch": {
       "changed": false
     },
+    "by_type": [
+      "cache_update_time",
+      "status"
+    ],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [],
     "module": "copy",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -120,10 +164,17 @@
       "failed": true,
       "msg": "failed to validate"
     },
+    "by_type": [
+      "cache_update_time",
+      "status"
+    ],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [],
     "module": "copy",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -137,10 +188,17 @@
     "branch": {
       "changed": false
     },
+    "by_type": [
+      "cache_update_time",
+      "status"
+    ],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [],
     "module": "package",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -154,10 +212,22 @@
     "branch": {
       "changed": false
     },
+    "by_type": [
+      "cache_update_time",
+      "status"
+    ],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [],
     "module": "service",
     "patterns": {},
+    "required": [
+      "status.Id",
+      "status.LoadState",
+      "status.ActiveState",
+      "status.SubState"
+    ],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -173,10 +243,17 @@
     "branch": {
       "changed": true
     },
+    "by_type": [
+      "cache_update_time",
+      "status"
+    ],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [],
     "module": "template",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -191,10 +268,17 @@
     "branch": {
       "changed": true
     },
+    "by_type": [
+      "cache_update_time",
+      "status"
+    ],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [],
     "module": "template",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -209,10 +293,17 @@
     "branch": {
       "changed": false
     },
+    "by_type": [
+      "cache_update_time",
+      "status"
+    ],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [],
     "module": "template",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -227,10 +318,17 @@
     "branch": {
       "changed": false
     },
+    "by_type": [
+      "cache_update_time",
+      "status"
+    ],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [],
     "module": "unarchive",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -244,10 +342,18 @@
     "branch": {
       "changed": true
     },
+    "by_type": [
+      "cache_update_time",
+      "status",
+      "size"
+    ],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [],
     "module": "unarchive",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -469,10 +575,14 @@
       "changed": true,
       "msg": "section and option added"
     },
+    "by_type": [],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [],
     "module": "community.general.ini_file",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -489,10 +599,14 @@
     "branch": {
       "changed": true
     },
+    "by_type": [],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [],
     "module": "ansible.posix.sysctl",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -1389,10 +1503,33 @@
     "branch": {
       "changed": true
     },
+    "by_type": [
+      "size",
+      "stat.atime",
+      "stat.attr_flags",
+      "stat.attributes",
+      "stat.block_size",
+      "stat.blocks",
+      "stat.charset",
+      "stat.checksum",
+      "stat.ctime",
+      "stat.dev",
+      "stat.inode",
+      "stat.mimetype",
+      "stat.mtime",
+      "stat.nlink",
+      "stat.size",
+      "stat.version"
+    ],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [
+      "stat.version"
+    ],
     "module": "file",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -1408,10 +1545,33 @@
       "changed": true,
       "msg": "line added"
     },
+    "by_type": [
+      "size",
+      "stat.atime",
+      "stat.attr_flags",
+      "stat.attributes",
+      "stat.block_size",
+      "stat.blocks",
+      "stat.charset",
+      "stat.checksum",
+      "stat.ctime",
+      "stat.dev",
+      "stat.inode",
+      "stat.mimetype",
+      "stat.mtime",
+      "stat.nlink",
+      "stat.size",
+      "stat.version"
+    ],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [
+      "stat.version"
+    ],
     "module": "lineinfile",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -1422,10 +1582,33 @@
     "branch": {
       "changed": false
     },
+    "by_type": [
+      "size",
+      "stat.atime",
+      "stat.attr_flags",
+      "stat.attributes",
+      "stat.block_size",
+      "stat.blocks",
+      "stat.charset",
+      "stat.checksum",
+      "stat.ctime",
+      "stat.dev",
+      "stat.inode",
+      "stat.mimetype",
+      "stat.mtime",
+      "stat.nlink",
+      "stat.size",
+      "stat.version"
+    ],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [
+      "stat.version"
+    ],
     "module": "ping",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
@@ -1438,10 +1621,33 @@
     "branch": {
       "changed": false
     },
+    "by_type": [
+      "size",
+      "stat.atime",
+      "stat.attr_flags",
+      "stat.attributes",
+      "stat.block_size",
+      "stat.blocks",
+      "stat.charset",
+      "stat.checksum",
+      "stat.ctime",
+      "stat.dev",
+      "stat.inode",
+      "stat.mimetype",
+      "stat.mtime",
+      "stat.nlink",
+      "stat.size",
+      "stat.version"
+    ],
     "compare": "shape",
     "expect": "python",
+    "known": [],
+    "may_be_null": [
+      "stat.version"
+    ],
     "module": "stat",
     "patterns": {},
+    "required": [],
     "unordered": [],
     "volatile": [],
     "why": "no native: compared by its keys and the type of each value"
