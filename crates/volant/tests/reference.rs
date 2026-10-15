@@ -284,11 +284,14 @@ impl Case {
     }
 }
 
-/// `stdout` with the lines an `unordered` regex matches sorted among themselves, each staying in
-/// the slots such lines take: only their order is excused.
+/// `stdout` with a command's timings masked, and the lines an `unordered` regex matches sorted
+/// among themselves, each staying in the slots such lines take: only their order is excused.
 fn normalise(stdout: &str, unordered: &[regex::Regex]) -> String {
+    // A command's timings, which differ between two runs of the reference itself.
+    let timed = regex::Regex::new(r#""(start|end|delta)": "[^"]*""#).expect("the pattern compiles");
+    let stdout = timed.replace_all(stdout, r#""$1": "<time>""#);
     if unordered.is_empty() {
-        return stdout.to_string();
+        return stdout.into_owned();
     }
     let lines: Vec<&str> = stdout.split_inclusive('\n').collect();
     let loose = |line: &str| {
@@ -417,8 +420,11 @@ fn a_scenario_matches_the_reference(#[files("tests/scenarios/*/case.yml")] case:
             command.env("VOLANT_PYTHON", python);
         }
         let out = process::run_within(&mut command, DEADLINE, None);
+        // macOS resolves its temporary directory under `/private`: mask both spellings.
+        let canonical = copy.canonicalize().unwrap_or_else(|_| copy.clone());
         let _ = std::fs::remove_dir_all(&copy);
         let got = String::from_utf8_lossy(&out.stdout)
+            .replace(&canonical.display().to_string(), "<golden-tmp>")
             .replace(&copy.display().to_string(), "<golden-tmp>");
         let shown = format!(
             "{name}: {}\n--- stderr\n{}",
