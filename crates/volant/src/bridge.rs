@@ -15,7 +15,7 @@ use volant_protocol::frame::MAX_FRAME_LEN;
 use crate::python::PythonBuilder;
 
 /// What a bridged call runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PluginKind {
     Filter,
     Test,
@@ -23,7 +23,7 @@ pub enum PluginKind {
 }
 
 impl PluginKind {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             PluginKind::Filter => "filter",
             PluginKind::Test => "test",
@@ -39,27 +39,32 @@ pub enum BridgeError {
     Plugin(String),
     /// ansible-core knows no plugin of that name; the text is its sentence.
     NotFound(String),
-    /// The helper could not start, died, or broke the protocol.
+    /// The helper could not start; the text is why.
+    Start(String),
+    /// The helper died or broke the protocol.
     Helper(String),
 }
 
 impl fmt::Display for BridgeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let (BridgeError::Plugin(text) | BridgeError::NotFound(text) | BridgeError::Helper(text)) =
-            self;
-        f.write_str(text)
+        match self {
+            BridgeError::Start(why) => write!(f, "the Python helper could not start: {why}"),
+            BridgeError::Plugin(text) | BridgeError::NotFound(text) | BridgeError::Helper(text) => {
+                f.write_str(text)
+            }
+        }
     }
 }
 
 impl std::error::Error for BridgeError {}
 
-type Start = Box<dyn Fn() -> anyhow::Result<PythonBuilder> + Send + Sync>;
+pub(crate) type Start = Box<dyn Fn() -> anyhow::Result<PythonBuilder> + Send + Sync>;
 
 enum State {
     Idle,
     Running(PythonBuilder),
     /// The helper is gone; every later call fails with this and nothing restarts it.
-    Dead(String),
+    Dead(BridgeError),
 }
 
 /// The run's channel to the Python helper.
@@ -88,7 +93,7 @@ impl Bridge {
         }))
     }
 
-    fn with_start(start: Start) -> Arc<Bridge> {
+    pub(crate) fn with_start(start: Start) -> Arc<Bridge> {
         Arc::new(Bridge {
             start,
             state: Mutex::new((State::Idle, 0)),
@@ -124,25 +129,43 @@ impl Bridge {
         kwargs: &Map<String, Value>,
         vars: Option<&Map<String, Value>>,
     ) -> Result<Value, BridgeError> {
+        self.request(
+            kind,
+            name,
+            json!({"kind": kind.as_str(), "name": name, "args": args, "kwargs": kwargs, "vars": vars}),
+        )
+    }
+
+    /// Whether ansible-core has a filter or test of that name, without running it.
+    ///
+    /// # Errors
+    /// [`BridgeError::NotFound`] when it has none, or why the helper could not say.
+    pub fn resolve(&self, kind: PluginKind, name: &str) -> Result<(), BridgeError> {
+        self.request(
+            kind,
+            name,
+            json!({"kind": kind.as_str(), "name": name, "args": [], "kwargs": {}, "resolve_only": true}),
+        )
+        .map(drop)
+    }
+
+    fn request(&self, kind: PluginKind, name: &str, call: Value) -> Result<Value, BridgeError> {
         let mut guard = self.lock();
         let (state, next) = &mut *guard;
         if matches!(state, State::Idle) {
             *state = match (self.start)() {
                 Ok(helper) => State::Running(helper),
-                Err(err) => State::Dead(format!("the Python helper could not start: {err:#}")),
+                Err(err) => State::Dead(BridgeError::Start(format!("{err:#}"))),
             };
         }
         let helper = match state {
             State::Running(helper) => helper,
-            State::Dead(why) => return Err(BridgeError::Helper(why.clone())),
+            State::Dead(why) => return Err(why.clone()),
             State::Idle => unreachable!("started above"),
         };
         *next += 1;
         let id = *next;
-        let request = json!({"id": id, "call": {
-            "kind": kind.as_str(), "name": name, "args": args, "kwargs": kwargs, "vars": vars,
-        }})
-        .to_string();
+        let request = json!({"id": id, "call": call}).to_string();
         if request.len() > MAX_FRAME_LEN {
             return Err(BridgeError::Helper(format!(
                 "the request for the {} plugin '{name}' is {} bytes, over the {MAX_FRAME_LEN} byte limit",
@@ -159,8 +182,9 @@ impl Bridge {
             } else {
                 why.clone()
             };
+            let why = BridgeError::Helper(why);
             *state = State::Dead(why.clone());
-            return Err(BridgeError::Helper(why));
+            return Err(why);
         }
         outcome
     }
@@ -318,9 +342,10 @@ while True:
     fn a_helper_that_cannot_start_names_why_on_every_call() {
         let bridge = Bridge::with_start(Box::new(|| anyhow::bail!("no ansible-core")));
         let err = ask(&bridge).unwrap_err();
+        assert_eq!(err, BridgeError::Start("no ansible-core".into()));
         assert_eq!(
-            err,
-            BridgeError::Helper("the Python helper could not start: no ansible-core".into())
+            err.to_string(),
+            "the Python helper could not start: no ansible-core"
         );
         assert_eq!(ask(&bridge), Err(err));
     }

@@ -1585,6 +1585,16 @@ pub(super) fn step_tasks(
     out
 }
 
+/// The name the reference gives a task's action in its messages: a builtin by its resolved
+/// FQCN, a collection's by the name the task wrote.
+pub(super) fn action_fqcn(module: &str) -> String {
+    if crate::python::is_resolved_name(module) {
+        module.to_string()
+    } else {
+        format!("ansible.builtin.{}", short_name(module))
+    }
+}
+
 /// What each item of a task reports when its module's string argument left words that are not
 /// `key=value`, the module not reading it as a command line or as raw parameters.
 ///
@@ -1601,11 +1611,7 @@ pub(super) fn step_tasks(
 pub(super) fn raw_params_refusal(task: &PlayTask) -> Option<TaskResult> {
     crate::playbook::stray_raw_params(task)
         .filter(|raw| !crate::playbook::possibly_all_template(raw))?;
-    let action = if crate::python::is_resolved_name(&task.module) {
-        task.module.clone()
-    } else {
-        format!("ansible.builtin.{}", short_name(&task.module))
-    };
+    let action = action_fqcn(&task.module);
     let mut r = Map::new();
     r.insert("changed".into(), json!(false));
     r.insert("exception".into(), json!("(traceback unavailable)"));

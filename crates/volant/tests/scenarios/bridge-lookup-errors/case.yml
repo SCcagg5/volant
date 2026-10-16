@@ -1,0 +1,7 @@
+# A lookup plugin that raises fails the task in the reference's words, and `errors` turns the
+# failure into a warning or nothing.
+runs:
+  - args: [-i, inv.ini, fails.yml]
+  - args: [-i, inv.ini, ignored.yml]
+  - args: [-i, inv.ini, warned.yml]
+needs: ["ansible-core"]

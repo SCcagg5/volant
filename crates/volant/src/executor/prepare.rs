@@ -21,6 +21,11 @@ use crate::vars::{HostVars, Scope, VarStore, host_setting, omit_token};
 use super::as_bool_value;
 use super::coordinator::Progress;
 
+/// The head of a task whose arguments a plugin failed to render, then the action in quotes:
+/// `Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value
+/// for 'msg': The lookup plugin 'x' failed: …`, measured on ansible-core 2.19.12.
+pub(super) const FINALIZING: &str = "Finalization of task args for ";
+
 /// Everything a host driver needs about the play, shared read-only.
 pub(super) struct PlayPlan {
     /// The play flattened into numbered steps, with the block spans that say where each one
@@ -524,7 +529,17 @@ pub(super) fn prepare(
             } else {
                 std::borrow::Cow::Borrowed(&task.args)
             };
-            let (map, untrusted) = templar.render_map_tainted(&raw, &vars)?;
+            let (map, untrusted) = templar.render_map_tainted(&raw, &vars).map_err(|err| {
+                if err.0.starts_with(crate::template::RESOLVING) {
+                    TemplateError(format!(
+                        "{FINALIZING}'{}' failed: {}",
+                        super::run::action_fqcn(&task.module),
+                        err.0
+                    ))
+                } else {
+                    err
+                }
+            })?;
             let mut rendered = Value::Object(map);
             remove_omit(&mut rendered);
             let Value::Object(map) = rendered else {

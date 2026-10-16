@@ -4,6 +4,8 @@
 //! text, and the result is never itself rendered, unlike `Templar::render_in`'s extra passes over
 //! a task's arguments.
 
+use minijinja::machinery::WhitespaceConfig;
+
 use super::{Templar, TemplateError, Vars, context_of, convert_error, render_str};
 
 /// The `template` module's own options, as the reference reads them.
@@ -34,10 +36,8 @@ impl Default for FileRender {
 impl Templar {
     /// Renders a template file's text **once**, as the `template` module does: `render_str`, not
     /// `render_in`'s further passes, so a value read from a managed host lands in the output as
-    /// text and is never rendered a second time. A dedicated `Environment`, cloned from the
-    /// `Templar`'s own so it keeps every filter, test and lookup the engine has, carries the
-    /// file's own `trim_blocks`/`lstrip_blocks`; a render per task does not make cloning it worth
-    /// caching.
+    /// text and is never rendered a second time. The file's own `trim_blocks`/`lstrip_blocks`
+    /// are compile settings, so the `Templar`'s environment runs it unchanged.
     ///
     /// Two things ansible-core's own `template` action does after Jinja2 renders are reproduced
     /// here rather than left to minijinja, read from the reference's source
@@ -58,13 +58,15 @@ impl Templar {
         vars: impl Into<Vars<'a>>,
         options: &FileRender,
     ) -> Result<String, TemplateError> {
-        let mut env = self.env.clone();
-        env.set_trim_blocks(options.trim_blocks);
-        env.set_lstrip_blocks(options.lstrip_blocks);
+        let ws = WhitespaceConfig {
+            keep_trailing_newline: false,
+            lstrip_blocks: options.lstrip_blocks,
+            trim_blocks: options.trim_blocks,
+        };
         let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
         let (ctx, _tainted) = context_of(vars.into());
         let name = options.name.as_deref().unwrap_or("<string>");
-        let mut rendered = render_str(&env, name, &normalized, &ctx).map_err(convert_error)?;
+        let mut rendered = render_str(self, name, &normalized, &ctx, ws).map_err(convert_error)?;
         let wanted = trailing_newlines(text);
         let got = trailing_newlines(&rendered);
         if wanted > got {

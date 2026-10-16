@@ -2,11 +2,11 @@
 //! Jinja2 templating the way ansible-core 2.19 does it: strict about undefined variables, and a
 //! template that is one expression yields that expression's value, not its text.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
 use minijinja::functions::Function;
 use minijinja::machinery::{
@@ -18,6 +18,9 @@ use minijinja::value::{Enumerator, FunctionArgs, FunctionResult, Object, Rest, V
 use minijinja::{AutoEscape, Environment, ErrorKind, State, UndefinedBehavior};
 use serde_json::{Map, Value};
 
+use crate::bridge::{Bridge, PluginKind};
+
+mod bridged;
 mod file;
 mod filters;
 pub(crate) use filters::python_json;
@@ -25,12 +28,16 @@ mod lookups;
 mod tests;
 mod yaml_dump;
 
+pub use bridged::bridged_name;
 pub use file::FileRender;
 pub use lookups::supported as lookup_supported;
 
 /// Prefix of every error raised because a variable had no value, the one template failure
 /// Ansible treats as recoverable in places such as `vars_files`.
 const UNDEFINED: &str = "The task includes an option with an undefined variable.";
+
+/// What [`Templar::render_map_tainted`] puts before a plugin's failure, then the key in quotes.
+pub(crate) const RESOLVING: &str = "Error while resolving value for ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TemplateError(pub String);
@@ -67,9 +74,14 @@ pub(crate) const TAINT_KEY: &str = "volant::tainted";
 /// the root context, whose every read goes through `get_value` and taints as a bare read does.
 pub(crate) const CONTEXT_KEY: &str = "volant::context";
 
-/// The global every `~` is compiled to call, see [`route_concat`]. Unwritable in Jinja for the
+/// The global every `~` is compiled to call, see [`route_calls`]. Unwritable in Jinja for the
 /// same reason as `TAINT_KEY`, and `Context` answers nothing for it, so no variable shadows it.
 const CONCAT_KEY: &str = "volant::concat";
+
+/// The global a call to `query` or `q` is compiled to call, see [`route_calls`]. Not a global of
+/// either name: measured on ansible-core 2.19.12, `q is defined` is false on a host with no
+/// variable `q`.
+pub(crate) const QUERY_KEY: &str = "volant::query";
 
 #[derive(Debug)]
 pub(crate) struct TaintSink(pub(crate) Tainted);
@@ -167,7 +179,7 @@ impl Object for Context {
         let key = key.as_str()?;
         // Not a variable: the VM looks the root up before the globals, so a variable of that
         // name (`-e '{"volant::concat": 1}'`) would otherwise replace every `~`.
-        if key == CONCAT_KEY {
+        if key == CONCAT_KEY || key == QUERY_KEY {
             return None;
         }
         if key == TAINT_KEY {
@@ -292,26 +304,88 @@ fn context_of(vars: Vars<'_>) -> (minijinja::Value, Tainted) {
 }
 
 pub struct Templar {
-    env: Environment<'static>,
+    env: RwLock<Bridged>,
+    bridge: Option<Arc<Bridge>>,
+}
+
+/// The environment a render runs in, and the filter and test names already looked at.
+///
+/// A name the engine has no native implementation of is registered here, as a call to the
+/// Python helper, the first time a template uses it. The environment is replaced rather than
+/// changed under a render that holds it: a render keeps its own `Arc` and takes no lock, so a
+/// lookup rendering a template of its own never waits for itself.
+struct Bridged {
+    env: Arc<Environment<'static>>,
+    seen: HashSet<(PluginKind, String)>,
 }
 
 impl Templar {
-    /// `base_dir` anchors relative paths in lookups such as `lookup('file', ...)`.
+    /// `base_dir` anchors relative paths in lookups such as `lookup('file', ...)`. No Python
+    /// helper: a filter, test or lookup the engine lacks is unknown.
     pub fn new(base_dir: PathBuf) -> Self {
-        let mut env = Environment::new();
-        env.set_undefined_behavior(UndefinedBehavior::Strict);
-        // Strict mode refuses to print an undefined value, not a list or mapping holding one,
-        // which minijinja prints as `[undefined]`. Measured on ansible-core 2.19.12,
-        // `x {{ [nope] }}` is an undefined read.
-        env.set_formatter(|out, state, value| {
-            if !value.is_undefined() && holds_undefined(value) {
-                return Err(minijinja::Error::from(ErrorKind::UndefinedError));
+        Self::with_bridge(base_dir, None)
+    }
+
+    /// [`Templar::new`], sending what the engine lacks to `bridge`: a filter or test the engine
+    /// has no native implementation of, a lookup it does not run. A native name never reaches it.
+    pub fn with_bridge(base_dir: PathBuf, bridge: Option<Arc<Bridge>>) -> Self {
+        Self {
+            env: RwLock::new(Bridged {
+                env: Arc::new(environment(base_dir, bridge.as_ref())),
+                seen: HashSet::new(),
+            }),
+            bridge,
+        }
+    }
+
+    /// The environment as it stands.
+    pub(crate) fn env(&self) -> Arc<Environment<'static>> {
+        Arc::clone(&self.env.read().unwrap_or_else(PoisonError::into_inner).env)
+    }
+
+    /// The environment to run `code` in: [`Templar::env`], plus a call to the bridge under each
+    /// filter and test name `code` uses that the engine has no native implementation of.
+    fn env_for<'a, 's: 'a>(
+        &self,
+        code: impl IntoIterator<Item = &'a Instructions<'s>>,
+    ) -> Arc<Environment<'static>> {
+        let Some(bridge) = &self.bridge else {
+            return self.env();
+        };
+        let mut used = Vec::new();
+        for instructions in code {
+            let mut idx = 0;
+            while let Some(op) = instructions.get(idx) {
+                match op {
+                    Instruction::ApplyFilter(name, ..) => {
+                        used.push((PluginKind::Filter, bridged::normalized(name)));
+                    }
+                    Instruction::PerformTest(name, ..) => {
+                        used.push((PluginKind::Test, bridged::normalized(name)));
+                    }
+                    _ => {}
+                }
+                idx += 1;
             }
-            minijinja::escape_formatter(out, state, value)
-        });
-        filters::register(&mut env, base_dir);
-        env.add_function(CONCAT_KEY, concat);
-        Self { env }
+        }
+        {
+            let current = self.env.read().unwrap_or_else(PoisonError::into_inner);
+            if used.iter().all(|name| current.seen.contains(name)) {
+                return Arc::clone(&current.env);
+            }
+        }
+        let mut current = self.env.write().unwrap_or_else(PoisonError::into_inner);
+        let Bridged { env, seen } = &mut *current;
+        for (kind, name) in used {
+            if seen.contains(&(kind, name.clone())) {
+                continue;
+            }
+            if bridged::sendable_name(kind, &name) && !bridged::knows(env, kind, &name) {
+                bridged::register(Arc::make_mut(env), bridge, kind, &name);
+            }
+            seen.insert((kind, name));
+        }
+        Arc::clone(env)
     }
 
     pub fn is_template(text: &str) -> bool {
@@ -370,7 +444,7 @@ impl Templar {
         if let Some(expr) = single_expression(text) {
             return self.evaluate_in(expr, ctx);
         }
-        render_str(&self.env, "<string>", text, ctx)
+        render_str(self, "<string>", text, ctx, WhitespaceConfig::default())
             .map(Value::String)
             .map_err(convert_error)
     }
@@ -417,10 +491,19 @@ impl Templar {
         let mut untrusted = BTreeSet::new();
         for (key, value) in map {
             let mut any = false;
-            out.insert(
-                key.clone(),
-                self.render_value_in(value, &ctx, &tainted, &mut any)?,
-            );
+            let rendered = self
+                .render_value_in(value, &ctx, &tainted, &mut any)
+                .map_err(|err| {
+                    // Measured on ansible-core 2.19.12: a plugin's failure names the value it
+                    // was resolving, `Error while resolving value for 'msg': The lookup plugin
+                    // 'x' failed: …`.
+                    if bridged::is_plugin_failure(&err.0) {
+                        TemplateError(format!("{RESOLVING}'{key}': {}", err.0))
+                    } else {
+                        err
+                    }
+                })?;
+            out.insert(key.clone(), rendered);
             if any {
                 untrusted.insert(key.clone());
             }
@@ -470,7 +553,7 @@ impl Templar {
     }
 
     fn evaluate_in(&self, expr: &str, ctx: &minijinja::Value) -> Result<Value, TemplateError> {
-        let value = eval_expr(&self.env, expr, ctx).map_err(convert_error)?;
+        let value = eval_expr(self, expr, ctx).map_err(convert_error)?;
         // Strict mode only raises on operations that force an undefined value (printing,
         // comparing, ...); an attribute lookup that never gets used stays a lazy Undefined, alone
         // or inside a list or mapping, that serde_json would otherwise turn into `null`. Force
@@ -620,6 +703,25 @@ impl Templar {
 }
 
 /// Whether any string inside a value still carries a template marker.
+/// The engine's environment: minijinja's, strict about undefined values, with every filter,
+/// test and lookup of the engine; the lookups the engine lacks go to `bridge`.
+fn environment(base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) -> Environment<'static> {
+    let mut env = Environment::new();
+    env.set_undefined_behavior(UndefinedBehavior::Strict);
+    // Strict mode refuses to print an undefined value, not a list or mapping holding one,
+    // which minijinja prints as `[undefined]`. Measured on ansible-core 2.19.12,
+    // `x {{ [nope] }}` is an undefined read.
+    env.set_formatter(|out, state, value| {
+        if !value.is_undefined() && holds_undefined(value) {
+            return Err(minijinja::Error::from(ErrorKind::UndefinedError));
+        }
+        minijinja::escape_formatter(out, state, value)
+    });
+    filters::register(&mut env, base_dir, bridge);
+    env.add_function(CONCAT_KEY, concat);
+    env
+}
+
 fn holds_template(value: &Value) -> bool {
     match value {
         Value::String(s) => Templar::is_template(s),
@@ -827,46 +929,50 @@ fn concat(
     Ok(minijinja::Value::from(format!("{left}{right}")))
 }
 
-/// Replaces each `~` in compiled code by a call to [`concat()`]. minijinja evaluates `~` in its VM
-/// with no hook, and its syntax tree cannot be rewritten in place, so the swap happens on the
-/// bytecode: the concatenation instruction and a two-argument call take the same two operands
-/// off the stack in the same order, so every jump target stays where it was.
-fn route_concat(instructions: &mut Instructions<'_>) {
+/// Replaces each `~` in compiled code by a call to [`concat()`], and each call to `query` or `q`
+/// by a call to [`QUERY_KEY`]. minijinja evaluates `~` in its VM with no hook, and its syntax tree
+/// cannot be rewritten in place, so the swap happens on the bytecode: the concatenation
+/// instruction and a two-argument call take the same two operands off the stack in the same
+/// order, and a call keeps its own, so every jump target stays where it was.
+fn route_calls(instructions: &mut Instructions<'_>) {
     let mut idx = 0;
     while let Some(op) = instructions.get_mut(idx) {
-        if matches!(op, Instruction::StringConcat) {
-            *op = Instruction::CallFunction(CONCAT_KEY, Some(2));
+        match op {
+            Instruction::StringConcat => *op = Instruction::CallFunction(CONCAT_KEY, Some(2)),
+            Instruction::CallFunction(name, args) if matches!(*name, "query" | "q") => {
+                *op = Instruction::CallFunction(QUERY_KEY, *args);
+            }
+            _ => {}
         }
         idx += 1;
     }
 }
 
 /// `env.render_named_str`, with `~` routed through [`concat()`]. Compiled once per call, as
-/// `render_named_str` does, with the environment's own whitespace settings. The only place
-/// that decides auto-escape and syntax: `Environment` has no getter for either, so a setting
-/// changed on the environment does not reach here and has to be made here.
+/// `render_named_str` does, with the whitespace settings given. The only place that decides
+/// auto-escape and syntax. The environment is the templar's, with the filters and tests the
+/// compiled code calls that only the Python helper has ([`Templar::env_for`]).
 fn render_str(
-    env: &Environment<'_>,
+    templar: &Templar,
     name: &str,
     source: &str,
     ctx: &minijinja::Value,
+    ws_config: WhitespaceConfig,
 ) -> Result<String, minijinja::Error> {
     let config = TemplateConfig {
         syntax_config: SyntaxConfig,
-        ws_config: WhitespaceConfig {
-            keep_trailing_newline: env.keep_trailing_newline(),
-            lstrip_blocks: env.lstrip_blocks(),
-            trim_blocks: env.trim_blocks(),
-        },
+        ws_config,
         // Never by file name: measured on ansible-core 2.19.12, `index.html.j2` holding
         // `{{ "<b>" }}` writes `<b>`.
         default_auto_escape: Arc::new(|_| AutoEscape::None),
     };
     let mut compiled = CompiledTemplate::new(name, source, &config)?;
-    route_concat(&mut compiled.instructions);
-    compiled.blocks.values_mut().for_each(route_concat);
+    route_calls(&mut compiled.instructions);
+    compiled.blocks.values_mut().for_each(route_calls);
+    let env =
+        templar.env_for(std::iter::once(&compiled.instructions).chain(compiled.blocks.values()));
     let mut out = String::with_capacity(compiled.buffer_size_hint);
-    Vm::new(env).eval(
+    Vm::new(&env).eval(
         &compiled.instructions,
         ctx.clone(),
         &compiled.blocks,
@@ -878,7 +984,7 @@ fn render_str(
 
 /// `env.compile_expression(expr)?.eval(ctx)`, with `~` routed through [`concat()`].
 fn eval_expr(
-    env: &Environment<'_>,
+    templar: &Templar,
     expr: &str,
     ctx: &minijinja::Value,
 ) -> Result<minijinja::Value, minijinja::Error> {
@@ -886,9 +992,10 @@ fn eval_expr(
     let mut codegen = CodeGenerator::new("<expression>", expr);
     codegen.compile_expr(&ast);
     let (mut instructions, _) = codegen.finish();
-    route_concat(&mut instructions);
+    route_calls(&mut instructions);
+    let env = templar.env_for([&instructions]);
     let mut out = String::new();
-    let (value, _) = Vm::new(env).eval(
+    let (value, _) = Vm::new(&env).eval(
         &instructions,
         ctx.clone(),
         &BTreeMap::new(),
@@ -910,6 +1017,10 @@ fn convert_error(err: minijinja::Error) -> TemplateError {
         });
     if undefined_operand {
         return convert_error(minijinja::Error::from(ErrorKind::UndefinedError));
+    }
+    // A bridged call's failure is worded in full where it is raised, as the reference words it.
+    if let Some(said) = bridged::said(&err) {
+        return TemplateError(said.to_string());
     }
     let text = err.to_string();
     if err.kind() == ErrorKind::UndefinedError {
@@ -1075,7 +1186,7 @@ mod unit {
             }
             {
                 let bare = format!("{:?}", Environment::new());
-                let ours = format!("{:?}", templar().env);
+                let ours = format!("{:?}", templar().env());
                 let names = |debug: &str, field: &str| -> Vec<String> {
                     let start = debug.find(&format!("{field}: [")).expect(field) + field.len() + 3;
                     let end = start + debug[start..].find(']').expect(field);
@@ -1576,5 +1687,110 @@ mod unit {
         ] {
             assert_eq!(t.render(text, &vars), Ok(want), "{text}");
         }
+    }
+
+    /// A bridge whose helper `start` gives, and the count of its starts.
+    fn bridged_templar(
+        start: fn() -> anyhow::Result<crate::python::PythonBuilder>,
+    ) -> (Templar, Arc<std::sync::atomic::AtomicUsize>) {
+        let starts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = Arc::clone(&starts);
+        let bridge = Bridge::with_start(Box::new(move || {
+            counted.fetch_add(1, Ordering::SeqCst);
+            start()
+        }));
+        (
+            Templar::with_bridge(PathBuf::from("."), Some(bridge)),
+            starts,
+        )
+    }
+
+    fn no_helper() -> anyhow::Result<crate::python::PythonBuilder> {
+        anyhow::bail!("no ansible-core here")
+    }
+
+    fn dying_helper() -> anyhow::Result<crate::python::PythonBuilder> {
+        crate::python::PythonBuilder::spawn("python3", &["-c", "import sys; sys.exit(3)"], &[])
+    }
+
+    /// A native name never starts the helper; what the engine lacks goes to it, or fails naming it.
+    #[rstest::rstest]
+    #[case::k3s_ipwrap_stays_native("{{ '::1' | ansible.utils.ipwrap }}", Ok(json!("[::1]")), 0)]
+    #[case::qualified_lookup_stays_native("{{ lookup('ansible.builtin.vars', 'x') }}", Ok(json!(1)), 0)]
+    #[case::qualified_builtin_stays_native("{{ [1] | ansible.builtin.length }}", Ok(json!(1)), 0)]
+    #[case::native_test("{{ 'a' is ansible.builtin.string }}", Ok(json!(true)), 0)]
+    #[case::native_lookup("{{ query('vars', 'x') }}", Ok(json!([1])), 0)]
+    #[case::vault_is_never_sent(
+        "{{ 'x' | vault('s') }}",
+        Err("unknown filter: filter vault is unknown (in <expression>:1)"),
+        0
+    )]
+    #[case::unvault_is_never_sent(
+        "{{ lookup('unvault', 'f') }}",
+        Err("invalid operation: lookup plugin (unvault) is not available yet (in <expression>:1)"),
+        0
+    )]
+    #[case::undefined_input_still_resolves_the_name(
+        "{{ nope | community.general.dict_kv('k') | default('d') }}",
+        Err(
+            "filter 'community.general.dict_kv' needs the Python helper, which could not start: no ansible-core here"
+        ),
+        1
+    )]
+    #[case::jinja_object_is_refused(
+        "{% macro m() %}{% endmacro %}{{ m | community.general.dict_kv('k') }}",
+        Err(
+            "filter 'community.general.dict_kv' was given a Jinja object, which cannot be sent to the Python helper"
+        ),
+        0
+    )]
+    #[case::a_filter(
+        "{{ 'v' | community.general.dict_kv('k') }}",
+        Err(
+            "filter 'community.general.dict_kv' needs the Python helper, which could not start: no ansible-core here"
+        ),
+        1
+    )]
+    #[case::a_test(
+        "{{ 'a' is ansible.builtin.abs }}",
+        Err(
+            "test 'ansible.builtin.abs' needs the Python helper, which could not start: no ansible-core here"
+        ),
+        1
+    )]
+    #[case::a_lookup(
+        "{{ q('sequence', 'end=3') }}",
+        Err(
+            "lookup 'sequence' needs the Python helper, which could not start: no ansible-core here"
+        ),
+        1
+    )]
+    fn a_name_the_engine_lacks_goes_to_the_python_helper(
+        #[case] text: &str,
+        #[case] want: Result<Value, &str>,
+        #[case] starts: usize,
+    ) {
+        let (t, started) = bridged_templar(no_helper);
+        let vars = vars(json!({"x": 1}));
+        assert_eq!(
+            t.render(text, &vars),
+            want.map_err(|e| TemplateError(e.into())),
+            "{text}"
+        );
+        assert_eq!(started.load(Ordering::SeqCst), starts, "{text}");
+    }
+
+    #[test]
+    fn a_helper_that_dies_fails_the_render_and_every_later_one() {
+        let (t, _) = bridged_templar(dying_helper);
+        let text = "{{ 'v' | community.general.dict_kv('k') }}";
+        let first = t.render(text, &Map::new()).unwrap_err();
+        assert!(
+            first.0.starts_with(
+                "filter 'community.general.dict_kv' needs the Python helper, which failed: the Python helper exited"
+            ),
+            "{first}"
+        );
+        assert_eq!(t.render(text, &Map::new()), Err(first));
     }
 }

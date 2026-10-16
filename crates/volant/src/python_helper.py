@@ -557,7 +557,8 @@ def call(request):
     if not CALL_NAME.match(name):
         return {"error": missing}
     args = request["args"]
-    if kind != "lookup" and not args:
+    resolve_only = request.get("resolve_only", False)
+    if kind != "lookup" and not args and not resolve_only:
         return {"error": {"kind": "plugin", "message": "a %s needs the value it is given" % kind}}
     expression = EXPRESSIONS[kind] if kind == "lookup" else EXPRESSIONS[kind] % name
     try:
@@ -566,6 +567,10 @@ def call(request):
         # load error of a broken plugin file: both are answered below like a failed call.
         if kind != "lookup" and name not in getattr(templar.environment, kind + "s"):
             return {"error": missing}
+        # Whether the plugin exists, for a call the controller does not make because a value it
+        # would be given is undefined: ansible-core resolves the name before it looks at those.
+        if resolve_only:
+            return {"value": None}
         value = templar.evaluate_expression(
             trust_as_template(expression),
             local_variables={

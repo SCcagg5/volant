@@ -1,0 +1,4 @@
+# A filter from the playbook's filter_plugins that raises fails the task in the reference's
+# words.
+args: [-i, inv.ini, filter.yml]
+needs: ["ansible-core"]

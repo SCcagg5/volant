@@ -15,7 +15,11 @@ use volant_protocol::encoding::{b64_decode, b64_encode, sha1_hex};
 use super::truthy;
 use super::{add_filter, add_test, add_text_filter};
 
-pub fn register(env: &mut Environment<'static>, base_dir: PathBuf) {
+pub fn register(
+    env: &mut Environment<'static>,
+    base_dir: PathBuf,
+    bridge: Option<&std::sync::Arc<crate::bridge::Bridge>>,
+) {
     // minijinja's own filters and tests, registered again so that an undefined input stays
     // undefined through them as well (see `add_filter`), and so that they answer under
     // `ansible.builtin.` the way the reference's Jinja builtins do (`[1] | ansible.builtin.length`
@@ -184,7 +188,7 @@ pub fn register(env: &mut Environment<'static>, base_dir: PathBuf) {
         seq.try_iter().is_ok_and(|mut it| it.any(|x| x == item))
     });
 
-    super::lookups::register(env, base_dir);
+    super::lookups::register(env, base_dir, bridge);
 
     // Python's `str` and `dict` methods (`.split()`, `.startswith()`, `.keys()`...), which real
     // roles call on values. Anything neither `pycompat` nor this engine has must still fail by
