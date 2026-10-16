@@ -1825,6 +1825,27 @@ pub(super) async fn drive_host(
                 &options,
             )
             .await;
+            // `wait_for_connection` is for a host that may be down: it runs over a link that is
+            // already lost, and its own loop reports the connection error, as the reference's
+            // does, rather than the host being unreachable from the first connect.
+            let connected = match connected {
+                Err(ConnectError::Unreachable(_))
+                    if crate::action_plugins::waits_for_connection(
+                        &c.steps[batch[0].0].task.module,
+                    ) =>
+                {
+                    match AgentLink::dead() {
+                        Ok(dead) => {
+                            links.insert(key.clone(), dead);
+                            // Not proved alive: the next batch handshakes again.
+                            checked.remove(&key);
+                            Ok(links.get_mut(&key).expect("inserted just above"))
+                        }
+                        Err(err) => Err(ConnectError::Unreachable(err.to_string())),
+                    }
+                }
+                other => other,
+            };
             options
                 .profile
                 .phase(Some(&name), Phase::Connect, micros(connecting));
@@ -2116,7 +2137,12 @@ pub(super) async fn drive_host(
                     };
                     stopped = driver.pause_for(pause, owed).await.is_none();
                 }
-                links.insert(key.clone(), owned);
+                // The stand-in for a host that never answered is not kept: the next batch connects.
+                if owned.is_stand_in() {
+                    tokio::spawn(owned.shutdown());
+                } else {
+                    links.insert(key.clone(), owned);
+                }
                 if stopped {
                     if let Some(link) = links.get_mut(&key) {
                         file_timings(
