@@ -1,0 +1,48 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    ansible_async_dir: "{{ playbook_dir }}/jobs"
+  tasks:
+    # Looked at three seconds before it ends and three seconds after.
+    - name: polled twice
+      command: sleep 9
+      async: 30
+      poll: 6
+      register: r
+
+    - debug: var=r
+
+    - name: the status file is removed once the job is read
+      shell: test -e {{ r.results_file }} && echo kept || echo removed
+      register: kept
+
+    - debug: var=kept.stdout
+
+    - name: a failing job
+      command: "false"
+      async: 30
+      poll: 3
+      register: f
+      ignore_errors: true
+
+    - debug: var=f.msg
+
+    # Killed at two seconds, its status written at three, looked at after six.
+    - name: a job killed at its limit
+      command: sleep 30
+      async: 2
+      poll: 6
+      register: t
+      ignore_errors: true
+
+    - debug: var=t
+
+    # A limit of 7 is killed at 10 and written at 11; the one look is at 7.
+    - name: a job the controller stops waiting for
+      command: sleep 30
+      async: 7
+      poll: 7
+      register: n
+      ignore_errors: true
+
+    - debug: var=n.msg
