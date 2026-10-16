@@ -266,8 +266,8 @@ impl Bridged {
                 Ok((step, Pending::Module))
             }
             // The command goes over the task's link, which is the escalated one when the task
-            // escalates: a command the plugin marks as not to escalate is its temporary
-            // directory's housekeeping, and the directory is that link's own.
+            // escalates. A `sudoable=False` command (the plugin's housekeeping) also goes over
+            // it: there is no unescalated link inside the plugin loop.
             Ask::Command { cmd, stdin, .. } => {
                 if stdin.is_some() {
                     return Err(Reply::Error(
@@ -587,5 +587,36 @@ mod tests {
             Reply::Value(json!({"ping": "pong"}))
         );
         assert!(matches!(step, Step::RunDropping(_)), "{step:?}");
+    }
+
+    /// A command the plugin marks as not to escalate still runs, over the task link (the escalated one under `become`).
+    #[test]
+    fn a_command_that_must_not_escalate_runs_over_the_task_link() {
+        let (_, asks) = channel();
+        let (replies, _) = channel();
+        let mut plugin = Bridged {
+            name: "script",
+            modules: &[],
+            hostvars: Arc::default(),
+            asks,
+            replies: Some(replies),
+            ready: Arc::new(Notify::new()),
+            pending: None,
+            tmps: Vec::new(),
+            ending: None,
+            timeout: None,
+            deadline: Instant::now() + Duration::from_secs(600),
+            stale: false,
+            connect_timeout: Duration::from_secs(5),
+        };
+        let ask = Ask::Command {
+            cmd: "true".into(),
+            stdin: None,
+            sudoable: false,
+        };
+        let Ok((Step::Run(sub), Pending::Command)) = plugin.step_for(ask) else {
+            panic!("the command should become a sub-task");
+        };
+        assert_eq!(sub.module, "raw");
     }
 }
