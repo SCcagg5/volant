@@ -61,6 +61,58 @@ pub(crate) enum Kind {
     Bridged(&'static str),
 }
 
+/// What the controller's ansible-core resolved about the names a collection serves through an
+/// action plugin: the plugin each task name runs, and the modules a plugin may run, which the
+/// union holds. Names are leaked once, so [`Kind`] stays `Copy`: the sets are as large as the
+/// distinct collection plugins a run names.
+struct Collection {
+    action: BTreeMap<&'static str, &'static str>,
+    modules: BTreeMap<&'static str, &'static [&'static str]>,
+}
+
+fn collection_actions() -> std::sync::MutexGuard<'static, Collection> {
+    static NAMES: std::sync::Mutex<Collection> = std::sync::Mutex::new(Collection {
+        action: BTreeMap::new(),
+        modules: BTreeMap::new(),
+    });
+    NAMES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn leak(text: &str) -> &'static str {
+    Box::leak(text.to_string().into_boxed_str())
+}
+
+/// Records that `name` (a collection's module or action plugin, as a task spells it) runs the
+/// action plugin `action` in the Python helper, as ansible-core's own. `with_module` says the
+/// module of that name exists and goes in the union, for a plugin that runs it.
+pub(crate) fn note_collection_action(name: &str, action: &str, with_module: bool) {
+    let mut known = collection_actions();
+    if known.action.contains_key(name) {
+        return;
+    }
+    let (name, action) = (leak(name), leak(action));
+    known.action.insert(name, action);
+    if with_module {
+        let mut held: Vec<&'static str> =
+            known.modules.get(action).copied().unwrap_or(&[]).to_vec();
+        held.push(name);
+        known
+            .modules
+            .insert(action, Box::leak(held.into_boxed_slice()));
+    }
+}
+
+/// Whether the parity page holds this collection plugin or module back for a later release: it
+/// needs Windows or a network device's connection. `later_actions.txt` is written from the same
+/// data (`tests/parity/reference.json`), and `parity.rs` checks it.
+pub(crate) fn waits_for_later(name: &str) -> bool {
+    include_str!("../later_actions.txt")
+        .lines()
+        .any(|line| line == name)
+}
+
 /// The plugin this release runs for a module name, read as the builtin registry reads one.
 ///
 /// Gated on [`ACTION_PLUGINS`], the list the modules page is built from, so a name this match
@@ -68,7 +120,11 @@ pub(crate) enum Kind {
 pub(crate) fn kind(module: &str) -> Option<Kind> {
     let short = short_name(module);
     if !builtin_spelling(module) {
-        return None;
+        return collection_actions()
+            .action
+            .get(module)
+            .copied()
+            .map(Kind::Bridged);
     }
     let (name, _) = ACTION_PLUGINS.iter().find(|(name, _)| *name == short)?;
     match short {
@@ -112,7 +168,11 @@ pub(crate) fn modules_for(kind: Kind) -> &'static [&'static str] {
         Kind::Bridged("gather_facts") => &["setup"],
         Kind::Bridged("uri") => &["uri"],
         Kind::Bridged("wait_for_connection") => &["ping"],
-        Kind::Bridged(_) => &[],
+        Kind::Bridged(name) => collection_actions()
+            .modules
+            .get(name)
+            .copied()
+            .unwrap_or(&[]),
     }
 }
 
@@ -348,6 +408,9 @@ mod tests {
         assert_eq!(kind("community.general.unarchive"), None);
         assert_eq!(kind("ansible.builtin.fetch"), Some(Kind::Fetch));
         assert_eq!(kind("community.general.fetch"), None);
+        assert_eq!(kind("ns.coll.shutdown"), None);
+        note_collection_action("ns.coll.shutdown", "ns.coll.act", false);
+        assert_eq!(kind("ns.coll.shutdown"), Some(Kind::Bridged("ns.coll.act")));
         assert_eq!(kind("ansible.builtin.reboot"), Some(Kind::Reboot));
         assert_eq!(kind("community.general.reboot"), None);
     }
