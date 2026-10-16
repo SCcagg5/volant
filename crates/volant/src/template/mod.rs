@@ -552,6 +552,18 @@ impl Templar {
         self.evaluate_in(expr, &context_of(vars.into()).0)
     }
 
+    /// `evaluate`, and whether the value is data: a lookup read a file, a command or the
+    /// environment, or the expression read a name that came from a managed host.
+    pub fn evaluate_tainted<'a>(
+        &self,
+        expr: &str,
+        vars: impl Into<Vars<'a>>,
+    ) -> Result<(Value, bool), TemplateError> {
+        let (ctx, tainted) = context_of(vars.into());
+        let value = self.evaluate_in(expr, &ctx)?;
+        Ok((value, tainted.load(Ordering::Relaxed)))
+    }
+
     fn evaluate_in(&self, expr: &str, ctx: &minijinja::Value) -> Result<Value, TemplateError> {
         let value = eval_expr(self, expr, ctx).map_err(convert_error)?;
         // Strict mode only raises on operations that force an undefined value (printing,
@@ -599,6 +611,13 @@ impl Templar {
         // from that pass on and the passes after this one leave it alone.
         let mut untrusted = given();
         let mut current = vars.map.clone();
+        // What `!unsafe` loaded as is text from here on: a sibling that reads it must see the
+        // text, not the wrapper, and the name is data so no pass renders it.
+        for (k, v) in &mut current {
+            if !untrusted.contains(k) && unwrap_unsafe(v) {
+                untrusted.insert(k.clone());
+            }
+        }
         for _ in 0..5 {
             // One context for the whole pass: every value of the map renders against the same
             // map, so building it per value paid for the same conversion once per variable.
@@ -702,7 +721,6 @@ impl Templar {
     }
 }
 
-/// Whether any string inside a value still carries a template marker.
 /// The engine's environment: minijinja's, strict about undefined values, with every filter,
 /// test and lookup of the engine; the lookups the engine lacks go to `bridge`.
 fn environment(base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) -> Environment<'static> {
@@ -722,6 +740,17 @@ fn environment(base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) -> Environment<'
     env
 }
 
+/// Replaces every `!unsafe` wrapper inside `value` by its text; whether there was one.
+fn unwrap_unsafe(value: &mut Value) -> bool {
+    match value {
+        Value::String(s) => crate::yaml::unsafe_text(s).map(|t| *s = t).is_some(),
+        Value::Array(items) => items.iter_mut().fold(false, |a, v| unwrap_unsafe(v) | a),
+        Value::Object(map) => map.values_mut().fold(false, |a, v| unwrap_unsafe(v) | a),
+        _ => false,
+    }
+}
+
+/// Whether any string inside a value still carries a template marker.
 fn holds_template(value: &Value) -> bool {
     match value {
         Value::String(s) => Templar::is_template(s),

@@ -6,6 +6,7 @@ use std::fmt;
 use std::path::Path;
 
 use anyhow::Context;
+use regex::Regex;
 use serde_json::Value;
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -64,6 +65,19 @@ impl Inventory {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("reading inventory {}", path.display()))?;
         Self::parse_ini(&text).with_context(|| format!("parsing inventory {}", path.display()))
+    }
+
+    /// An inventory holding the groups `groups` lists, in that order, and `all`'s hosts in the
+    /// order it gives them: what `lookup('inventory_hostnames')` matches a pattern against.
+    pub fn from_groups(groups: &BTreeMap<String, Vec<String>>) -> Self {
+        let mut inv = Inventory::default();
+        for name in groups.get("all").into_iter().flatten() {
+            inv.add_host(name, BTreeMap::new());
+        }
+        for (name, hosts) in groups {
+            inv.group_mut(name).hosts.clone_from(hosts);
+        }
+        inv
     }
 
     pub fn parse_ini(text: &str) -> Result<Self, InventoryError> {
@@ -223,14 +237,23 @@ impl Inventory {
         if let Some(g) = self.group(term) {
             return self.group_hosts(g);
         }
-        if term.contains(['*', '?', '[']) {
+        // `~regex` is matched from the start of the name (`re.match`), hosts first, then groups.
+        let regex = term
+            .strip_prefix('~')
+            .map(|r| Regex::new(&format!("^(?:{r})")));
+        if regex.is_some() || term.contains(['*', '?', '[']) {
+            let matches = |name: &str| match &regex {
+                Some(Ok(re)) => re.is_match(name),
+                Some(Err(_)) => false,
+                None => glob_match(term, name),
+            };
             let mut out: Vec<String> = self
                 .hosts
                 .iter()
                 .map(|h| h.name.clone())
-                .filter(|h| glob_match(term, h))
+                .filter(|h| matches(h))
                 .collect();
-            for g in self.groups.iter().filter(|g| glob_match(term, &g.name)) {
+            for g in self.groups.iter().filter(|g| matches(&g.name)) {
                 for h in self.group_hosts(g) {
                     if !out.contains(&h) {
                         out.push(h);
@@ -884,6 +907,9 @@ env=prod
     #[case::colon_only(":", &[])]
     #[case::host_wildcard("w*b1", &["web1"])]
     #[case::group_wildcard("pro*", &["web1", "web2", "db1"])]
+    #[case::regex_host("~w.*1", &["web1"])]
+    #[case::regex_group("~pro", &["web1", "web2", "db1"])]
+    #[case::regex_is_anchored_at_the_start("~b1", &[])]
     #[case::index("web[0]", &["web1"])]
     #[case::negative_index("web[-1]", &["web2"])]
     #[case::slice("web[0:1]", &["web1", "web2"])]
