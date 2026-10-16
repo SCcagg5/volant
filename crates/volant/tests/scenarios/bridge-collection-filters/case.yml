@@ -1,4 +1,4 @@
-# Collection filters given an undefined value, omit and what a host printed: the plugin never
-# sees the undefined value, and its answer is data.
+# Collection filters given an undefined value, omit, an !unsafe value and what a host
+# printed: the plugin never sees the undefined value, and its answer is data.
 args: [-i, inv.ini, collection.yml]
 needs: ["ansible-core"]
