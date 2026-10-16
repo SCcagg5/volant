@@ -34,18 +34,32 @@ pub fn bridged_name(kind: PluginKind, name: &str) -> bool {
         LazyLock::new(|| super::environment(PathBuf::from("."), None));
     sendable_name(kind, name)
         && match kind {
-            PluginKind::Lookup => !super::lookups::supported(name),
+            PluginKind::Lookup => !super::lookups::supported(short(name)),
             PluginKind::Filter | PluginKind::Test => !knows(&NATIVE, kind, name),
         }
 }
 
 /// Whether `name` may be sent to the helper at all.
 pub(super) fn sendable_name(kind: PluginKind, name: &str) -> bool {
-    let short = name
-        .strip_prefix("ansible.builtin.")
+    !NOT_SENT.contains(&(kind, short(name)))
+}
+
+/// `name` without the `ansible.builtin.` or `ansible.legacy.` the reference accepts on its own.
+pub(super) fn short(name: &str) -> &str {
+    name.strip_prefix("ansible.builtin.")
         .or_else(|| name.strip_prefix("ansible.legacy."))
-        .unwrap_or(name);
-    !NOT_SENT.contains(&(kind, short))
+        .unwrap_or(name)
+}
+
+/// Whether `text` reads as a plugin name, `word` or `word.word...`. Only such a string is ever
+/// put into a probe expression ([`knows`]).
+pub(super) fn is_name(text: &str) -> bool {
+    text.split('.').all(|part| {
+        part.chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    })
 }
 
 /// A filter or test name as minijinja looks it up: `a | b . c` calls `b.c`.
@@ -70,7 +84,7 @@ pub(super) fn knows(env: &Environment<'_>, kind: PluginKind, name: &str) -> bool
 /// Registers `name` in `env` as a call to the helper.
 ///
 /// An undefined argument is not sent, as `_invoke_plugin` sends none to a plugin: once the name
-/// is known to exist, a filter's result is undefined, a test fails as an undefined read.
+/// is not known to be missing, a filter's result is undefined, a test fails as an undefined read.
 pub(super) fn register(
     env: &mut Environment<'static>,
     bridge: &Arc<Bridge>,
@@ -84,10 +98,13 @@ pub(super) fn register(
         if super::any_undefined(&args) {
             // The name is resolved first, as ansible-core resolves it: a filter it does not
             // know fails even on an undefined value.
-            resolved
-                .get_or_init(|| bridge.resolve(kind, &owned))
-                .clone()
-                .map_err(|err| failed(kind, &owned, err))?;
+            // Only an answer that it does not exist fails here: with no helper to ask, the value
+            // stays undefined, so `nope | x | default(...)` still answers.
+            if let Err(err @ BridgeError::NotFound(_)) =
+                resolved.get_or_init(|| bridge.resolve(kind, &owned))
+            {
+                return Err(failed(kind, &owned, err.clone()));
+            }
             return match kind {
                 PluginKind::Filter => Ok(Value::UNDEFINED),
                 PluginKind::Test | PluginKind::Lookup => {

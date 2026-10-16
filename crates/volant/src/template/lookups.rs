@@ -25,6 +25,11 @@ pub fn register(env: &mut Environment<'static>, base_dir: PathBuf, bridge: Optio
         if undefined_option || terms.iter().any(super::holds_undefined) {
             return Err(Error::from(ErrorKind::UndefinedError));
         }
+        // `ansible.legacy.env` is the engine's `env`, as the reference resolves it.
+        let name = match name.strip_prefix("ansible.legacy.") {
+            Some(short) if supported(short) => short.to_string(),
+            _ => name,
+        };
         if let Some(bridge) = &bridge
             && super::bridged_name(PluginKind::Lookup, &name)
         {

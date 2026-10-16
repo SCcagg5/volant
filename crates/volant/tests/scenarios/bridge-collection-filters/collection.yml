@@ -32,3 +32,6 @@
     - name: ipaddr of an unsafe value
       debug:
         msg: "{{ [uns, '10.0.0.1'] | ansible.utils.ipaddr }}"
+    - name: dict_kv named by map
+      debug:
+        msg: "{{ ['v', 'w'] | map('community.general.dict_kv', 'k') | list }}"

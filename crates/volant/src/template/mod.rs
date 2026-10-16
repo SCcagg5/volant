@@ -354,18 +354,41 @@ impl Templar {
         };
         let mut used = Vec::new();
         for instructions in code {
+            // `map('f')`, `select('t')`, `selectattr('a', 't')`...: the filter or test they name
+            // is a string constant, so each constant that reads as a name is a candidate.
+            let mut by_name = (false, false);
+            let mut constants = Vec::new();
             let mut idx = 0;
             while let Some(op) = instructions.get(idx) {
                 match op {
                     Instruction::ApplyFilter(name, ..) => {
-                        used.push((PluginKind::Filter, bridged::normalized(name)));
+                        let name = bridged::normalized(name);
+                        match bridged::short(&name) {
+                            "map" => by_name.0 = true,
+                            "select" | "reject" | "selectattr" | "rejectattr" => by_name.1 = true,
+                            _ => {}
+                        }
+                        used.push((PluginKind::Filter, name));
                     }
                     Instruction::PerformTest(name, ..) => {
                         used.push((PluginKind::Test, bridged::normalized(name)));
                     }
+                    Instruction::LoadConst(value) => {
+                        if let Some(text) = value.as_str().filter(|t| bridged::is_name(t)) {
+                            constants.push(text.to_string());
+                        }
+                    }
                     _ => {}
                 }
                 idx += 1;
+            }
+            for text in constants {
+                if by_name.0 {
+                    used.push((PluginKind::Filter, text.clone()));
+                }
+                if by_name.1 {
+                    used.push((PluginKind::Test, text));
+                }
             }
         }
         {
@@ -828,6 +851,7 @@ where
 {
     let filter = undefined_through(name, f);
     env.add_filter(format!("ansible.builtin.{name}"), filter.clone());
+    env.add_filter(format!("ansible.legacy.{name}"), filter.clone());
     env.add_filter(name.to_string(), filter);
 }
 
@@ -849,6 +873,7 @@ where
         f(state, args)
     };
     env.add_filter(format!("ansible.builtin.{name}"), filter.clone());
+    env.add_filter(format!("ansible.legacy.{name}"), filter.clone());
     env.add_filter(name.to_string(), filter);
 }
 
@@ -930,6 +955,7 @@ where
         f.call(state, &args)
     };
     env.add_test(format!("ansible.builtin.{name}"), test.clone());
+    env.add_test(format!("ansible.legacy.{name}"), test.clone());
     env.add_test(name.to_string(), test);
 }
 
@@ -1760,7 +1786,13 @@ mod unit {
         0
     )]
     #[case::undefined_input_still_resolves_the_name(
-        "{{ nope | community.general.dict_kv('k') | default('d') }}",
+        "{{ nope | community.general.dict_kv('k') | default({}) }}",
+        Ok(json!({})),
+        1
+    )]
+    #[case::legacy_native_stays_native("{{ [1] | ansible.legacy.length }}", Ok(json!(1)), 0)]
+    #[case::filter_named_by_map(
+        "{{ ['v'] | map('community.general.dict_kv', 'k') | list }}",
         Err(
             "filter 'community.general.dict_kv' needs the Python helper, which could not start: no ansible-core here"
         ),

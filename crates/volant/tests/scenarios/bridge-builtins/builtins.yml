@@ -19,3 +19,6 @@
     - name: A native lookup through query
       debug:
         msg: "{{ query('vars', 'inventory_hostname') }}"
+    - name: A test named by select
+      debug:
+        msg: "{{ ['/a', 'b'] | select('abs') | list }}"
