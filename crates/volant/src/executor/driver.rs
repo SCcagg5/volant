@@ -2515,6 +2515,34 @@ mod tests {
     use rstest::rstest;
     use serde_json::json;
 
+    /// A plugin failure while rendering an argument chains the action's key, then the argument's.
+    #[test]
+    fn a_finalization_failure_names_the_action_then_the_argument() {
+        let at = |line| crate::playbook::Origin {
+            path: "p.yml".into(),
+            line,
+            col: 7,
+        };
+        let mut t = task("ansible.builtin.debug");
+        t.value_origins.insert("action".into(), at(4));
+        t.value_origins.insert("args.msg".into(), at(5));
+        let message = "Finalization of task args for 'ansible.builtin.debug' failed: Error while \
+                       resolving value for 'msg': The filter plugin 'f' failed: boom";
+        assert_eq!(
+            finalization_causes(&t, message),
+            Some(json!([
+                {"msg": "Finalization of task args for 'ansible.builtin.debug' failed.",
+                 "path": "p.yml", "line": 4, "col": 7},
+                {"msg": "Error while resolving value for 'msg': The filter plugin 'f' failed: boom",
+                 "path": "p.yml", "line": 5, "col": 7},
+            ]))
+        );
+        assert_eq!(
+            finalization_causes(&t, "The filter plugin 'f' failed: boom"),
+            None
+        );
+    }
+
     /// Each host's run of each play numbers its batches in a range of its own.
     #[test]
     fn batch_ids_start_in_a_range_of_their_own() {
