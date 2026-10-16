@@ -1768,6 +1768,36 @@ mod unit {
         crate::python::PythonBuilder::spawn("python3", &["-c", "import sys; sys.exit(3)"], &[])
     }
 
+    /// A helper that knows no plugin at all.
+    fn empty_helper() -> anyhow::Result<crate::python::PythonBuilder> {
+        const KNOWS_NOTHING: &str = r#"
+import json, struct, sys
+while True:
+    head = sys.stdin.buffer.read(4)
+    if len(head) < 4:
+        break
+    request = json.loads(sys.stdin.buffer.read(struct.unpack(">I", head)[0]))
+    answer = {"id": request["id"], "error": {"kind": "not_found", "message": "No filter named 'x'."}}
+    raw = json.dumps(answer).encode()
+    sys.stdout.buffer.write(struct.pack(">I", len(raw)) + raw)
+    sys.stdout.buffer.flush()
+"#;
+        crate::python::PythonBuilder::spawn("python3", &["-c", KNOWS_NOTHING], &[])
+    }
+
+    /// ansible-core resolves a filter's name before it looks at the value: an undefined value
+    /// given to a filter nobody has fails as unknown, not as undefined.
+    #[test]
+    fn an_undefined_value_given_to_a_missing_filter_fails_as_unknown() {
+        let (t, _) = bridged_templar(empty_helper);
+        assert_eq!(
+            t.render("{{ nope | badfilter | default('d') }}", &Map::new()),
+            Err(TemplateError(
+                "unknown filter: filter badfilter is unknown (in <expression>:1)".into()
+            ))
+        );
+    }
+
     /// A native name never starts the helper; what the engine lacks goes to it, or fails naming it.
     #[rstest::rstest]
     #[case::k3s_ipwrap_stays_native("{{ '::1' | ansible.utils.ipwrap }}", Ok(json!("[::1]")), 0)]
