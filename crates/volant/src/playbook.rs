@@ -159,6 +159,20 @@ fn value_origin(value: &Yaml<'_>) -> Option<Origin> {
     })
 }
 
+/// Where the key of `value`'s entry was written, when it is a mapping entry's value in the file
+/// being parsed.
+fn key_origin(value: &Yaml<'_>) -> Option<Origin> {
+    ORIGINS.with(|o| {
+        o.borrow().as_ref().and_then(|(path, origins)| {
+            origins.of_key(value).map(|(line, col)| Origin {
+                path: path.clone(),
+                line,
+                col,
+            })
+        })
+    })
+}
+
 /// Where `map` was written, when it comes from the file being parsed.
 fn task_origin(map: &saphyr::Mapping<'_>) -> Option<Origin> {
     ORIGINS.with(|o| {
@@ -259,7 +273,10 @@ pub struct PlayTask {
     pub origin: Option<Origin>,
     /// Where some of its values were written - `until`, `retries`, `delay` and a `debug`'s `var` -
     /// for the cause the reference points at when one of them fails.
-    pub value_origins: std::collections::BTreeMap<&'static str, Origin>,
+    ///
+    /// Also the action's key, under `action`, and each argument written as a mapping entry,
+    /// under `args.<name>`, for the chain a failed render of the arguments prints.
+    pub value_origins: std::collections::BTreeMap<String, Origin>,
 }
 
 impl PlayTask {
@@ -1299,7 +1316,19 @@ fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask> {
         ("var", var),
     ] {
         if let Some(origin) = node.and_then(value_origin) {
-            value_origins.insert(key, origin);
+            value_origins.insert(key.to_string(), origin);
+        }
+    }
+    if let Some(origin) = key_origin(value) {
+        value_origins.insert("action".to_string(), origin);
+    }
+    for node in [Some(value), field(yaml, "args")].into_iter().flatten() {
+        if let Yaml::Mapping(map) = node {
+            for (k, v) in map {
+                if let (Some(k), Some(origin)) = (k.as_str(), value_origin(v)) {
+                    value_origins.insert(format!("args.{k}"), origin);
+                }
+            }
         }
     }
     Ok(PlayTask {

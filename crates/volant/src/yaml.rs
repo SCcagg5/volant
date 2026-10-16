@@ -42,6 +42,8 @@ fn marked<'a>(text: &'a str, source: &str) -> anyhow::Result<Vec<MarkedYaml<'a>>
 pub struct Origins {
     maps: std::collections::HashMap<usize, (usize, usize)>,
     values: std::collections::HashMap<usize, (usize, usize)>,
+    /// Where the key of each entry starts, by the address of its value.
+    keys: std::collections::HashMap<usize, (usize, usize)>,
 }
 
 impl Origins {
@@ -53,6 +55,12 @@ impl Origins {
     /// Where `value` starts, when it is the value of a mapping entry of those documents.
     pub fn of_value(&self, value: &Yaml<'_>) -> Option<(usize, usize)> {
         self.values.get(&std::ptr::from_ref(value).addr()).copied()
+    }
+
+    /// Where the key of `value`'s entry starts, when it is the value of a mapping entry of
+    /// those documents: the reference points a task's action at its key (`debug:`).
+    pub fn of_key(&self, value: &Yaml<'_>) -> Option<(usize, usize)> {
+        self.keys.get(&std::ptr::from_ref(value).addr()).copied()
     }
 }
 
@@ -70,7 +78,7 @@ pub fn load_with_origins<'a>(
     }
     // The mappings in the order a walk meets them, on both trees: the marked one gives the
     // positions, the lowered one the addresses.
-    let mut starts = (Vec::new(), Vec::new());
+    let mut starts = (Vec::new(), Vec::new(), Vec::new());
     for doc in &marked {
         mapping_starts(doc, &mut starts);
     }
@@ -88,12 +96,17 @@ pub fn load_with_origins<'a>(
         docs,
         Origins {
             maps: addresses.0.into_iter().zip(starts.0).collect(),
+            keys: addresses.1.iter().copied().zip(starts.2).collect(),
             values: addresses.1.into_iter().zip(starts.1).collect(),
         },
     ))
 }
 
-type Starts = (Vec<(usize, usize)>, Vec<(usize, usize)>);
+type Starts = (
+    Vec<(usize, usize)>,
+    Vec<(usize, usize)>,
+    Vec<(usize, usize)>,
+);
 
 fn mapping_starts(node: &MarkedYaml<'_>, out: &mut Starts) {
     let at = |n: &MarkedYaml<'_>| (n.span.start.line(), n.span.start.col() + 1);
@@ -103,6 +116,7 @@ fn mapping_starts(node: &MarkedYaml<'_>, out: &mut Starts) {
             out.0.push(at(node));
             for (k, v) in map {
                 out.1.push(at(v));
+                out.2.push(at(k));
                 mapping_starts(k, out);
                 mapping_starts(v, out);
             }

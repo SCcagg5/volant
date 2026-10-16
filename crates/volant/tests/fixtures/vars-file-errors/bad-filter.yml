@@ -2,7 +2,7 @@
   hosts: web
   gather_facts: false
   vars_files:
-    - "{{ nope | badfilter }}.yml"
+    - "{{ 'x' | badfilter }}.yml"
   tasks:
     - name: Never reached
       debug:

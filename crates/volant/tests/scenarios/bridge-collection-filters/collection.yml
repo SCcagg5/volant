@@ -1,0 +1,37 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    x: SECRET
+    uns: !unsafe '{{ x }}'
+  tasks:
+    - name: A host prints a template
+      command: printf '%s%s x %s%s' '{' '{' '}' '}'
+      register: out
+      changed_when: false
+    - name: dict_kv
+      debug:
+        msg: "{{ 'v' | community.general.dict_kv('k') }}"
+    - name: dict_kv of an undefined value
+      debug:
+        msg: "{{ nope | community.general.dict_kv('k') | default('never ran') }}"
+    - name: dict_kv of omit
+      debug:
+        msg: "{{ omit | community.general.dict_kv('k') }}"
+    - name: dict_kv of host data
+      debug:
+        msg: "{{ out.stdout | community.general.dict_kv('k') }}"
+    - name: ipaddr
+      debug:
+        msg: "{{ ['x', '10.0.0.1'] | ansible.utils.ipaddr }}"
+    - name: ipaddr of host data
+      debug:
+        msg: "{{ out.stdout | ansible.utils.ipaddr }}"
+    - name: dict_kv of an unsafe value
+      debug:
+        msg: "{{ uns | community.general.dict_kv('k') }}"
+    - name: ipaddr of an unsafe value
+      debug:
+        msg: "{{ [uns, '10.0.0.1'] | ansible.utils.ipaddr }}"
+    - name: dict_kv named by map
+      debug:
+        msg: "{{ ['v', 'w'] | map('community.general.dict_kv', 'k') | list }}"

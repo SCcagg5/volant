@@ -15,7 +15,11 @@ use volant_protocol::encoding::{b64_decode, b64_encode, sha1_hex};
 use super::truthy;
 use super::{add_filter, add_test, add_text_filter};
 
-pub fn register(env: &mut Environment<'static>, base_dir: PathBuf) {
+pub fn register(
+    env: &mut Environment<'static>,
+    base_dir: PathBuf,
+    bridge: Option<&std::sync::Arc<crate::bridge::Bridge>>,
+) {
     // What `!unsafe` text loads as: the text itself, marked as data so no further pass renders it.
     env.add_filter("volant_unsafe", |state: &State, text: String| {
         if let Some(sink) = state.lookup(super::TAINT_KEY)
@@ -193,7 +197,7 @@ pub fn register(env: &mut Environment<'static>, base_dir: PathBuf) {
         seq.try_iter().is_ok_and(|mut it| it.any(|x| x == item))
     });
 
-    super::lookups::register(env, base_dir);
+    super::lookups::register(env, base_dir, bridge);
 
     // Python's `str` and `dict` methods (`.split()`, `.startswith()`, `.keys()`...), which real
     // roles call on values. Anything neither `pycompat` nor this engine has must still fail by

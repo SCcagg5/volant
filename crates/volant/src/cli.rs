@@ -9,6 +9,7 @@ use anstream::ColorChoice;
 use clap::Parser;
 use tokio::sync::watch;
 
+use crate::bridge::Bridge;
 use crate::compile::{self, Compiled, TagSelection};
 use crate::config::Config;
 use crate::executor::{self, Abort, RunOptions, RunState};
@@ -299,7 +300,7 @@ async fn run_all(
         .flatten()
         .flat_map(preflight::collection_modules)
         .collect();
-    let python = python::union_for(
+    let (python, helper) = python::union_and_helper(
         &python_modules,
         &named,
         &reach.plugin_dirs,
@@ -308,6 +309,12 @@ async fn run_all(
         },
     )
     .map_err(|e| Refusal::or(4, e))?;
+    // The filters, tests and lookups only ansible-core has run in the helper the union was
+    // built with, or in one started on the first of them.
+    let bridge = Bridge::new(reach.plugin_dirs.clone());
+    if let Some(helper) = helper {
+        bridge.adopt(helper);
+    }
     for plays in &compiled {
         for play in plays {
             preflight::check_built(play, python.as_ref()).map_err(|e| Refusal::or(4, e))?;
@@ -443,7 +450,10 @@ async fn run_all(
     let (run_tags, skip_tags) = selection.lists();
     store.set_tags(run_tags, skip_tags);
     let mut state = RunState {
-        templar: Arc::new(Templar::new(playbook_dir.clone())),
+        templar: Arc::new(Templar::with_bridge(
+            playbook_dir.clone(),
+            Some(Arc::clone(&bridge)),
+        )),
         vars: Arc::new(Mutex::new(store)),
         failed_hosts: HashSet::new(),
         verbosity: args.verbose,
@@ -492,7 +502,10 @@ async fn run_all(
                 // file's plays in place, and each of them reads its `group_vars/`, its
                 // `vars_files` and its lookups beside the file it was written in.
                 if play.dir != current_dir {
-                    state.templar = Arc::new(Templar::new(play.dir.clone()));
+                    state.templar = Arc::new(Templar::with_bridge(
+                        play.dir.clone(),
+                        Some(Arc::clone(&bridge)),
+                    ));
                     state.vars.lock().expect("vars lock").rebase(&play.dir)?;
                     current_dir.clone_from(&play.dir);
                 }

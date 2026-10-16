@@ -1,0 +1,14 @@
+[
+  {
+    "code": 2,
+    "stdout": "\nPLAY [h1] **********************************************************************\n\nTASK [A failing lookup] ********************************************************\n[ERROR]: Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The lookup plugin 'badv' failed: lookup boom value\n\nTask failed.\nOrigin: <golden-tmp>/fails.yml:4:7\n\n2   gather_facts: false\n3   tasks:\n4     - name: A failing lookup\n        ^ column 7\n\n<<< caused by >>>\n\nFinalization of task args for 'ansible.builtin.debug' failed.\nOrigin: <golden-tmp>/fails.yml:5:7\n\n3   tasks:\n4     - name: A failing lookup\n5       debug:\n        ^ column 7\n\n<<< caused by >>>\n\nError while resolving value for 'msg': The lookup plugin 'badv' failed: lookup boom value\nOrigin: <golden-tmp>/fails.yml:6:14\n\n4     - name: A failing lookup\n5       debug:\n6         msg: \"{{ lookup('badv', 'x') }}\"\n               ^ column 14\n\nfatal: [h1]: FAILED! => {\"msg\": \"Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The lookup plugin 'badv' failed: lookup boom value\"}\n\nPLAY RECAP *********************************************************************\nh1                         : ok=0    changed=0    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0   \n\n"
+  },
+  {
+    "code": 0,
+    "stdout": "\nPLAY [h1] **********************************************************************\n\nTASK [Ignored] *****************************************************************\nok: [h1] => {\n    \"msg\": null\n}\n\nTASK [Ignored, as a list] ******************************************************\nok: [h1] => {\n    \"msg\": []\n}\n\nPLAY RECAP *********************************************************************\nh1                         : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   \n\n"
+  },
+  {
+    "code": 0,
+    "stdout": "\nPLAY [h1] **********************************************************************\n\nTASK [Warned] ******************************************************************\nok: [h1] => {\n    \"msg\": null\n}\n\nTASK [Warned, through query] ***************************************************\nok: [h1] => {\n    \"msg\": []\n}\n\nPLAY RECAP *********************************************************************\nh1                         : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   \n\n"
+  }
+]

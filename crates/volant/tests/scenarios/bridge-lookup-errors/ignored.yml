@@ -1,0 +1,9 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: Ignored
+      debug:
+        msg: "{{ lookup('badv', 'x', errors='ignore') }}"
+    - name: Ignored, as a list
+      debug:
+        msg: "{{ lookup('badv', 'x', errors='ignore', wantlist=True) }}"

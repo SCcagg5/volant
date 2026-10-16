@@ -4,7 +4,7 @@
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use minijinja::value::{Kwargs, Rest, ValueKind};
 use minijinja::{Environment, Error, ErrorKind, State, Value};
@@ -12,28 +12,61 @@ use minijinja::{Environment, Error, ErrorKind, State, Value};
 use crate::inventory::Inventory;
 
 use super::{Context, FileRender, Templar, TemplateError, Vars};
+use crate::bridge::{Bridge, PluginKind};
 
-pub fn register(env: &mut Environment<'static>, base_dir: PathBuf) {
-    env.add_function(
-        "lookup",
-        move |state: &State, name: String, terms: Rest<Value>, kwargs: Kwargs| {
-            // Measured on ansible-core 2.19.12: an undefined term or option is an undefined
-            // read (`lookup('env', nope | lower)`, `lookup('vars', 'x', default=nope | lower)`).
-            let undefined_option = kwargs
-                .args()
-                .any(|k| kwargs.peek::<Value>(k).is_ok_and(|v| v.is_undefined()));
-            if undefined_option || terms.iter().any(super::holds_undefined) {
-                return Err(Error::from(ErrorKind::UndefinedError));
-            }
-            let wantlist = kwargs.get::<Option<bool>>("wantlist")?.unwrap_or(false);
-            let results = lookup(state, &name, &terms, kwargs, &base_dir)?;
-            Ok(if wantlist {
-                Value::from(results)
-            } else {
-                shaped(results)
-            })
-        },
-    );
+pub fn register(env: &mut Environment<'static>, base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) {
+    let bridge = bridge.cloned();
+    let call = move |state: &State, name: String, terms: Rest<Value>, kwargs: Kwargs| {
+        // Measured on ansible-core 2.19.12: an undefined term or option is an undefined
+        // read (`lookup('env', nope | lower)`, `lookup('vars', 'x', default=nope | lower)`).
+        let undefined_option = kwargs
+            .args()
+            .any(|k| kwargs.peek::<Value>(k).is_ok_and(|v| v.is_undefined()));
+        if undefined_option || terms.iter().any(super::holds_undefined) {
+            return Err(Error::from(ErrorKind::UndefinedError));
+        }
+        // `ansible.legacy.env` is the engine's `env`, as the reference resolves it.
+        let name = match name.strip_prefix("ansible.legacy.") {
+            Some(short) if supported(short) => short.to_string(),
+            _ => name,
+        };
+        if let Some(bridge) = &bridge
+            && super::bridged_name(PluginKind::Lookup, &name)
+        {
+            // The plugin shapes its own answer: `wantlist` and `errors` go with the call.
+            return super::bridged::lookup(state, bridge, &name, &terms, &kwargs);
+        }
+        let wantlist = kwargs.get::<Option<bool>>("wantlist")?.unwrap_or(false);
+        let results = lookup(state, &name, &terms, kwargs, &base_dir, bridge.as_ref())?;
+        Ok(if wantlist {
+            Value::from(results)
+        } else {
+            shaped(results)
+        })
+    };
+    // `query(name, ...)` and its alias `q`, routed here (`route_calls`), are `lookup(name, ...,
+    // wantlist=True)`, a `wantlist` the call gives replaced, as ansible-core's `_query` does.
+    let lookup_call = call.clone();
+    let query = move |state: &State, name: String, terms: Rest<Value>, kwargs: Kwargs| {
+        let kwargs: Kwargs = kwargs
+            .args()
+            .filter(|k| *k != "wantlist")
+            .map(|k| (k.to_string(), kwargs.peek::<Value>(k).unwrap_or_default()))
+            .chain(std::iter::once(("wantlist".to_string(), Value::from(true))))
+            .collect();
+        lookup_call(state, name, terms, kwargs)
+    };
+    env.add_function("lookup", call);
+    env.add_function(super::QUERY_KEY, query);
+}
+
+/// Marks the render as data, see [`super::TaintSink`].
+pub(super) fn taint(state: &State) {
+    if let Some(sink) = state.lookup(super::TAINT_KEY)
+        && let Some(sink) = sink.downcast_object_ref::<super::TaintSink>()
+    {
+        sink.taint();
+    }
 }
 
 fn invalid(msg: impl Into<String>) -> Error {
@@ -66,6 +99,7 @@ fn lookup(
     terms: &[Value],
     kwargs: Kwargs,
     base_dir: &Path,
+    bridge: Option<&Arc<Bridge>>,
 ) -> Result<Vec<Value>, Error> {
     if !supported(name) {
         return Err(invalid(format!(
@@ -97,13 +131,7 @@ fn lookup(
     // `{{ 1 + 1 }}` the file that held it did. `vars` is not one of them: it hands back a value
     // the context already holds, and reading an untrusted name through it taints on the same
     // path a bare read does.
-    let taint = || {
-        if let Some(sink) = state.lookup(super::TAINT_KEY)
-            && let Some(sink) = sink.downcast_object_ref::<super::TaintSink>()
-        {
-            sink.taint();
-        }
-    };
+    let taint = || taint(state);
     let mut results = Vec::new();
     for term in terms {
         let term_text = term
@@ -171,7 +199,7 @@ fn lookup(
                 let text = std::fs::read_to_string(&path)
                     .map_err(|e| invalid(format!("template lookup: {}: {e}", path.display())))?;
                 taint();
-                render_template(state, &term_text, &path, &text, base_dir)?
+                render_template(state, &term_text, &path, &text, base_dir, bridge)?
             }
             _ => unreachable!("supported() admitted {name}"),
         };
@@ -338,6 +366,7 @@ fn render_template(
     path: &Path,
     text: &str,
     base_dir: &Path,
+    bridge: Option<&Arc<Bridge>>,
 ) -> Result<Value, Error> {
     let depth = TEMPLATE_DEPTH.get();
     if depth >= MAX_TEMPLATE_DEPTH {
@@ -346,7 +375,7 @@ fn render_template(
         )));
     }
     TEMPLATE_DEPTH.set(depth + 1);
-    let out = render_template_at(state, name, path, text, base_dir);
+    let out = render_template_at(state, name, path, text, base_dir, bridge);
     TEMPLATE_DEPTH.set(depth);
     out.map(Value::from).map_err(|e| lookup_error(name, &e))
 }
@@ -357,8 +386,9 @@ fn render_template_at(
     path: &Path,
     text: &str,
     base_dir: &Path,
+    bridge: Option<&Arc<Bridge>>,
 ) -> Result<String, TemplateError> {
-    let templar = Templar::new(base_dir.to_path_buf());
+    let templar = Templar::with_bridge(base_dir.to_path_buf(), bridge.cloned());
     let root = state.lookup(super::CONTEXT_KEY);
     let ctx = root
         .as_ref()
@@ -371,7 +401,7 @@ fn render_template_at(
     let untrusted_hosts = ctx.map(|c| &c.untrusted_hosts);
 
     let read = templar
-        .env
+        .env()
         .template_from_str(text)
         .map(|t| t.undeclared_variables(false))
         .unwrap_or_default();
@@ -422,9 +452,9 @@ fn render_template_at(
             named.iter().for_each(|k| {
                 f.shift_remove(*k);
             });
-            std::sync::Arc::new(f)
+            Arc::new(f)
         } else {
-            std::sync::Arc::clone(f)
+            Arc::clone(f)
         }
     });
     let vars = Vars {

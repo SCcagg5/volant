@@ -1,0 +1,9 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: Warned
+      debug:
+        msg: "{{ lookup('badv', 'x', errors='warn') }}"
+    - name: Warned, through query
+      debug:
+        msg: "{{ query('badv', 'x', errors='warn') }}"

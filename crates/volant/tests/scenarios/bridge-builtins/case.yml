@@ -1,0 +1,4 @@
+# A filter, a test and a lookup only ansible-core has run in its Python helper; native names
+# keep their own answer.
+args: [-i, inv.ini, builtins.yml]
+needs: ["ansible-core"]
