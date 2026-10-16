@@ -467,6 +467,9 @@ mod tests {
             origin: &origin,
             playbook_dir,
             warnings: &mut warnings,
+
+            environment: None,
+            timeout: None,
         })
     }
 

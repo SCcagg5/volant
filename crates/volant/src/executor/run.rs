@@ -136,6 +136,8 @@ pub(super) async fn run_local(
             stop,
         )
         .await?
+    } else if crate::action_plugins::controller_side(&task.module) {
+        controller_side(task, item, step, templar, stop).await?
     } else {
         local_result(task, item, step, templar, store, verbosity)
     };
@@ -143,6 +145,67 @@ pub(super) async fn run_local(
     // ran, the way `run_agent_batch` normalises an agent's.
     summarise_exception(&mut result);
     Some(result)
+}
+
+/// An action plugin that never touches the host (`add_host`, `group_by`, `set_stats`), run as
+/// ansible-core's own with no link: the reference runs these on the controller and never
+/// connects. What the plugin asks of a host is answered with a failure it reports itself.
+/// `None` when the run's stop came first.
+async fn controller_side(
+    task: &PlayTask,
+    item: &Item,
+    step: &Step,
+    templar: &Templar,
+    stop: &mut watch::Receiver<bool>,
+) -> Option<TaskResult> {
+    use crate::action_plugins::{Context, Step as Next, kind, start};
+    let Some(kind) = kind(&task.module) else {
+        return Some(TaskResult::failed_with(format!(
+            "no action plugin runs '{}'",
+            task.module
+        )));
+    };
+    let mut warnings = Vec::new();
+    let mut plugin = start(
+        kind,
+        Context {
+            args: &item.args,
+            args_untrusted: &item.args_untrusted,
+            running_vars: &item.vars,
+            delegated: false,
+            escalated: false,
+            local: true,
+            item_vars: &item.vars,
+            templar,
+            origin: &step.origin,
+            playbook_dir: std::path::Path::new("."),
+            warnings: &mut warnings,
+            environment: Some(&item.environment),
+            timeout: task.timeout,
+        },
+    );
+    let mut last = None;
+    loop {
+        match plugin.next(last.take()) {
+            Next::Done(result) => return Some(result),
+            Next::Wait(ready) => {
+                tokio::select! {
+                    () = ready.notified() => {}
+                    stopped = stop.wait_for(|stopped| *stopped) => {
+                        if stopped.is_ok() {
+                            return None;
+                        }
+                    }
+                }
+            }
+            _ => {
+                last = Some(TaskResult::failed_with(format!(
+                    "'{}' runs on the controller and cannot reach a host",
+                    task.module
+                )));
+            }
+        }
+    }
 }
 
 /// The names a `set_fact` sets, each with its value and whether it is data from a managed host.
@@ -1810,14 +1873,22 @@ pub(super) const DISCOVERY_HELP: &str = "See https://docs.ansible.com/ansible-co
 /// Whether the reference discovers the interpreter this task's module runs under, once nobody
 /// named one. Measured on ansible-core 2.19.12: every module sent to a host does, but not `raw`
 /// and `script` (they hand a line or a file to the shell) and not `fetch`, `reboot` and
-/// `wait_for_connection`, whose result is not a module's.
+/// `wait_for_connection`, whose result is not a module's. `add_host`, `group_by` and
+/// `set_stats` send no module at all.
 pub(super) fn discovers_interpreter<V: crate::vars::HostSettings + ?Sized>(
     module: &str,
     vars: &V,
 ) -> bool {
     !matches!(
         short_name(module),
-        "raw" | "script" | "fetch" | "reboot" | "wait_for_connection"
+        "raw"
+            | "script"
+            | "fetch"
+            | "reboot"
+            | "wait_for_connection"
+            | "add_host"
+            | "group_by"
+            | "set_stats"
     ) && requested_interpreter(vars).is_none()
 }
 
@@ -2032,10 +2103,70 @@ pub(super) async fn run_plugin_item<C: AgentChannel, R: Relink<C>>(
     let mut tries: Option<u32> = None;
     loop {
         if expired() {
+            sweep_abandoned(
+                plugin,
+                link,
+                host,
+                batch_id,
+                task,
+                item,
+                union,
+                interpreters,
+                asked,
+                stop,
+                stop_broken,
+                logs,
+            )
+            .await;
             return Ok(timeout_result());
         }
         let (sub, dropping) = match plugin.next(last.take()) {
             Step::Done(result) => return Ok(result),
+            Step::Wait(ready) => {
+                let mut watcher = stop.clone();
+                let stopped = async move {
+                    if watcher.wait_for(|stopped| *stopped).await.is_err() {
+                        std::future::pending::<()>().await;
+                    }
+                };
+                let until = async {
+                    match ends {
+                        Some(e) => tokio::time::sleep_until(e).await,
+                        None => std::future::pending::<()>().await,
+                    }
+                };
+                tokio::select! {
+                    () = ready.notified() => {}
+                    () = until => {}
+                    () = stopped => return Err(Ok(BatchOutcome::Cancelled { at: 0 })),
+                }
+                continue;
+            }
+            Step::PutFile {
+                bytes,
+                remote,
+                mode,
+            } => {
+                let put = put_file_within(
+                    link,
+                    host,
+                    &bytes,
+                    &remote,
+                    mode,
+                    logs,
+                    capped(PUT_FILE_WAIT),
+                )
+                .await;
+                last = Some(match put {
+                    Ok(changed) => {
+                        let mut done = Map::new();
+                        done.insert("changed".into(), Value::Bool(changed));
+                        TaskResult(done)
+                    }
+                    Err(why) => TaskResult::failed_with(why),
+                });
+                continue;
+            }
             Step::Run(sub) => (sub, false),
             Step::RunDropping(sub) => (sub, true),
             Step::Reconnect {
@@ -2212,6 +2343,46 @@ pub(super) async fn run_plugin_item<C: AgentChannel, R: Relink<C>>(
     }
 }
 
+/// How long each removal of a directory a plugin left behind may take, the item's time being up.
+const SWEEP_WAIT: u64 = 10;
+
+/// Runs what a plugin left on the host when its item ran out of time, whatever each answers. A
+/// link that breaks on the way is left for the next batch to find.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "run_plugin_item's link and run state, which each removal goes over"
+)]
+async fn sweep_abandoned<C: AgentChannel>(
+    plugin: &mut dyn crate::action_plugins::Plugin,
+    link: &mut C,
+    host: &str,
+    batch_id: &mut u64,
+    task: &PlayTask,
+    item: &Item,
+    union: Option<&Union>,
+    interpreters: &[String],
+    asked: Option<&str>,
+    stop: &mut watch::Receiver<bool>,
+    stop_broken: &mut bool,
+    logs: &mut Vec<String>,
+) {
+    for sub in plugin.abandoned() {
+        let Ok(mut built) = sub_task(task, item, &sub, union, interpreters, asked) else {
+            continue;
+        };
+        built.timeout = Some(SWEEP_WAIT);
+        *batch_id += 1;
+        let (_, ended) =
+            send_batch(link, host, *batch_id, vec![built], stop, stop_broken, logs).await;
+        if let Err(why) = ended {
+            logs.push(format!(
+                "removing what an action plugin left on the host: {why}"
+            ));
+            return;
+        }
+    }
+}
+
 /// What starting an action plugin reads besides the item it runs and the warnings it raises.
 pub(super) struct PluginStart<'a> {
     pub(super) kind: crate::action_plugins::Kind,
@@ -2283,6 +2454,8 @@ pub(super) async fn run_plugin_attempts<C: AgentChannel, R: Relink<C>>(
                     origin: start.origin,
                     playbook_dir: start.playbook_dir,
                     warnings: &mut *warnings,
+                    environment: Some(&item.environment),
+                    timeout: task.timeout,
                 },
             );
             run_plugin_item(
@@ -2894,7 +3067,10 @@ const PUT_FILE_WAIT: Duration = Duration::from_secs(120);
 /// Whether the content differs from what the path held.
 #[cfg_attr(
     not(test),
-    expect(dead_code, reason = "the action plugins that put files come next")
+    expect(
+        dead_code,
+        reason = "the plugins put files with the item's time as the patience"
+    )
 )]
 pub(super) async fn put_file<C: AgentChannel>(
     link: &mut C,
@@ -3279,7 +3455,7 @@ async fn send_batch<C: AgentChannel>(
 /// `_ansible_` key but `_ansible_parsed`, as the reference's `remove_internal_keys` drops them
 /// from a module's return. Measured on ansible-core 2.19.12: a module returning
 /// `_ansible_verbose_always` gets a warning and its result printed on one line.
-fn drop_internal_keys(result: &mut TaskResult) {
+pub(crate) fn drop_internal_keys(result: &mut TaskResult) {
     result.0.retain(|key, _| {
         !key.starts_with("_volant_") && (!key.starts_with("_ansible_") || key == "_ansible_parsed")
     });
@@ -5779,6 +5955,7 @@ mod tests {
             crate::action_plugins::Kind::Service => "service",
             crate::action_plugins::Kind::Template => "template",
             crate::action_plugins::Kind::Unarchive => "unarchive",
+            crate::action_plugins::Kind::Bridged(name) => name,
         });
         let t = PlayTask { timeout, ..t };
         let item = Item {
@@ -5811,6 +5988,9 @@ mod tests {
                     origin: &origin,
                     playbook_dir: Path::new("."),
                     warnings: &mut warnings,
+
+                    environment: None,
+                    timeout: None,
                 },
             );
             run_plugin_item(
