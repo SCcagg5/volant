@@ -1768,21 +1768,91 @@ mod unit {
         crate::python::PythonBuilder::spawn("python3", &["-c", "import sys; sys.exit(3)"], &[])
     }
 
-    /// A helper that knows no plugin at all.
-    fn empty_helper() -> anyhow::Result<crate::python::PythonBuilder> {
-        const KNOWS_NOTHING: &str = r#"
+    /// A stand-in helper answering every call as `argv[1]` says: `not_found`, `failed`, or the
+    /// call's own arguments.
+    const STAND_IN: &str = r#"
 import json, struct, sys
+mode = sys.argv[1]
 while True:
     head = sys.stdin.buffer.read(4)
     if len(head) < 4:
         break
     request = json.loads(sys.stdin.buffer.read(struct.unpack(">I", head)[0]))
-    answer = {"id": request["id"], "error": {"kind": "not_found", "message": "No filter named 'x'."}}
+    answer = {"id": request["id"]}
+    if mode == "not_found":
+        answer["error"] = {"kind": "not_found", "message": "The lookup plugin 'x.y' was not found."}
+    elif mode == "failed":
+        answer["error"] = {"kind": "plugin", "message": "The filter plugin 'x.y' failed: boom"}
+    else:
+        answer["value"] = request["call"]["args"]
     raw = json.dumps(answer).encode()
     sys.stdout.buffer.write(struct.pack(">I", len(raw)) + raw)
     sys.stdout.buffer.flush()
 "#;
-        crate::python::PythonBuilder::spawn("python3", &["-c", KNOWS_NOTHING], &[])
+
+    fn empty_helper() -> anyhow::Result<crate::python::PythonBuilder> {
+        crate::python::PythonBuilder::spawn("python3", &["-c", STAND_IN, "not_found"], &[])
+    }
+
+    fn failing_helper() -> anyhow::Result<crate::python::PythonBuilder> {
+        crate::python::PythonBuilder::spawn("python3", &["-c", STAND_IN, "failed"], &[])
+    }
+
+    fn echo_helper() -> anyhow::Result<crate::python::PythonBuilder> {
+        crate::python::PythonBuilder::spawn("python3", &["-c", STAND_IN, "echo"], &[])
+    }
+
+    /// What the helper answers reaches the template: a value, a plugin's own failure, a name it
+    /// does not know.
+    #[rstest::rstest]
+    #[case::filter_value(echo_helper, "{{ 'a' | x.y('b', k=1) }}", Ok(json!(["a", "b"])))]
+    #[case::test_value(echo_helper, "{{ 'a' is x.y }}", Ok(json!(true)))]
+    #[case::lookup_value(echo_helper, "{{ lookup('x.y', 't') }}", Ok(json!(["t"])))]
+    #[case::query_value(echo_helper, "{{ q('x.y', 't', wantlist=False) }}", Ok(json!(["t"])))]
+    #[case::undefined_filter_input(echo_helper, "{{ nope | x.y | default(1) }}", Ok(json!(1)))]
+    #[case::plugin_failure(
+        failing_helper,
+        "{{ 'a' | x.y }}",
+        Err("The filter plugin 'x.y' failed: boom")
+    )]
+    #[case::unknown_test(
+        empty_helper,
+        "{{ 'a' is x.y }}",
+        Err("unknown test: test x.y is unknown (in <expression>:1)")
+    )]
+    #[case::unknown_lookup(
+        empty_helper,
+        "{{ lookup('x.y') }}",
+        Err("The lookup plugin 'x.y' was not found.")
+    )]
+    #[case::jinja_object_in_a_lookup(
+        echo_helper,
+        "{{ lookup('x.y', range) }}",
+        Err("lookup 'x.y' was given a Jinja object, which cannot be sent to the Python helper")
+    )]
+    #[case::jinja_object_in_a_keyword(
+        echo_helper,
+        "{{ 'a' is x.y(k=range) }}",
+        Err("test 'x.y' was given a Jinja object, which cannot be sent to the Python helper")
+    )]
+    fn what_the_helper_answers_reaches_the_template(
+        #[case] helper: fn() -> anyhow::Result<crate::python::PythonBuilder>,
+        #[case] text: &str,
+        #[case] want: Result<Value, &str>,
+    ) {
+        let (t, _) = bridged_templar(helper);
+        assert_eq!(
+            t.render(text, &Map::new()),
+            want.map_err(|e| TemplateError(e.into())),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn an_undefined_value_given_to_a_test_is_an_undefined_read() {
+        let (t, _) = bridged_templar(echo_helper);
+        let err = t.render("{{ nope is x.y }}", &Map::new()).unwrap_err();
+        assert!(err.is_undefined(), "{err}");
     }
 
     /// ansible-core resolves a filter's name before it looks at the value: an undefined value
@@ -1791,9 +1861,9 @@ while True:
     fn an_undefined_value_given_to_a_missing_filter_fails_as_unknown() {
         let (t, _) = bridged_templar(empty_helper);
         assert_eq!(
-            t.render("{{ nope | badfilter | default('d') }}", &Map::new()),
+            t.render("{{ nope | x.y | default('d') }}", &Map::new()),
             Err(TemplateError(
-                "unknown filter: filter badfilter is unknown (in <expression>:1)".into()
+                "unknown filter: filter x.y is unknown (in <expression>:1)".into()
             ))
         );
     }

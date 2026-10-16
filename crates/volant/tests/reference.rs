@@ -399,8 +399,12 @@ fn a_scenario_matches_the_reference(#[files("tests/scenarios/*/case.yml")] case:
             .args(["--forks", &spec.forks.to_string()])
             .current_dir(&copy)
             .env_remove("COLUMNS");
+        // Except where the controller's collections are installed: the helper runs a
+        // collection's filter from there, as the reference did when it was recorded.
         for (var, _) in std::env::vars() {
-            if var.starts_with("ANSIBLE_") || var.starts_with("VOLANT_") {
+            if (var.starts_with("ANSIBLE_") || var.starts_with("VOLANT_"))
+                && var != "ANSIBLE_COLLECTIONS_PATH"
+            {
                 command.env_remove(var);
             }
         }
@@ -437,7 +441,11 @@ fn a_scenario_matches_the_reference(#[files("tests/scenarios/*/case.yml")] case:
         );
         let code = want["code"].as_i64().and_then(|c| i32::try_from(c).ok());
         let wanted = want["stdout"].as_str().expect("a recorded stdout");
-        assert_eq!(out.status.code(), code, "exit code of {shown}");
+        assert_eq!(
+            out.status.code(),
+            code,
+            "exit code of {shown}--- stdout\n{got}"
+        );
         assert_eq!(
             normalise(&got, &unordered),
             normalise(wanted, &unordered),

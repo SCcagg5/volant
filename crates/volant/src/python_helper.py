@@ -565,7 +565,10 @@ def call(request):
         templar = Templar(variables=request.get("vars") or {})
         # The environment resolves a plugin on `in`, which may raise the not-found error or the
         # load error of a broken plugin file: both are answered below like a failed call.
-        if kind != "lookup" and name not in getattr(templar.environment, kind + "s"):
+        # The engine's environment, not `templar.environment`: ansible-core 2.19 warns on every
+        # read of that attribute, and the warning would land in the run's output.
+        environment = templar._engine.environment
+        if kind != "lookup" and name not in getattr(environment, kind + "s"):
             return {"error": missing}
         # Whether the plugin exists, for a call the controller does not make because a value it
         # would be given is undefined: ansible-core resolves the name before it looks at those.
