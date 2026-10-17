@@ -768,6 +768,11 @@ async fn run_all(
     let extra_for_check = extra.clone();
     let mut store = VarStore::with_sources(&inventory, &sources, &playbook_dir, extra)?;
     store.set_forks(forks);
+    store.set_reload(
+        sources.clone(),
+        config.inventory_plugins.clone(),
+        limit.clone(),
+    );
     if let Some(cache) = &cache {
         let names: Vec<String> = inventory
             .resolve("all")
@@ -914,6 +919,7 @@ async fn run_all(
                     play, compiled, hosts, &agents, &options, &mut state, out, &mut stats,
                 )
                 .await?;
+                state.vars.lock().expect("vars lock").end_play();
                 // `meta: refresh_inventory` read the file again: the plays behind this one
                 // resolve their hosts against what it found.
                 if let Some(fresh) = state.refreshed.take() {
