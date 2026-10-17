@@ -203,8 +203,8 @@ async fn controller_side(
             warnings: &mut warnings,
             environment: Some(&item.environment),
             timeout: task.timeout,
-            check_mode: task.check_mode == Some(true),
-            diff: task.diff == Some(true),
+            check_mode: item.check_mode == Some(true),
+            diff: item.diff == Some(true),
         },
     );
     let mut last = None;
@@ -1186,8 +1186,13 @@ fn settle_failure(result: &mut TaskResult, task: &PlayTask) {
             .map_or(msg.clone(), str::to_string);
         // `AnsibleError`: an empty message is the default one alone, `Action failed.`.
         let by_failed = format!("{by} failed.");
+        // `Unexpected AnsibleActionFail error: ...` is the sentence the reference's own `copy`
+        // fails with for a source that is not there, and its block carries it as it is. Any
+        // other result starting with it only loses the `Action failed: ` in its error block.
         let message = if msg.starts_with("Task failed: ") {
             msg
+        } else if msg.starts_with("Unexpected AnsibleActionFail error: ") {
+            crate::render::task_failed(&msg)
         } else if detail.is_empty() {
             crate::render::task_failed(&by_failed)
         } else {
@@ -2039,7 +2044,19 @@ fn sub_task(
     if volant_protocol::modules::native(sub.module).is_some() {
         return Ok(Task {
             module: sub.module.to_string(),
-            args: with_modes(task, sub.args.clone()),
+            // A command a plugin runs is the connection's, which check mode never reaches: the
+            // reference's `_low_level_execute_command` makes its temporary directory and removes
+            // it in check mode too.
+            args: {
+                // The agent's own modules know no `_ansible_module_name`, which is for Python.
+                let mut args = sub.args.clone();
+                args.remove("_ansible_module_name");
+                if sub.module == "raw" {
+                    args
+                } else {
+                    with_modes(item, args)
+                }
+            },
             job: None,
             ..protocol_task(task, item, None)
         });
@@ -2050,7 +2067,7 @@ fn sub_task(
     let interpreter = chosen_interpreter(asked, interpreters)?;
     Ok(Task {
         module: sub.module.to_string(),
-        args: with_modes(task, sub.args.clone()),
+        args: with_modes(item, sub.args.clone()),
         ignore_errors: item.ignore_errors.unwrap_or_else(|| task.ignores_errors())
             || task.loop_items.is_some(),
         timeout: task.timeout,
@@ -2524,8 +2541,8 @@ pub(super) async fn run_plugin_attempts<C: AgentChannel, R: Relink<C>>(
                     warnings: &mut *warnings,
                     environment: Some(&item.environment),
                     timeout: task.timeout,
-                    check_mode: task.check_mode == Some(true),
-                    diff: task.diff == Some(true),
+                    check_mode: item.check_mode == Some(true),
+                    diff: item.diff == Some(true),
                 },
             );
             run_plugin_item(
@@ -2667,7 +2684,7 @@ pub(super) fn protocol_task(
     }
     Task {
         module: task.module.clone(),
-        args: with_modes(task, args),
+        args: with_modes(item, args),
         // An item is not the task: a failing item never stops the ones behind it, exactly as in
         // Ansible. The task's own failure is decided later, by `report_task`, from every item's
         // result.
@@ -2690,8 +2707,8 @@ pub(super) fn protocol_task(
 /// `args` with what ansible-core's `_update_module_args` adds for the task's check and diff
 /// modes, sent only when on. Whatever the playbook wrote under those names goes, as the reference
 /// overwrites it: a task cannot talk a module out of check mode through its arguments.
-fn with_modes(task: &PlayTask, mut args: Map<String, Value>) -> Map<String, Value> {
-    for (key, on) in [(CHECK_MODE_ARG, task.check_mode), (DIFF_ARG, task.diff)] {
+fn with_modes(item: &Item, mut args: Map<String, Value>) -> Map<String, Value> {
+    for (key, on) in [(CHECK_MODE_ARG, item.check_mode), (DIFF_ARG, item.diff)] {
         args.remove(key);
         if on == Some(true) {
             args.insert(key.into(), Value::Bool(true));
@@ -4131,6 +4148,8 @@ mod tests {
                 vars: HostVars::default(),
                 environment: BTreeMap::new(),
                 ignore_errors: None,
+                check_mode: None,
+                diff: None,
                 skipped: None,
                 set_fact_names: std::sync::OnceLock::new(),
                 notify: Vec::new(),
@@ -4167,6 +4186,8 @@ mod tests {
             vars: HostVars::default(),
             environment: BTreeMap::new(),
             ignore_errors: None,
+            check_mode: None,
+            diff: None,
             skipped: None,
             set_fact_names: std::sync::OnceLock::new(),
             notify: Vec::new(),
@@ -4688,6 +4709,8 @@ mod tests {
                 vars: hvars(host),
                 environment: BTreeMap::new(),
                 ignore_errors: None,
+                check_mode: None,
+                diff: None,
                 skipped: None,
                 set_fact_names: std::sync::OnceLock::new(),
                 notify: Vec::new(),
@@ -4835,6 +4858,8 @@ mod tests {
             vars: HostVars::default(),
             environment: BTreeMap::new(),
             ignore_errors: None,
+            check_mode: None,
+            diff: None,
             skipped: None,
             set_fact_names: std::sync::OnceLock::new(),
             notify: Vec::new(),
@@ -4881,6 +4906,8 @@ mod tests {
             vars: HostVars::default(),
             environment: BTreeMap::new(),
             ignore_errors: None,
+            check_mode: None,
+            diff: None,
             skipped: None,
             set_fact_names: std::sync::OnceLock::new(),
             notify: Vec::new(),
@@ -4935,6 +4962,8 @@ mod tests {
             vars: HostVars::default(),
             environment: BTreeMap::new(),
             ignore_errors: None,
+            check_mode: None,
+            diff: None,
             skipped: None,
             set_fact_names: std::sync::OnceLock::new(),
             notify: Vec::new(),
@@ -6937,6 +6966,22 @@ mod tests {
             let failure = sub_task(&task("copy"), &bare_item(), &sub, None, &python3(), None)
                 .expect_err("a module the union lacks is never sent as native");
             assert!(msg(&failure).contains("python payload"), "{failure:?}");
+            // A bridged plugin that calls `command` sends the agent's own module no name key.
+            let sub = crate::action_plugins::Sub {
+                module: "command",
+                args: json!({"cmd": "true", "_ansible_module_name": "ansible.legacy.command"})
+                    .as_object()
+                    .cloned()
+                    .expect("an object"),
+                files: Vec::new(),
+            };
+            let built = sub_task(&task("copy"), &bare_item(), &sub, None, &python3(), None)
+                .expect("a native sub-task builds");
+            assert_eq!(built.args.get("cmd"), Some(&json!("true")));
+            assert!(
+                !built.args.contains_key("_ansible_module_name"),
+                "{built:?}"
+            );
         }
     }
 
@@ -8000,6 +8045,8 @@ mod tests {
             vars: HostVars::default(),
             environment: BTreeMap::new(),
             ignore_errors: None,
+            check_mode: None,
+            diff: None,
             skipped: None,
             set_fact_names: std::sync::OnceLock::new(),
             notify: Vec::new(),
