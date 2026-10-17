@@ -234,6 +234,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "web[1:3],db[a:b]:2222,x:y,"
@@ -267,6 +268,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "web[1:3],"
@@ -279,6 +281,7 @@
       },
       "hosts": [],
       "list": null,
+      "needs": [],
       "rc": 1,
       "sources": [
         "bad.ini",
@@ -300,6 +303,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "bad.ini"
@@ -347,12 +351,87 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "bad.ini",
         "one.ini"
       ],
       "stderr": "[WARNING]: Failed to parse inventory with 'ini' plugin: Failed to parse inventory: not enough values to unpack (expected 3, got 2)\n\nFailed to parse inventory with 'ini' plugin.\n\n<<< caused by >>>\n\nFailed to parse inventory: not enough values to unpack (expected 3, got 2)\nOrigin: <golden-tmp>/bad.ini\n\n[WARNING]: Unable to parse <golden-tmp>/bad.ini as an inventory source\n"
+    },
+    "collection_plugin_fails": {
+      "env": {},
+      "hosts": [],
+      "list": {
+        "_meta": {
+          "hostvars": {},
+          "profile": "inventory_legacy"
+        },
+        "all": {
+          "children": [
+            "ungrouped"
+          ]
+        }
+      },
+      "needs": [
+        "ansible-core"
+      ],
+      "rc": 0,
+      "sources": [
+        "icinga2.yml"
+      ],
+      "stderr": "[WARNING]: Failed to parse inventory with 'auto' plugin: Required config 'url' for 'ansible_collections.community.general.plugins.inventory.icinga2' inventory plugin not provided.\n\nFailed to parse inventory with 'auto' plugin.\n\n<<< caused by >>>\n\nRequired config 'url' for 'ansible_collections.community.general.plugins.inventory.icinga2' inventory plugin not provided.\nOrigin: <inventory plugin 'auto' with source '<golden-tmp>/icinga2.yml'>\n\n[WARNING]: Failed to parse inventory with 'yaml' plugin: Plugin configuration YAML file, not YAML inventory\n\nFailed to parse inventory with 'yaml' plugin.\n\n<<< caused by >>>\n\nPlugin configuration YAML file, not YAML inventory\nOrigin: <inventory plugin 'yaml' with source '<golden-tmp>/icinga2.yml'>\n\n[WARNING]: Failed to parse inventory with 'ini' plugin: Failed to parse inventory: Invalid host pattern 'plugin:' supplied, ending in ':' is not allowed, this character is reserved to provide a port.\n\nFailed to parse inventory with 'ini' plugin.\n\n<<< caused by >>>\n\nFailed to parse inventory: Invalid host pattern 'plugin:' supplied, ending in ':' is not allowed, this character is reserved to provide a port.\nOrigin: <golden-tmp>/icinga2.yml\n\n[WARNING]: Unable to parse <golden-tmp>/icinga2.yml as an inventory source\n[WARNING]: No inventory was parsed, only implicit localhost is available\n"
+    },
+    "collection_plugin_fails_then_ini": {
+      "env": {},
+      "hosts": [
+        "h1",
+        "h2",
+        "h3"
+      ],
+      "list": {
+        "_meta": {
+          "hostvars": {
+            "h1": {
+              "only_one": 1,
+              "v": "one_h1",
+              "wv": "one"
+            },
+            "h2": {
+              "wv": "one"
+            }
+          },
+          "profile": "inventory_legacy"
+        },
+        "all": {
+          "children": [
+            "ungrouped",
+            "web",
+            "shared"
+          ]
+        },
+        "shared": {
+          "hosts": [
+            "h3",
+            "h1"
+          ]
+        },
+        "web": {
+          "hosts": [
+            "h1",
+            "h2"
+          ]
+        }
+      },
+      "needs": [
+        "ansible-core"
+      ],
+      "rc": 0,
+      "sources": [
+        "icinga2.yml",
+        "one.ini"
+      ],
+      "stderr": "[WARNING]: Failed to parse inventory with 'auto' plugin: Required config 'url' for 'ansible_collections.community.general.plugins.inventory.icinga2' inventory plugin not provided.\n\nFailed to parse inventory with 'auto' plugin.\n\n<<< caused by >>>\n\nRequired config 'url' for 'ansible_collections.community.general.plugins.inventory.icinga2' inventory plugin not provided.\nOrigin: <inventory plugin 'auto' with source '<golden-tmp>/icinga2.yml'>\n\n[WARNING]: Failed to parse inventory with 'yaml' plugin: Plugin configuration YAML file, not YAML inventory\n\nFailed to parse inventory with 'yaml' plugin.\n\n<<< caused by >>>\n\nPlugin configuration YAML file, not YAML inventory\nOrigin: <inventory plugin 'yaml' with source '<golden-tmp>/icinga2.yml'>\n\n[WARNING]: Failed to parse inventory with 'ini' plugin: Failed to parse inventory: Invalid host pattern 'plugin:' supplied, ending in ':' is not allowed, this character is reserved to provide a port.\n\nFailed to parse inventory with 'ini' plugin.\n\n<<< caused by >>>\n\nFailed to parse inventory: Invalid host pattern 'plugin:' supplied, ending in ':' is not allowed, this character is reserved to provide a port.\nOrigin: <golden-tmp>/icinga2.yml\n\n[WARNING]: Unable to parse <golden-tmp>/icinga2.yml as an inventory source\n"
     },
     "colon": {
       "env": {},
@@ -368,6 +447,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "colon.ini"
@@ -420,6 +500,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "dir"
@@ -440,6 +521,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "empty"
@@ -480,6 +562,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "a:2222,,b,[::1]:22,b:x,"
@@ -507,6 +590,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "web[1:3],"
@@ -560,6 +644,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "h1,h9,",
@@ -866,6 +951,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "base.ini",
@@ -907,6 +993,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "late_children.ini"
@@ -927,11 +1014,172 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "missing.ini"
       ],
       "stderr": "[WARNING]: Unable to parse <golden-tmp>/missing.ini as an inventory source\n[WARNING]: No inventory was parsed, only implicit localhost is available\n"
+    },
+    "nmap": {
+      "env": {
+        "PATH": "$COPY/fakebin:$PATH"
+      },
+      "hosts": [
+        "web1.example",
+        "db1.example"
+      ],
+      "list": {
+        "_meta": {
+          "hostvars": {
+            "db1.example": {
+              "ip": {
+                "__ansible_unsafe": "192.0.2.11"
+              },
+              "name": {
+                "__ansible_unsafe": "db1.example"
+              }
+            },
+            "web1.example": {
+              "ip": {
+                "__ansible_unsafe": "192.0.2.10"
+              },
+              "name": {
+                "__ansible_unsafe": "web1.example"
+              },
+              "ports": [
+                {
+                  "port": {
+                    "__ansible_unsafe": "22"
+                  },
+                  "protocol": {
+                    "__ansible_unsafe": "tcp"
+                  },
+                  "service": {
+                    "__ansible_unsafe": "ssh"
+                  },
+                  "state": {
+                    "__ansible_unsafe": "open"
+                  }
+                }
+              ]
+            }
+          },
+          "profile": "inventory_legacy"
+        },
+        "all": {
+          "children": [
+            "ungrouped"
+          ]
+        },
+        "ungrouped": {
+          "hosts": [
+            "web1.example",
+            "db1.example"
+          ]
+        }
+      },
+      "needs": [
+        "ansible-core"
+      ],
+      "rc": 0,
+      "sources": [
+        "nmap.yml"
+      ],
+      "stderr": "[WARNING]: Found variable using reserved name 'name'.\nOrigin: <unknown>\n\nname\n\n"
+    },
+    "nmap_then_ini": {
+      "env": {
+        "PATH": "$COPY/fakebin:$PATH"
+      },
+      "hosts": [
+        "web1.example",
+        "db1.example",
+        "h1",
+        "h2",
+        "h3"
+      ],
+      "list": {
+        "_meta": {
+          "hostvars": {
+            "db1.example": {
+              "ip": {
+                "__ansible_unsafe": "192.0.2.11"
+              },
+              "name": {
+                "__ansible_unsafe": "db1.example"
+              }
+            },
+            "h1": {
+              "only_one": 1,
+              "v": "one_h1",
+              "wv": "one"
+            },
+            "h2": {
+              "wv": "one"
+            },
+            "web1.example": {
+              "ip": {
+                "__ansible_unsafe": "192.0.2.10"
+              },
+              "name": {
+                "__ansible_unsafe": "web1.example"
+              },
+              "ports": [
+                {
+                  "port": {
+                    "__ansible_unsafe": "22"
+                  },
+                  "protocol": {
+                    "__ansible_unsafe": "tcp"
+                  },
+                  "service": {
+                    "__ansible_unsafe": "ssh"
+                  },
+                  "state": {
+                    "__ansible_unsafe": "open"
+                  }
+                }
+              ]
+            }
+          },
+          "profile": "inventory_legacy"
+        },
+        "all": {
+          "children": [
+            "ungrouped",
+            "web",
+            "shared"
+          ]
+        },
+        "shared": {
+          "hosts": [
+            "h3",
+            "h1"
+          ]
+        },
+        "ungrouped": {
+          "hosts": [
+            "web1.example",
+            "db1.example"
+          ]
+        },
+        "web": {
+          "hosts": [
+            "h1",
+            "h2"
+          ]
+        }
+      },
+      "needs": [
+        "ansible-core"
+      ],
+      "rc": 0,
+      "sources": [
+        "nmap.yml",
+        "one.ini"
+      ],
+      "stderr": "[WARNING]: Found variable using reserved name 'name'.\nOrigin: <unknown>\n\nname\n\n"
     },
     "partial": {
       "env": {},
@@ -947,6 +1195,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "partial.ini"
@@ -1001,6 +1250,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "partial.ini",
@@ -1053,6 +1303,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "priority.ini"
@@ -1143,6 +1394,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "ranges.ini"
@@ -1163,6 +1415,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_badjson.sh"
@@ -1183,6 +1436,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_empty.sh"
@@ -1203,6 +1457,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_fail.sh"
@@ -1250,6 +1505,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_fail.sh",
@@ -1271,6 +1527,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_host_bad.sh"
@@ -1299,6 +1556,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_host_empty.sh"
@@ -1319,6 +1577,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_hosts_str.sh"
@@ -1339,6 +1598,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_hostvars_late.sh"
@@ -1392,6 +1652,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_hostvars_late.sh",
@@ -1413,6 +1674,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_list.sh"
@@ -1448,6 +1710,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_malformed.sh"
@@ -1506,6 +1769,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_meta.sh"
@@ -1526,6 +1790,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_meta_int.sh"
@@ -1546,6 +1811,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_noexec.sh"
@@ -1566,6 +1832,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_nohv.sh"
@@ -1605,6 +1872,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_nometa.sh"
@@ -1640,6 +1908,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_order.sh"
@@ -1715,6 +1984,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_meta.sh",
@@ -1736,6 +2006,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "script_vars_list.sh"
@@ -1833,6 +2104,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "basic.toml"
@@ -1853,6 +2125,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "bad_children.toml"
@@ -1873,6 +2146,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "empty.toml"
@@ -1893,6 +2167,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "bad_hosts.toml"
@@ -1913,6 +2188,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "plugin.toml"
@@ -2236,6 +2512,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "basic.toml",
@@ -2292,6 +2569,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "one.ini",
@@ -2348,6 +2626,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "two.ini",
@@ -2369,6 +2648,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "undefined_child.ini"
@@ -2389,6 +2669,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "undefined_vars.ini"
@@ -2401,6 +2682,7 @@
       },
       "hosts": [],
       "list": null,
+      "needs": [],
       "rc": 1,
       "sources": [
         "bad.ini"
@@ -2450,6 +2732,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "bad.ini",
@@ -2723,6 +3006,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "basic.yml"
@@ -2754,6 +3038,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "empty_sections.yml"
@@ -2791,6 +3076,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "children.yml"
@@ -2833,6 +3119,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "odd.yml"
@@ -3138,6 +3425,7 @@
           ]
         }
       },
+      "needs": [],
       "rc": 0,
       "sources": [
         "basic.yml",
