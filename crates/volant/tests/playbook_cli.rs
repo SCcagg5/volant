@@ -6327,9 +6327,8 @@ fn a_strategy_that_does_not_wait_warns_or_stops_like_the_reference() {
     - command: echo {{ inventory_hostname }}
       register: out
       run_once: true
-      when: inventory_hostname == 'h1'
     - assert:
-        that: out.stdout == 'h1'
+        that: hostvars['h1'].out.stdout == inventory_hostname
 ",
             0,
             &[once][..],
