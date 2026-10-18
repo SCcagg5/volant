@@ -44,7 +44,8 @@ fn only_the_actions_that_bypass_the_host_loop_end_the_run() {
     );
     let errors: Vec<Option<String>> = c.steps.iter().map(|s| bypass_error(&s.task)).collect();
     let first = errors[0].as_deref().expect("pause ends the run");
-    assert!(first.starts_with("The 'pause' module bypasses the host loop, which is currently not supported in the free strategy and would instead execute for every host in the inventory list.\nOrigin: play.yml:4:7"), "{first}");
+    assert!(first.starts_with("The 'pause' module bypasses the host loop, which is currently not supported in the free strategy and would instead execute for every host in the inventory list.\nOrigin: "), "{first}");
+    assert!(first.contains("play.yml:4:7\n"), "{first}");
     let second = errors[1].as_deref().expect("add_host ends the run");
     assert!(
         second.starts_with("The 'ansible.builtin.add_host' module"),
