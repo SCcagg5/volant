@@ -65,7 +65,9 @@ The controller keeps one Python helper process for the whole run. It uses ansibl
 
 | File | What it holds |
 |---|---|
-| `mod.rs` | The run's settings, the connections kept between plays, and the entry point the command line calls. |
+| `mod.rs` | The run's settings and `run_play`, the entry point the command line calls. |
+| `state.rs` | What a run carries from play to play: the abort, the reboots counted, the connections kept and the failed hosts. |
+| `play_checks.rs` | What a play is checked for before it runs: `host_pinned`, `max_fail_percentage`, the gather keywords and `vars_files`. |
 | `coordinator.rs` | The serialized view of a batch's progress, and everything that reaches the terminal. |
 | `driver/` | One host's run through a play, from its first step to the moment it leaves. `mod.rs` holds `drive_host`, `boundaries.rs` the scan that decides where the hosts meet, `waits.rs` the waits on the other hosts, `unreachable.rs` the `ignore_unreachable` steps, `timings.rs` the profile records of a link. |
 | `prepare.rs` | Rendering one task for one host: variables, escalation, environment and loop items. |
