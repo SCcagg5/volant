@@ -1,77 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The `auto` inventory plugin: a YAML file whose `plugin` key names the plugin that reads it.
-//! A plugin of a collection is run by ansible-core in the Python helper, which starts only then.
+//! An inventory plugin of a collection, named by an `auto` file: ansible-core runs it in the
+//! Python helper, which starts only then, and its answer is read here.
 
 use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use super::{Inventory, InventoryPlugin, ParseCx, PluginError, Source, ini, sources};
+use super::{Inventory, ParseCx, PluginError, Source, ini};
 use crate::yaml;
-
-pub(super) struct Auto;
-
-/// The plugins ansible-core ships that `auto` can name; this release reads none of them yet.
-const BUILTIN: &[&str] = &[
-    "advanced_host_list",
-    "auto",
-    "constructed",
-    "generator",
-    "host_list",
-    "ini",
-    "script",
-    "toml",
-    "yaml",
-];
-
-impl InventoryPlugin for Auto {
-    fn name(&self) -> &'static str {
-        "auto"
-    }
-
-    fn verify(&self, source: &Source) -> bool {
-        sources::file_with_extension(source, &[Some("yml"), Some("yaml")])
-    }
-
-    fn parse(
-        &self,
-        source: &Source,
-        into: &mut Inventory,
-        cx: &ParseCx,
-    ) -> Result<(), PluginError> {
-        let path = source.text();
-        let text = std::fs::read(source.path())
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-            .map_err(|e| failure(format!("Unable to read {path}: {e}")))?;
-        let docs = yaml::load(&text, path).map_err(|e| failure(format!("{e:#}")))?;
-        let named = docs.first().and_then(|doc| yaml::field(doc, "plugin"));
-        let Some(named) = named.filter(|n| n.as_str() != Some("")) else {
-            return Err(failure(format!(
-                "no root 'plugin' key found, '{path}' is not a valid YAML inventory plugin config \
-                 file"
-            )));
-        };
-        let Some(name) = named.as_str() else {
-            return Err(failure(format!(
-                "inventory config '{path}' specifies unknown plugin '{named:?}'"
-            )));
-        };
-        let short = name.strip_prefix("ansible.builtin.").unwrap_or(name);
-        if BUILTIN.contains(&short) {
-            return Err(PluginError::unsupported(short));
-        }
-        if !name.contains('.') {
-            return Err(failure(format!(
-                "inventory config '{path}' specifies unknown plugin '{name}'"
-            )));
-        }
-        let answer = cx
-            .helper()
-            .inventory(name, path)
-            .map_err(|e| failure(e.to_string()))?;
-        read(&answer, source, into, cx)
-    }
-}
 
 fn failure(message: String) -> PluginError {
     PluginError {

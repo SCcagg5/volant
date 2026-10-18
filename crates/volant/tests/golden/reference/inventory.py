@@ -39,7 +39,11 @@ def _sources():
             # `$COPY` is this copy of the directory and `$PATH` the search path the run has.
             used = {k: v.replace("$COPY", copy).replace("$PATH", os.environ["PATH"]) for k, v in env.items()}
             listed = run(["ansible-inventory", *args, "--list"], cwd=copy, extra_env=used)
-            hosts = run(["ansible", *args, "all", "--list-hosts"], cwd=copy, extra_env=used)
+            # A group walk over sets of groups hashed by name: the host order is not stable.
+            unordered = case.get("hosts") == "unordered"
+            hosts = None if unordered else run(
+                ["ansible", *args, "all", "--list-hosts"], cwd=copy, extra_env=used
+            )
             recorded[name] = {
                 "sources": case["sources"],
                 "env": env,
@@ -47,7 +51,9 @@ def _sources():
                 "rc": listed.returncode,
                 "stderr": listed.stderr.replace(copy, TMP),
                 "list": json.loads(listed.stdout) if listed.returncode == 0 else None,
-                "hosts": [h.strip() for h in hosts.stdout.splitlines()[1:] if h.strip()],
+                "hosts": None
+                if unordered
+                else [h.strip() for h in hosts.stdout.splitlines()[1:] if h.strip()],
             }
     return recorded
 

@@ -3,7 +3,10 @@
 //! them: each source offered to the enabled plugins in turn, directories walked, several
 //! sources merged into one inventory.
 
+mod auto;
 mod collection;
+mod constructed;
+mod generator;
 mod host_list;
 mod ini;
 pub mod ranges;
@@ -30,40 +33,12 @@ const PLUGINS: &[&dyn InventoryPlugin] = &[
     &host_list::HostList { advanced: false },
     &host_list::HostList { advanced: true },
     &script::Script,
-    &collection::Auto,
+    &auto::Auto,
     &yaml::YamlInventory,
     &ini::Ini,
     &toml::Toml,
-    &sources::Pending {
-        name: "constructed",
-        verify: |s| {
-            sources::file_with_extension(
-                s,
-                &[
-                    None,
-                    Some("config"),
-                    Some("yaml"),
-                    Some("yml"),
-                    Some("json"),
-                ],
-            )
-        },
-    },
-    &sources::Pending {
-        name: "generator",
-        verify: |s| {
-            sources::file_with_extension(
-                s,
-                &[
-                    None,
-                    Some("config"),
-                    Some("yaml"),
-                    Some("yml"),
-                    Some("json"),
-                ],
-            )
-        },
-    },
+    &constructed::Constructed,
+    &generator::Generator,
 ];
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -83,12 +58,27 @@ struct Group {
     priority: Option<i64>,
 }
 
+/// A computed value as `--list` prints it: every string in it wrapped, mapping keys left alone.
+fn mark_unsafe(value: &mut Value, computed: &HashSet<String>) {
+    match value {
+        Value::String(text) if computed.contains(text.as_str()) => {
+            *value = serde_json::json!({ "__ansible_unsafe": text });
+        }
+        Value::Array(items) => items.iter_mut().for_each(|v| mark_unsafe(v, computed)),
+        Value::Object(map) => map.values_mut().for_each(|v| mark_unsafe(v, computed)),
+        _ => {}
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Inventory {
     hosts: Vec<Host>,
     groups: Vec<Group>,
     /// The file each host was first read from, for its `inventory_file` and `inventory_dir`.
     origins: HashMap<String, PathBuf>,
+    /// The `(host, variable)` pairs a `constructed` compose built from a computed string, which
+    /// `--list` marks `__ansible_unsafe`.
+    unsafe_vars: HashMap<(String, String), HashSet<String>>,
 }
 
 #[derive(Debug, Default)]
@@ -143,6 +133,17 @@ impl Inventory {
         Ok(loaded.inventory)
     }
 
+    /// The variables a run must treat as data, by host: the ones a compose computed.
+    pub fn untrusted_vars(&self) -> BTreeMap<String, std::collections::BTreeSet<String>> {
+        let mut out: BTreeMap<String, std::collections::BTreeSet<String>> = BTreeMap::new();
+        for ((host, var), computed) in &self.unsafe_vars {
+            if !computed.is_empty() {
+                out.entry(host.clone()).or_default().insert(var.clone());
+            }
+        }
+        out
+    }
+
     /// The file `host` was first read from, when a file source added it.
     pub fn source_of(&self, host: &str) -> Option<&Path> {
         self.origins.get(host).map(PathBuf::as_path)
@@ -159,6 +160,8 @@ impl Inventory {
         file: Option<&Path>,
     ) -> bool {
         if let Some(host) = self.hosts.iter_mut().find(|h| h.name == name) {
+            self.unsafe_vars
+                .retain(|(h, v), _| h != name || !vars.contains_key(v));
             host.vars.extend(vars);
             return false;
         }
@@ -209,6 +212,16 @@ impl Inventory {
             .hosts
             .iter()
             .map(|h| (h.name.clone(), self.host_with_vars(&h.name).vars))
+            .map(|(name, mut vars)| {
+                for ((host, var), computed) in &self.unsafe_vars {
+                    if *host == name
+                        && let Some(value) = vars.get_mut(var)
+                    {
+                        mark_unsafe(value, computed);
+                    }
+                }
+                (name, vars)
+            })
             .filter(|(_, vars)| !vars.is_empty())
             .map(|(name, vars)| {
                 (
@@ -411,7 +424,11 @@ impl Inventory {
     /// Adds a host, or merges `vars` into the one of that name.
     pub fn add_host(&mut self, name: &str, vars: BTreeMap<String, Value>) {
         match self.hosts.iter_mut().find(|h| h.name == name) {
-            Some(host) => host.vars.extend(vars),
+            Some(host) => {
+                self.unsafe_vars
+                    .retain(|(h, v), _| h != name || !vars.contains_key(v));
+                host.vars.extend(vars);
+            }
             None => self.hosts.push(Host {
                 name: name.to_string(),
                 vars,
