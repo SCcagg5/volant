@@ -91,6 +91,7 @@ The controller keeps one Python helper process for the whole run. It uses ansibl
 | `natives/systemd/` | The native `systemd`: the answer, the request and its options, the `systemctl` host, and the reading of `systemctl show` and init scripts. |
 | `natives/file/` | The native `file`: the answer and the states it ensures, and the check before a tree is removed. |
 | `natives/group/` | The native `group`, and what `user` shares with it: the host gate, the commands, the account files and the result keys. |
+| `natives/setup/network/` | The `network` collector: the commands it runs and the working state it reads their output into. |
 | `natives/package_facts/` | The native `package_facts` for apt: the run and its arguments, dpkg's status, the configured sources, and the scan of the lists. |
 | `blobs/` | The cache of module payloads, addressed by hash: reading the controller's messages, the staged files of a connection, and the filesystem checks. |
 | `interpreter.rs` | Finding the host's Python interpreters, in the order Ansible prefers them. |
