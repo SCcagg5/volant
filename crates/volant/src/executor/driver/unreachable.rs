@@ -79,8 +79,8 @@ pub(super) async fn ignore_the_batch(
     pos: &mut usize,
 ) -> bool {
     let task = &compiled.steps[index].task;
-    let live = driver.progress.borrow().live_hosts.clone();
-    let targets = fact_targets(task, host, &live);
+    let live = driver.plan.batch_hosts(&driver.progress.borrow());
+    let targets = fact_targets(task, host, &live, driver.plan.strategy.free());
     ignore_unreachable(tx, host, index, task, msg, delegate, store, &targets).await;
     if let Some(step) = undecided {
         let Some(next) = driver.advance(step).await else {

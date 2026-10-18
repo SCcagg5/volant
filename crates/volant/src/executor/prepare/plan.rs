@@ -101,6 +101,24 @@ impl Strategy {
 }
 
 impl PlayPlan {
+    /// `ansible_play_batch` as `live` stands: the batch's live hosts, or under `host_pinned` the
+    /// whole batch its waves were cut from, less the hosts the play has lost.
+    pub(in crate::executor) fn batch_hosts(
+        &self,
+        live: &crate::executor::coordinator::Progress,
+    ) -> Vec<String> {
+        if self.strategy.pinned() {
+            let left = &live.play_hosts_left;
+            self.whole_batch
+                .iter()
+                .filter(|h| left.contains(h))
+                .cloned()
+                .collect()
+        } else {
+            live.live_hosts.clone()
+        }
+    }
+
     /// The step list as it stands. An `Arc` clone, so the watch is never held across an `await`.
     pub(in crate::executor) fn steps(&self) -> Arc<Compiled> {
         self.plan.borrow().clone()

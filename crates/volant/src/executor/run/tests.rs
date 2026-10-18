@@ -1140,9 +1140,9 @@ fn a_raw_argument_on_a_collection_module_fails_the_task_when_it_runs() {
 fn a_run_once_step_writes_its_result_for_the_whole_batch() {
     let live = ["h1".to_string(), "h2".to_string()];
     let mut t = task("command");
-    assert_eq!(fact_targets(&t, "h1", &live), ["h1"]);
+    assert_eq!(fact_targets(&t, "h1", &live, false), ["h1"]);
     t.run_once = Some(true);
-    assert_eq!(fact_targets(&t, "h1", &live), live);
+    assert_eq!(fact_targets(&t, "h1", &live, false), live);
 }
 
 /// A payload the agent already holds is not sent again, and a payload it does not hold is sent

@@ -57,16 +57,7 @@ pub(in crate::executor) fn host_vars(
         role_vars: role.vars.clone(),
         role_params,
         play_hosts: live.play_hosts_left.clone(),
-        batch_hosts: if plan.strategy.pinned() {
-            let left = &live.play_hosts_left;
-            plan.whole_batch
-                .iter()
-                .filter(|h| left.contains(h))
-                .cloned()
-                .collect()
-        } else {
-            live.live_hosts.clone()
-        },
+        batch_hosts: plan.batch_hosts(live),
         all_play_hosts: plan.all_play_hosts.clone(),
     };
     let mut vars = {

@@ -214,12 +214,15 @@ pub(in crate::executor) fn record_local_facts(
     }
 }
 
+/// The hosts a fact or a `register` of `task` on `host` is written for: every host of the batch
+/// for a `run_once` task, kept under `free` too, where the task runs on every host.
 pub(in crate::executor) fn fact_targets(
     task: &PlayTask,
     host: &str,
     live: &[String],
+    free: bool,
 ) -> Vec<String> {
-    if task.runs_once() && !live.is_empty() {
+    if (task.runs_once() || (free && task.loosened_once())) && !live.is_empty() {
         live.to_vec()
     } else {
         vec![host.to_string()]

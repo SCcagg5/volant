@@ -830,7 +830,8 @@ pub(super) async fn drive_host(
             // whole batch, so what it registered is written for every live host of the batch:
             // measured on ansible-core 2.19.12, `register: o` under `run_once: true` on h1
             // reads back as `o.stdout` on h2 as well. Every other step writes for its own host.
-            let register_hosts: Vec<String> = fact_targets(task, &name, &live.live_hosts);
+            let register_hosts: Vec<String> =
+                fact_targets(task, &name, &plan.batch_hosts(&live), plan.strategy.free());
             // A step calling a lookup starts its own batch. Every step of a batch is rendered
             // before the batch goes out, so a lookup rendered behind a batch in hand would read
             // the controller before the tasks in front of it had run - a file one of them
@@ -2179,8 +2180,8 @@ pub(super) async fn drive_host(
                         break 'run;
                     }
                 };
-                let live = driver.progress.borrow().live_hosts.clone();
-                let targets = fact_targets(task, &name, &live);
+                let live = plan.batch_hosts(&driver.progress.borrow());
+                let targets = fact_targets(task, &name, &live, plan.strategy.free());
                 let fact_hosts = match (task.delegates_facts(), &batch_delegate) {
                     (true, Some(to)) => std::slice::from_ref(to),
                     _ => &targets[..],

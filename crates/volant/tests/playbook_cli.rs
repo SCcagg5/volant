@@ -6319,6 +6319,22 @@ fn a_strategy_that_does_not_wait_warns_or_stops_like_the_reference() {
             &[once][..],
         ),
         (
+            "pinned-run-once-register",
+            "- hosts: all
+  strategy: host_pinned
+  gather_facts: false
+  tasks:
+    - command: echo {{ inventory_hostname }}
+      register: out
+      run_once: true
+      when: inventory_hostname == 'h1'
+    - assert:
+        that: out.stdout == 'h1'
+",
+            0,
+            &[once][..],
+        ),
+        (
             "free-add-host",
             "- hosts: all
   strategy: free
