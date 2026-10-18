@@ -1,6 +1,5 @@
 crates/volant-agent/src/natives/apt.rs 1303
 crates/volant-agent/src/natives/user.rs 667
-crates/volant/src/action_plugins/bridged.rs 569
 crates/volant/src/cli/run.rs 741
 crates/volant/src/executor/coordinator/mod.rs 877
 crates/volant/src/executor/driver/mod.rs 2626
