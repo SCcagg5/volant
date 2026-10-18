@@ -55,6 +55,10 @@ pub(in crate::executor) struct PlayPlan {
     /// Every host the play resolved, whatever batch it belongs to and whether it has failed or
     /// not: `ansible_play_hosts_all`. Fixed for the whole play, batches included.
     pub(in crate::executor) all_play_hosts: Vec<String>,
+    /// The batch as the inventory cut it. Under `host_pinned` a wave of hosts runs as a batch of
+    /// its own, and `ansible_play_batch` is still served from this whole list, less the hosts
+    /// the play has lost.
+    pub(in crate::executor) whole_batch: Vec<String>,
     pub(in crate::executor) r#become: Option<bool>,
     pub(in crate::executor) become_user: Option<String>,
     /// The module payloads this run sends, built once before the first connection. Shared rather

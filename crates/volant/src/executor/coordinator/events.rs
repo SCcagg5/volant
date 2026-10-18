@@ -104,7 +104,20 @@ pub(super) fn book(
     if fatal {
         coordinator.fatal.insert(at);
     }
-    if lost || announced || fatal {
+    // Under `free` and `host_pinned` a failed `run_once` task still fails every host, as the
+    // reference's strategy base does whatever the strategy: the others leave at their next step.
+    let once = sank && plan.strategy.free() && step.as_ref().is_some_and(PlayTask::loosened_once);
+    if once {
+        let staying: Vec<String> = coordinator
+            .batch_hosts
+            .iter()
+            .filter(|h| h.as_str() != host && !failed_hosts.contains(*h))
+            .cloned()
+            .collect();
+        coordinator.removed.extend(staying);
+        round.once_failed = true;
+    }
+    if lost || announced || fatal || once {
         coordinator.publish(failed_hosts, &plan.steps().steps);
     }
 }

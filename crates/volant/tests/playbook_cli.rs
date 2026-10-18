@@ -6264,6 +6264,7 @@ fn a_strategy_that_does_not_wait_warns_or_stops_like_the_reference() {
     let once = "[WARNING]: Using run_once with the free strategy is not currently supported. This task will still be executed for every host in the inventory list.";
     let fatal = "[WARNING]: Using any_errors_fatal with the free strategy is not supported, as tasks are executed independently on each host";
     let max_fail = "[WARNING]: Using max_fail_percentage with the free strategy is not supported, as tasks are executed independently on each host";
+    let add_host = "[ERROR]: The 'add_host' module bypasses the host loop, which is currently not supported in the free strategy and would instead execute for every host in the inventory list.";
     let pause = "[ERROR]: The 'pause' module bypasses the host loop, which is currently not supported in the free strategy and would instead execute for every host in the inventory list.";
     for (name, play, code, warned) in [
         (
@@ -6299,6 +6300,32 @@ fn a_strategy_that_does_not_wait_warns_or_stops_like_the_reference() {
 ",
             2,
             &[max_fail, fatal][..],
+        ),
+        (
+            "pinned-run-once-fails",
+            "- hosts: all
+  strategy: host_pinned
+  gather_facts: false
+  tasks:
+    - fail: msg=no
+      run_once: true
+    - debug: msg=never
+",
+            2,
+            &[once][..],
+        ),
+        (
+            "free-add-host",
+            "- hosts: all
+  strategy: free
+  gather_facts: false
+  tasks:
+    - debug: msg=first
+    - add_host: {name: extra}
+    - debug: msg=never
+",
+            1,
+            &[add_host][..],
         ),
         (
             "pinned-pause",

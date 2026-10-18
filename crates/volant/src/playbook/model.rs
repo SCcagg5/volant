@@ -353,6 +353,13 @@ impl PlayTask {
         self.run_once.unwrap_or(false)
     }
 
+    /// Whether this task of a `free` or `host_pinned` play was written with `run_once`: the
+    /// executor leaves it at `Some(false)` there, so every host runs the task and a failure
+    /// still fails them all.
+    pub fn loosened_once(&self) -> bool {
+        self.run_once == Some(false)
+    }
+
     /// Whether the facts this task sets belong to the host it was delegated to rather than to
     /// the host it was written for. Silence means no.
     pub fn delegates_facts(&self) -> bool {

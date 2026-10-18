@@ -660,6 +660,7 @@ fn plan() -> PlayPlan {
         play_vars: Map::new(),
         vars_files: HashMap::new(),
         all_play_hosts: Vec::new(),
+        whole_batch: Vec::new(),
         r#become: None,
         become_user: None,
         python: None,

@@ -17,14 +17,15 @@ const RUN_ONCE: &str = "Using run_once with the free strategy is not currently s
 /// warnings the reference prints for them, in the order the tasks come.
 ///
 /// The reference warns when a host reaches such a task; here the warnings come when the steps
-/// are loaded, so a task no host reaches still warns. A failed `run_once` task fails only its
-/// own host here, where the reference fails every host of the play.
+/// are loaded, so a task no host reaches still warns.
 pub(super) fn loosen(c: &mut Compiled) -> Vec<String> {
     let mut warnings: Vec<String> = Vec::new();
     let tasks = c.steps.iter_mut().map(|s| &mut s.task);
     for task in tasks.chain(c.handlers.iter_mut().map(|h| &mut h.task)) {
         let fatal = task.any_errors_fatal.take() == Some(true);
+        // Kept as `Some(false)` rather than cleared: see `PlayTask::loosened_once`.
         let once = task.run_once.take() == Some(true);
+        task.run_once = once.then_some(false);
         for (hit, text) in [(fatal, FATAL), (once, RUN_ONCE)] {
             if hit && !warnings.iter().any(|w| w == text) {
                 warnings.push(text.to_string());

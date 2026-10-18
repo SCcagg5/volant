@@ -232,8 +232,11 @@ pub async fn run_play(
             vec![live.as_slice()]
         };
         let mut ended_play = false;
+        let mut once_failed = false;
         for (n, wave) in waves.into_iter().enumerate() {
-            if n > 0 && (ended_play || options.abort.reason().is_some() || *options.stop.borrow()) {
+            // `meta: end_play` under `host_pinned` ends the hosts that ran it, not the waves to come.
+            if n > 0 && (once_failed || options.abort.reason().is_some() || *options.stop.borrow())
+            {
                 break;
             }
             let mut end = run_batch(
@@ -254,6 +257,7 @@ pub async fn run_play(
             )
             .await?;
             ended_play |= end.end_play;
+            once_failed |= end.once_failed;
             state.unreachable_hosts.extend(end.dark.drain(..));
             // The hosts a `clear_host_errors` brought back run the steps they missed, alone, once the
             // others are done: the reference's linear strategy goes back for them when its list of

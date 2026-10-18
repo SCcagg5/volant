@@ -109,6 +109,7 @@ pub(super) async fn run_batch(
         play_vars: play.vars.clone(),
         vars_files: vars_files.clone(),
         all_play_hosts: all.to_vec(),
+        whole_batch: whole.to_vec(),
         r#become: play.r#become,
         become_user: play.become_user.clone(),
         python: state.python.clone(),
@@ -616,9 +617,8 @@ pub(super) async fn run_batch(
                 next.splice(index + 1, steps);
             } else {
                 // The requests of every host, grouped so two hosts that asked for the same thing
-                // share one `included:` line and one copy of the steps behind it. First
-                // appearance decides the order, walked in the play's host order and then in each
-                // host's item order, which is the order the reference prints them in.
+                // share one `included:` line and one copy of the steps behind it, in the order
+                // of the play's hosts and then of each host's items, as the reference prints.
                 let mut arrived = includes.remove(&index).unwrap_or_default();
                 // `usize::MAX` rather than `None` for a host the batch does not hold, which
                 // would otherwise sort in front of every rank and take the first line.
@@ -866,6 +866,7 @@ pub(super) async fn run_batch(
     let revived = std::mem::take(&mut round.revived);
     Ok(BatchEnd {
         end_play: round.end_play,
+        once_failed: round.once_failed,
         steps: (!revived.is_empty()).then(|| (**plan_tx.borrow()).clone()),
         revived,
         dark: round.dark.into_iter().collect(),

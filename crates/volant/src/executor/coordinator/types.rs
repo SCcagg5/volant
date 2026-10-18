@@ -272,6 +272,9 @@ impl Unreached {
 pub(in crate::executor) struct BatchEnd {
     /// A `meta: end_play` held: no batch of the play after this one starts.
     pub end_play: bool,
+    /// A `run_once` task failed under `free` or `host_pinned`: the hosts of the batch that have
+    /// not started yet never do.
+    pub once_failed: bool,
     /// The hosts `meta: clear_host_errors` brought back, each with the step it picks the play up
     /// at. They run a round of their own once everybody else is done, as the reference's linear
     /// strategy goes back for them when its task list has run out.
@@ -287,6 +290,7 @@ pub(in crate::executor) struct BatchEnd {
 #[derive(Default)]
 pub(super) struct Round {
     pub(super) end_play: bool,
+    pub(super) once_failed: bool,
     /// Hosts that went unreachable and have not been forgiven.
     pub(super) dark: HashSet<String>,
     /// Where each of them picks the play up if it is.
