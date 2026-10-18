@@ -6258,6 +6258,10 @@ fn free_with_run_once_and_throttle_terminates() {
 /// `free` and `host_pinned` run what made them refuse a play before: the keywords that would
 /// have the hosts wait warn once each, and a `pause` ends the run with the reference's error.
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one row per case, each a whole playbook"
+)]
 fn a_strategy_that_does_not_wait_warns_or_stops_like_the_reference() {
     let dir = probe_dir("strategy-warnings");
     let inventory = two_hosts(&dir);
