@@ -6,7 +6,6 @@ crates/volant-protocol/src/modules.rs 715
 crates/volant/src/action_plugins/bridged.rs 569
 crates/volant/src/agent.rs 636
 crates/volant/src/cli/run.rs 741
-crates/volant/src/config.rs 716
 crates/volant/src/executor/coordinator.rs 1848
 crates/volant/src/executor/driver/mod.rs 2626
 crates/volant/src/executor/mod.rs 717
