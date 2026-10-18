@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.0-alpha.9](https://github.com/lorica-labs/volant/compare/v0.1.0-alpha.8...v0.1.0-alpha.9) - 2026-10-18
+
+### Added
+
+- *(executor)* accept async where ansible does, fail it where not ([#449](https://github.com/lorica-labs/volant/pull/449))
+- *(strategy)* run free and host_pinned plays the reference accepts ([#447](https://github.com/lorica-labs/volant/pull/447))
+- *(debugger)* redo a task from the debugger prompt ([#442](https://github.com/lorica-labs/volant/pull/442))
+- *(cli)* print every -vvvv line ansible prints ([#440](https://github.com/lorica-labs/volant/pull/440))
+- *(runtime)* pack a runtime and install it offline ([#443](https://github.com/lorica-labs/volant/pull/443))
+- *(runtime)* install collections into the runtime ([#441](https://github.com/lorica-labs/volant/pull/441))
+- *(runtime)* use the managed runtime and install it on first need ([#439](https://github.com/lorica-labs/volant/pull/439))
+- *(debugger)* answer every debugger command as ansible does ([#437](https://github.com/lorica-labs/volant/pull/437))
+- *(runtime)* install and manage Volant's Python runtime ([#438](https://github.com/lorica-labs/volant/pull/438))
+- *(executor)* template throttle and coerce it as ansible does ([#436](https://github.com/lorica-labs/volant/pull/436))
+- *(runtime)* pin and fetch a verified Python build ([#434](https://github.com/lorica-labs/volant/pull/434))
+
+### Fixed
+
+- *(executor)* close the remaining deferred executor gaps ([#457](https://github.com/lorica-labs/volant/pull/457))
+- *(strategy)* report a failure under free as soon as it happens ([#455](https://github.com/lorica-labs/volant/pull/455))
+- *(inventory)* close the remaining deferred inventory and output gaps ([#453](https://github.com/lorica-labs/volant/pull/453))
+- *(template)* close the deferred template, inventory and output gaps ([#451](https://github.com/lorica-labs/volant/pull/451))
+- *(executor)* close the deferred executor output gaps ([#450](https://github.com/lorica-labs/volant/pull/450))
+- *(actions)* close the deferred action and vault gaps ([#444](https://github.com/lorica-labs/volant/pull/444))
+- *(inventory)* run the implicit localhost under the controller Python ([#448](https://github.com/lorica-labs/volant/pull/448))
+- *(executor)* keep hosts forgiven by clear_host_errors in play ([#430](https://github.com/lorica-labs/volant/pull/430))
+
 ## [0.1.0-alpha.8](https://github.com/lorica-labs/volant/compare/v0.1.0-alpha.7...v0.1.0-alpha.8) - 2026-10-18
 
 ### Added
