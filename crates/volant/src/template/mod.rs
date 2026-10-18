@@ -14,7 +14,7 @@ mod filters;
 pub(crate) use filters::python_json;
 mod lookups;
 mod templar;
-mod tests;
+mod test_plugins;
 mod vm;
 mod yaml_dump;
 
