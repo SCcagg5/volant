@@ -87,7 +87,7 @@ The controller keeps one Python helper process for the whole run. It uses ansibl
 | `natives/setup/` | The native `setup`: one file per collector, plus the request, the collection run and the `fnmatch` filter. |
 | `natives/systemd/` | The native `systemd`: the answer, the request and its options, the `systemctl` host, and the reading of `systemctl show` and init scripts. |
 | `natives/package_facts/` | The native `package_facts` for apt: the run and its arguments, dpkg's status, the configured sources, and the scan of the lists. |
-| `blobs.rs` | The cache of module payloads, addressed by hash. |
+| `blobs/` | The cache of module payloads, addressed by hash: reading the controller's messages, the staged files of a connection, and the filesystem checks. |
 | `interpreter.rs` | Finding the host's Python interpreters, in the order Ansible prefers them. |
 
 ### Protocol, `crates/volant-protocol/src/`
