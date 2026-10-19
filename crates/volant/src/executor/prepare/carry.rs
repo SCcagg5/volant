@@ -27,8 +27,9 @@ pub(super) struct Carry {
     facts: Map<String, Value>,
     /// The carried names whose value came from a managed host: they stay data.
     data: BTreeSet<String>,
-    /// A carried name has been seen, and its mention in a variable checked once.
-    seen: BTreeSet<String>,
+    /// The carried names and the variables built from them, directly or through other
+    /// variables: each name is followed once.
+    reach: BTreeSet<String>,
     /// A template variable of the host names a carried name.
     derived: bool,
 }
@@ -39,7 +40,7 @@ impl Carry {
             merged,
             facts: Map::new(),
             data: BTreeSet::new(),
-            seen: BTreeSet::new(),
+            reach: BTreeSet::new(),
             derived: false,
         }
     }
@@ -71,6 +72,25 @@ impl Carry {
         }
     }
 
+    /// Adds to `reach` every variable that reads a name already in it, until none is left.
+    fn follow(&mut self) {
+        loop {
+            let found: Vec<String> = self
+                .merged
+                .map
+                .iter()
+                .filter(|(key, _)| !self.reach.contains(*key))
+                .filter(|(_, value)| self.reach.iter().any(|name| mentions(value, name)))
+                .map(|(key, _)| key.clone())
+                .collect();
+            if found.is_empty() {
+                return;
+            }
+            self.derived = true;
+            self.reach.extend(found);
+        }
+    }
+
     /// Takes what `item` sets: nothing for an item left out by its `when` or whose keys do not
     /// render. The trust is the one `record_local_facts` writes the same names with.
     pub(super) fn take(&mut self, item: &Item, templar: &Templar) {
@@ -81,8 +101,8 @@ impl Carry {
             return;
         };
         for (name, value, data) in names {
-            if self.seen.insert(name.clone()) && !self.derived {
-                self.derived = self.merged.map.values().any(|v| mentions(v, &name));
+            if self.reach.insert(name.clone()) {
+                self.follow();
             }
             if data {
                 self.data.insert(name.clone());
@@ -119,7 +139,23 @@ mod tests {
     use rstest::rstest;
     use serde_json::json;
 
-    use super::mentions;
+    use super::{Carry, mentions};
+    use crate::vars::HostVars;
+
+    /// A variable built from a variable built from a carried name is followed as well.
+    #[test]
+    fn a_variable_two_hops_from_a_carried_name_is_followed() {
+        let mut merged = HostVars::default();
+        merged.map.insert("e".into(), json!("{{ [x] }}"));
+        merged.map.insert("ee".into(), json!("{{ e | length }}"));
+        merged.map.insert("other".into(), json!("{{ y }}"));
+        let mut carry = Carry::new(merged);
+        carry.reach.insert("x".into());
+        carry.follow();
+        assert!(carry.derived);
+        assert!(carry.reach.contains("ee"));
+        assert!(!carry.reach.contains("other"));
+    }
 
     #[rstest]
     #[case::bare("{{ x | length }}", "x", true)]
