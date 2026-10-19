@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use serde_json::{Map, Value, json};
-use volant_protocol::modules::short_name;
+use volant_protocol::modules::{resolved_name, short_name};
 use volant_protocol::{BatchOutcome, StagedFile, Task, TaskResult};
 
 use crate::executor::prepare::Item;
@@ -46,7 +46,7 @@ pub(in crate::executor) fn action_fqcn(module: &str) -> String {
     if crate::python::is_resolved_name(module) {
         module.to_string()
     } else {
-        format!("ansible.builtin.{}", short_name(module))
+        format!("ansible.builtin.{}", resolved_name(module))
     }
 }
 

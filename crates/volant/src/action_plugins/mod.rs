@@ -33,7 +33,7 @@ use std::time::Duration;
 
 use serde_json::{Map, Value};
 use volant_protocol::TaskResult;
-use volant_protocol::modules::{ACTION_PLUGINS, short_name};
+use volant_protocol::modules::{ACTION_PLUGINS, resolved_name, short_name};
 
 use crate::template::Templar;
 use crate::vars::HostVars;
@@ -118,7 +118,7 @@ pub(crate) fn waits_for_later(name: &str) -> bool {
 /// Gated on [`ACTION_PLUGINS`], the list the modules page is built from, so a name this match
 /// knows and the page does not is never run.
 pub(crate) fn kind(module: &str) -> Option<Kind> {
-    let short = short_name(module);
+    let short = resolved_name(module);
     if !builtin_spelling(module) {
         return collection_actions()
             .action

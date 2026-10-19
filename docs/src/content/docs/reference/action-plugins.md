@@ -68,6 +68,8 @@ You should manually specify use_backend to tell the module whether to use the dn
 
 A failed `setup` ends the task with its own cause, `Failed to fetch ansible_pkg_mgr to determine the package action backend: <msg>`. When the task is not delegated, its result carries `ansible_facts.pkg_mgr` set to whatever the `setup` answered, the way the reference's own result does; a delegated task's result carries none, since a delegate's answer would otherwise land under the wrong host's facts.
 
+The module `yum` is not a module of its own in ansible-core 2.19: `yum`, `ansible.builtin.yum` and `ansible.legacy.yum` are redirects to the `dnf` action, and a task that names one runs this plugin. A `module_defaults` key for `yum` applies to a `dnf` task, and the reverse.
+
 ## `fetch`
 
 A file read from a host, written onto the controller under `dest` and nowhere else.
