@@ -35,7 +35,7 @@ pub(super) fn unwrap_unsafe(value: &mut Value) -> bool {
 }
 
 /// Whether any string inside a value still carries a template marker.
-pub(super) fn holds_template(value: &Value) -> bool {
+pub(crate) fn holds_template(value: &Value) -> bool {
     match value {
         Value::String(s) => Templar::is_template(s),
         Value::Array(items) => items.iter().any(holds_template),

@@ -106,7 +106,12 @@ fn play_context_of(ctx: &Context<'_>, running: &Map<String, Value>) -> Value {
 fn flat_vars(vars: &crate::vars::HostVars) -> Map<String, Value> {
     let mut flat: Map<String, Value> = (*vars.shared).clone();
     flat.extend(vars.facts.iter().map(|(k, v)| (k.clone(), v.clone())));
-    flat.extend(vars.map.iter().map(|(k, v)| (k.clone(), v.clone())));
+    flat.extend(
+        vars.own_variables()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone())),
+    );
+    // Each other host's variables are asked for when a plugin reads them.
     flat.remove("hostvars");
     flat
 }
