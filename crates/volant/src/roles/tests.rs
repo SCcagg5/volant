@@ -36,7 +36,7 @@ fn tree() -> tempfile::TempDir {
 fn a_defaults_directory_merges_its_files_in_name_order() {
     let tmp = tree();
     let dir = tmp.path().to_path_buf();
-    let role = load(&dir.join("roles/base"), &RoleFrom::default()).unwrap();
+    let role = load(&dir.join("roles/base"), "base", &RoleFrom::default()).unwrap();
     assert_eq!(role.defaults["x"], serde_json::json!("b"), "b.yml is later");
     assert_eq!(role.defaults["y"], serde_json::json!("from-first"));
     assert_eq!(role.vars["v"], serde_json::json!("role-var"));
@@ -54,7 +54,7 @@ fn a_file_beats_a_directory_of_the_same_name() {
     let tmp = tree();
     let dir = tmp.path().to_path_buf();
     std::fs::write(dir.join("roles/base/defaults/main.yml"), "x: fromfile\n").unwrap();
-    let role = load(&dir.join("roles/base"), &RoleFrom::default()).unwrap();
+    let role = load(&dir.join("roles/base"), "base", &RoleFrom::default()).unwrap();
     assert_eq!(role.defaults["x"], serde_json::json!("fromfile"));
     assert!(
         !role.defaults.contains_key("y"),
@@ -72,14 +72,14 @@ fn a_named_file_that_is_not_there_is_refused_and_a_missing_main_is_not() {
         tasks: "nosuch".to_string(),
         ..RoleFrom::default()
     };
-    let err = load(&dir.join("roles/base"), &from).unwrap_err();
+    let err = load(&dir.join("roles/base"), "base", &from).unwrap_err();
     assert!(
         format!("{err:#}").contains("Could not find specified file in role: tasks/nosuch"),
         "{err:#}"
     );
     std::fs::create_dir_all(dir.join("roles/bare/defaults")).unwrap();
     std::fs::write(dir.join("roles/bare/defaults/main.yml"), "q: 1\n").unwrap();
-    let role = load(&dir.join("roles/bare"), &RoleFrom::default()).unwrap();
+    let role = load(&dir.join("roles/bare"), "bare", &RoleFrom::default()).unwrap();
     assert!(role.tasks.is_empty(), "a role may have no tasks at all");
     assert_eq!(role.defaults["q"], serde_json::json!(1));
 }
@@ -319,7 +319,7 @@ fn check_from(sub: &str, from: &str, want: Result<&str, &str>) {
         "defaults" => selector.defaults = from,
         _ => selector.handlers = from,
     }
-    let loaded = load(&tmp.path().join("roles/rr"), &selector);
+    let loaded = load(&tmp.path().join("roles/rr"), "rr", &selector);
     match want {
         Ok(seen) => {
             let role = loaded.unwrap_or_else(|e| panic!("{sub}_from {selector:?}: {e:#}"));
@@ -372,6 +372,6 @@ fn a_missing_directory_is_not_looked_into() {
         handlers: "nosuch".to_string(),
         ..RoleFrom::default()
     };
-    let role = load(&tmp.path().join("roles/bare"), &selector).unwrap();
+    let role = load(&tmp.path().join("roles/bare"), "bare", &selector).unwrap();
     assert!(role.defaults.is_empty() && role.handlers.is_empty());
 }
