@@ -1,0 +1,6 @@
+i_int: &i 7
+i_alias: *i
+i_null: &in ~
+i_null_alias: *in
+i_unsafe: !unsafe 0x1F
+i_unsafe_quoted: !unsafe "5"
