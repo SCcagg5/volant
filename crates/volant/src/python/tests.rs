@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-use super::builder::{exchange, find_python, refusal_for, resolve_exchange, start_from};
+use super::builder::{
+    exchange, find_python, helper_args, refusal_for, resolve_exchange, start_from,
+};
 use super::reach::modules_to_build;
 use super::union_build::{gathering_only, no_builder, union_from};
 use super::*;
@@ -875,6 +877,27 @@ fn the_helper_refuses_a_byte_conflict_in_the_union() {
     assert!(
         out.status.success(),
         "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// A module sitting in the working directory is not imported by the helper in place of the real
+/// one: `python -c` puts that directory first on the module path, and the helper imports `json`
+/// and the rest of the standard library before it does anything else.
+#[test]
+fn the_helper_does_not_import_a_file_from_the_working_directory() {
+    let tmp = scratch();
+    std::fs::write(tmp.path().join("json.py"), "raise SystemExit(7)\n").unwrap();
+    let out = Command::new("python3")
+        .args(helper_args())
+        .arg("--self-check")
+        .current_dir(tmp.path())
+        .output()
+        .expect("python3 is on PATH wherever these tests run");
+    assert!(
+        out.status.success(),
+        "{:?} {}",
+        out.status,
         String::from_utf8_lossy(&out.stderr)
     );
 }

@@ -372,3 +372,20 @@ exit {code}
     );
     assert_eq!(resolve::pick(&list(&[&without]), || None), None);
 }
+
+/// A module sitting in the working directory is not imported by the probe in place of the real
+/// one. `python -c` puts that directory first on the module path, so a `json.py` or an
+/// `ansible.py` beside the playbook would otherwise decide the answer.
+#[test]
+fn a_file_in_the_working_directory_is_not_imported_by_the_probe() {
+    let tmp = scratch();
+    fs::write(tmp.path().join("json.py"), "raise SystemExit(7)\n").unwrap();
+    // The control: started without the probe's flags, the same directory does shadow the module.
+    let shadowed = Command::new("python3")
+        .args(["-c", "import json"])
+        .current_dir(tmp.path())
+        .status()
+        .expect("python3 is on PATH wherever these tests run");
+    assert_eq!(shadowed.code(), Some(7), "the file is not shadowing json");
+    assert!(resolve::imports("python3", "json", Some(tmp.path())));
+}
