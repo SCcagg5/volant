@@ -35,7 +35,7 @@ use super::run::{
     record_facts, record_inventory_results, record_local_facts, record_registered, refusal,
     requested_interpreter, retry_plans, reuse_or_connect, run_agent_batch, run_local,
     run_plugin_attempts, running_host_vars, silent_discovery, stamp_discovery, step_tasks,
-    take_warnings,
+    take_warnings, task_fails,
 };
 use super::{LinkKey, RunOptions};
 use notified::{announce_notified, saved_lines};
@@ -2323,7 +2323,7 @@ pub(super) async fn drive_host(
                     // smart` looks for in the cache.
                     if task.name == "Gathering Facts"
                         && task.module == "ansible.legacy.setup"
-                        && !results.iter().any(|(_, r)| r.failed())
+                        && !task_fails(&results)
                     {
                         let mark = Map::from_iter([(
                             "_ansible_facts_gathered".to_string(),

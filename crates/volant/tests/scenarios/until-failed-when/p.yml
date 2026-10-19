@@ -1,0 +1,91 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: failed_when false after the last retry
+      command: "false"
+      register: a
+      until: a.rc == 0
+      retries: 2
+      delay: 0
+      failed_when: false
+    - debug:
+        msg: "{{ a is failed }} {{ a.failed }} {{ a.attempts }} {{ a.failed_when_result }} {{ a.changed }}"
+
+    - name: ignore_errors after the last retry
+      command: "false"
+      register: b
+      until: b.rc == 0
+      retries: 1
+      delay: 0
+      ignore_errors: true
+    - debug: {msg: "{{ b is failed }} {{ b.attempts }}"}
+
+    - name: changed_when beside failed_when
+      command: "true"
+      register: c
+      until: c.rc == 1
+      retries: 1
+      delay: 0
+      changed_when: false
+      failed_when: false
+    - debug: {msg: "{{ c is failed }} {{ c.attempts }} {{ c.changed }}"}
+
+    - name: failed_when reads attempts
+      command: "false"
+      register: d
+      until: d.rc == 0
+      retries: 2
+      delay: 0
+      failed_when: d.attempts < 2
+
+    - name: failed_when false in a loop
+      command: "sh -c 'exit {{ item }}'"
+      register: e
+      loop: [0, 1]
+      until: e.rc == 0
+      retries: 1
+      delay: 0
+      failed_when: false
+    - debug:
+        msg: "{{ e is failed }} {{ e.results | map(attribute='failed') | list }} {{ e.results | map(attribute='attempts') | list }}"
+
+    - name: only the items that carry failed_when_result decide
+      command: "false"
+      loop: [0, 1]
+      until: false
+      retries: 1
+      delay: "{{ 'nan' if item == 1 else 0 }}"
+      failed_when: false
+
+    - name: the handler and the fact of a task that passed
+      set_fact:
+        kept: 1
+      register: f
+      until: false
+      retries: 1
+      delay: 0
+      failed_when: false
+      changed_when: true
+      notify: ran
+    - debug: {msg: "{{ kept | default('unset') }} {{ f is failed }}"}
+
+    - name: failed_when true after until held
+      command: "true"
+      register: g
+      until: g.rc == 0
+      retries: 1
+      delay: 0
+      failed_when: true
+      ignore_errors: true
+
+    - name: no failed_when still fails
+      command: "false"
+      register: h
+      until: h.rc == 0
+      retries: 1
+      delay: 0
+      ignore_errors: true
+    - debug: {msg: "{{ h is failed }} {{ h.attempts }}"}
+  handlers:
+    - name: ran
+      debug: {msg: handler}

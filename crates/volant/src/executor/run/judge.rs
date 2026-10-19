@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use serde_json::{Map, Value, json};
-use volant_protocol::TaskResult;
 use volant_protocol::modules::short_name;
+use volant_protocol::{TaskResult, failed_when_decides};
 
 use crate::executor::prepare::Item;
 use crate::playbook::PlayTask;
@@ -31,6 +31,14 @@ pub(in crate::executor) fn finish(
     let mut r = apply_conditions(task, item, result, templar);
     settle_failure(&mut r, task);
     r
+}
+
+/// Whether a task's results fail it, a loop's items included: what its facts, its notified
+/// handlers and the inventory it changed wait on. [`TaskResult::is_failed`] reads the result, so
+/// a task whose retries ran out under `failed_when: false` passes.
+pub(in crate::executor) fn task_fails(results: &[(Option<Value>, TaskResult)]) -> bool {
+    let decided = failed_when_decides(results.iter().map(|(_, r)| r));
+    results.iter().any(|(_, r)| r.is_failed_among(decided))
 }
 
 /// Whether a result is the one [`TaskResult::timed_out`] builds: a failure carrying the period

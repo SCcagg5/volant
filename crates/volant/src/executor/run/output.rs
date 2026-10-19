@@ -208,7 +208,18 @@ pub(in crate::executor) fn classify(
     ignore_errors: bool,
     rescuable: bool,
 ) -> Outcome {
-    if result.failed() {
+    classify_as(result, result.is_failed(), ignore_errors, rescuable)
+}
+
+/// [`classify`] for a result whose failure the caller judged: a loop's aggregate says `failed`
+/// when an item did, and the task fails only when [`TaskResult::is_failed`] says so of an item.
+pub(in crate::executor) fn classify_as(
+    result: &TaskResult,
+    failed: bool,
+    ignore_errors: bool,
+    rescuable: bool,
+) -> Outcome {
+    if failed {
         if ignore_errors {
             Outcome::Ignored
         } else if rescuable {

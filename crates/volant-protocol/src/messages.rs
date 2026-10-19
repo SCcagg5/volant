@@ -313,6 +313,28 @@ impl TaskResult {
         }
     }
 
+    /// Whether this result fails its task, as ansible-core 2.19.12's `TaskResult.is_failed`
+    /// reads it: `failed_when_result` decides when the result carries one, and `failed` only
+    /// otherwise. The two differ on a result whose `until` ran out of retries: the executor sets
+    /// `failed: true` on it after `failed_when` ran, so `failed_when: false` leaves a result that
+    /// registers as failed and a task that passed. `failed` stays what `r is failed` reads.
+    pub fn is_failed(&self) -> bool {
+        self.is_failed_among(self.0.contains_key(FAILED_WHEN_RESULT))
+    }
+
+    /// [`Self::is_failed`] for a result among a loop's: `decided` says whether one of them carries
+    /// `failed_when_result` ([`failed_when_decides`]). When one does, only those decide for the
+    /// task, and an item that failed without one does not fail it. Measured on ansible-core
+    /// 2.19.12: a loop whose first item exhausted its retries under `failed_when: false` and whose
+    /// second failed to render `retries` prints `failed:` for the second and passes the task.
+    pub fn is_failed_among(&self, decided: bool) -> bool {
+        if decided {
+            self.0.get(FAILED_WHEN_RESULT).is_some_and(truthy)
+        } else {
+            self.failed()
+        }
+    }
+
     /// Makes a result that counts as failed say `failed: true`, which is what the reference
     /// registers for one: measured, `failed: "yes"` and `failed: 1` both register `True`, while a
     /// falsy `failed` (`0`, `null`) is kept as the module wrote it.
@@ -356,6 +378,16 @@ impl TaskResult {
         map.insert("timedout".into(), Value::Object(timedout));
         Self(map)
     }
+}
+
+const FAILED_WHEN_RESULT: &str = "failed_when_result";
+
+/// Whether one of a task's results carries `failed_when_result`, which then decides for all of
+/// them: see [`TaskResult::is_failed_among`].
+pub fn failed_when_decides<'a>(results: impl IntoIterator<Item = &'a TaskResult>) -> bool {
+    results
+        .into_iter()
+        .any(|r| r.0.contains_key(FAILED_WHEN_RESULT))
 }
 
 /// Python's truthiness of a JSON value, which is how the reference reads a result's `failed`.
