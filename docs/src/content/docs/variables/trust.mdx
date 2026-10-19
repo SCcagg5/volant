@@ -45,7 +45,7 @@ Conditions follow the same rule. A `when: "{{ ... }}"` that renders to a string 
 
 A `lookup('template')` result is data too. A template holding `{{ '{{ 1 + 1 }}' }}` gives the text `{{ 1 + 1 }}`, not `2`, under both engines.
 
-A `delegate_to` that renders from a host value names a host with that text, braces included. The text is the delegate's `inventory_hostname` and `inventory_hostname_short`, and nothing renders it. Over ssh the task fails with `UNREACHABLE` and prints the text, as in ansible-core. A delegate that connects locally runs as usual.
+A `delegate_to` that renders from a host value names a host with that text, whatever it holds. The text is the delegate's `inventory_hostname` and `inventory_hostname_short`, and nothing renders it, even when a variable of your task puts braces next to it. A name that holds braces is text too, wherever it came from. Over ssh the task fails with `UNREACHABLE` and prints the text, as in ansible-core. A delegate that connects locally runs as usual.
 
 The `src` of `copy`, `template` and `unarchive` is stricter than the reference: a `src` whose render read a managed host is refused before any file is looked up. See [Action plugins](/reference/action-plugins/#a-source-file-a-managed-host-named).
 
