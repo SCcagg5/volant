@@ -243,6 +243,8 @@ pub fn register(
     add_filter(env, "type_debug", |v: Value| {
         if v.is_undefined() {
             "UndefinedMarker"
+        } else if v.downcast_object_ref::<super::clock::DateTime>().is_some() {
+            "datetime"
         } else {
             super::type_name(&json(&v))
         }
@@ -428,9 +430,14 @@ fn ternary(value: Value, true_val: Value, false_val: Value, none_val: Option<Val
 #[cfg(test)]
 mod tests;
 
-/// `string`, which prints a `range` as Python does and leaves every other value to MiniJinja.
+/// `string`, which prints a `range` or a `datetime` as Python does and leaves every other value
+/// to MiniJinja.
 fn string(state: &State, value: Value) -> Result<Value, Error> {
-    if value.downcast_object_ref::<super::env::Range>().is_some() {
+    if value.downcast_object_ref::<super::env::Range>().is_some()
+        || value
+            .downcast_object_ref::<super::clock::DateTime>()
+            .is_some()
+    {
         return Ok(Value::from(
             super::env::container_repr(&value).unwrap_or_default(),
         ));

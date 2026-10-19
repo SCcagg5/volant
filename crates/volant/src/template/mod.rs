@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 mod bridged;
+mod clock;
 mod context;
 mod env;
 mod file;
