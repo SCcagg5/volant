@@ -25,6 +25,17 @@ fn start_vars(
     item_vars: &HostVars,
     escalated: bool,
 ) -> Box<dyn Plugin> {
+    start_within(args, untrusted, item_vars, escalated, &[])
+}
+
+/// [`start_vars`] under a `host_named_dest_dirs` that names `dirs`.
+fn start_within(
+    args: Value,
+    untrusted: &BTreeSet<String>,
+    item_vars: &HostVars,
+    escalated: bool,
+    dirs: &[PathBuf],
+) -> Box<dyn Plugin> {
     let Value::Object(args) = args else {
         unreachable!()
     };
@@ -47,6 +58,7 @@ fn start_vars(
         playbook_dir: &dir,
         // A write on the controller is refused whatever the mode says about reads.
         host_named_paths: crate::config::HostNamedPaths::Allow,
+        host_named_dest_dirs: dirs,
         warnings: &mut warnings,
 
         environment: None,
@@ -125,11 +137,145 @@ fn a_dest_a_host_named_is_never_written() {
         assert_eq!(
             result["msg"],
             json!(
-                "the 'dest' of this task was named by a managed host, and a controller path a host chose is never written"
+                "the 'dest' of this task was named by a managed host, and a controller path a host chose is never written unless host_named_dest_dirs names a directory above it"
             )
         );
         assert!(!dest.exists(), "{} was created", dest.display());
     }
+}
+
+/// A fetch of `/etc/one.txt` whose `dest` a host named, under `host_named_dest_dirs = dirs`.
+fn fetch_named(dest: &str, dirs: &[PathBuf]) -> (Vec<Sub>, Value) {
+    let untrusted: BTreeSet<String> = ["dest".to_string()].into();
+    let mut item_vars = HostVars::default();
+    item_vars.insert("inventory_hostname".into(), json!("probe-hostname"));
+    let mut plugin = start_within(
+        json!({"src": "/etc/one.txt", "dest": dest}),
+        &untrusted,
+        &item_vars,
+        false,
+        dirs,
+    );
+    drive(plugin.as_mut(), b"x", "/etc/one.txt")
+}
+
+/// A `dest` a host named is written when it lies strictly inside a directory of the setting,
+/// and the directory may not exist yet below it.
+#[test]
+fn a_dest_a_host_named_is_written_inside_the_directories() {
+    let dir_guard = scratch();
+    let dir = dir_guard.path().canonicalize().unwrap();
+    let (other, allowed) = (dir.join("other"), dir.join("allowed"));
+    std::fs::create_dir_all(&allowed).unwrap();
+    let dirs = [other, allowed.clone()];
+    let dest = format!("{}/new/dir/", allowed.display());
+    let (subs, result) = fetch_named(&dest, &dirs);
+    assert_eq!(modules(&subs), ["stat", "slurp"], "{result}");
+    assert_eq!(result["changed"], json!(true), "{result}");
+    let written = allowed.join("new/dir/probe-hostname/etc/one.txt");
+    assert_eq!(std::fs::read(written).unwrap(), b"x");
+}
+
+/// Each spelling that leaves the directory is refused before the host is asked anything, names
+/// the setting, and creates nothing.
+#[cfg(unix)]
+#[rstest::rstest]
+#[case::relative("got/", "'got/' is not an absolute path")]
+#[case::tilde("~/got/", "'~/got/' is not an absolute path")]
+#[case::dotdot("{allowed}/../outside/got/", "has a '..' component")]
+#[case::outside("{outside}/got/", "is not inside any of the directories")]
+#[case::root("{allowed}/", "is not inside any of the directories")]
+#[case::sibling("{allowed}-evil/got/", "is not inside any of the directories")]
+#[case::link("{allowed}/link/got/", "which is not inside any of the directories")]
+#[case::dangling("{allowed}/dangling/got/", "cannot be resolved")]
+fn a_dest_a_host_named_outside_the_directories_is_refused(#[case] dest: &str, #[case] says: &str) {
+    use std::os::unix::fs::symlink;
+    let dir_guard = scratch();
+    let dir = dir_guard.path().canonicalize().unwrap();
+    let (allowed, outside) = (dir.join("allowed"), dir.join("outside"));
+    std::fs::create_dir_all(&allowed).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    symlink(&outside, allowed.join("link")).unwrap();
+    symlink(dir.join("nowhere"), allowed.join("dangling")).unwrap();
+    let dest = dest
+        .replace("{allowed}", &allowed.display().to_string())
+        .replace("{outside}", &outside.display().to_string());
+    let (subs, result) = fetch_named(&dest, std::slice::from_ref(&allowed));
+    assert!(subs.is_empty(), "the host was asked: {:?}", modules(&subs));
+    assert_eq!(result["failed"], json!(true), "{result}");
+    let msg = result["msg"].as_str().unwrap();
+    assert!(msg.contains(says), "{msg}");
+    assert!(
+        msg.ends_with(&format!("(host_named_dest_dirs = {})", allowed.display())),
+        "{msg}"
+    );
+    for path in [&outside, &dir.join("got"), &dir.join("allowed-evil")] {
+        let found = std::fs::read_dir(path).map_or(0, Iterator::count);
+        assert_eq!(found, 0, "{} was written", path.display());
+    }
+}
+
+/// A directory of the setting that other users can write holds nothing, unless it is sticky.
+#[cfg(unix)]
+#[rstest::rstest]
+#[case::world_writable(0o777, false)]
+#[case::group_writable(0o770, false)]
+#[case::sticky(0o1777, true)]
+#[case::private(0o700, true)]
+fn a_directory_other_users_write_holds_a_dest_only_when_it_is_sticky(
+    #[case] mode: u32,
+    #[case] written: bool,
+) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir_guard = scratch();
+    let allowed = dir_guard.path().canonicalize().unwrap().join("allowed");
+    std::fs::create_dir_all(&allowed).unwrap();
+    std::fs::set_permissions(&allowed, std::fs::Permissions::from_mode(mode)).unwrap();
+    let dest = format!("{}/got/", allowed.display());
+    let (_, result) = fetch_named(&dest, std::slice::from_ref(&allowed));
+    assert_eq!(result["changed"] == json!(true), written, "{result}");
+    if !written {
+        assert!(
+            result["msg"]
+                .as_str()
+                .unwrap()
+                .contains("which other users can write to")
+        );
+        assert!(!allowed.join("got").exists());
+    }
+}
+
+/// A link put where `dest` stands after the plugin was built, before it writes, is seen: the
+/// containment is decided again on the path the write will use.
+#[cfg(unix)]
+#[test]
+fn a_link_planted_after_the_first_check_is_seen_before_the_write() {
+    let dir_guard = scratch();
+    let dir = dir_guard.path().canonicalize().unwrap();
+    let (allowed, outside) = (dir.join("allowed"), dir.join("outside"));
+    std::fs::create_dir_all(allowed.join("slot")).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let untrusted: BTreeSet<String> = ["dest".to_string()].into();
+    let mut item_vars = HostVars::default();
+    item_vars.insert("inventory_hostname".into(), json!("probe-hostname"));
+    let dirs = [allowed.clone()];
+    let dest = format!("{}/slot/", allowed.display());
+    let mut plugin = start_within(
+        json!({"src": "/etc/one.txt", "dest": dest}),
+        &untrusted,
+        &item_vars,
+        false,
+        &dirs,
+    );
+    std::fs::remove_dir(allowed.join("slot")).unwrap();
+    std::os::unix::fs::symlink(&outside, allowed.join("slot")).unwrap();
+    let (_, result) = drive(plugin.as_mut(), b"x", "/etc/one.txt");
+    assert_eq!(result["failed"], json!(true), "{result}");
+    assert!(
+        result["msg"].as_str().unwrap().contains("resolves to"),
+        "{result}"
+    );
+    assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
 }
 
 /// The relative `src` that climbs out of `dest` is refused, and nothing is written where it

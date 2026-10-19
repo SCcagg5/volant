@@ -27,7 +27,7 @@ mod template;
 mod unarchive;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -370,6 +370,9 @@ pub(crate) struct Context<'a> {
     pub playbook_dir: &'a Path,
     /// What the task does with a controller file a managed host named.
     pub host_named_paths: HostNamedPaths,
+    /// The controller directories a `fetch` may write under when a managed host named its
+    /// `dest`; none refuses every such `dest`.
+    pub host_named_dest_dirs: &'a [PathBuf],
     /// Lines to show as `[WARNING]:` under this task.
     pub warnings: &'a mut Vec<String>,
     /// The item's rendered `environment`, and the task's `timeout` keyword, for a plugin run in

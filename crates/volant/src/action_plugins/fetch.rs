@@ -10,8 +10,8 @@
 //!
 //! Two refusals are this engine's own, and stricter than the reference:
 //!
-//! - A `dest` whose render read a managed host is refused. A host never chooses where the
-//!   controller writes.
+//! - A `dest` whose render read a managed host is refused, unless `host_named_dest_dirs` names a
+//!   directory it resolves strictly inside (see `dest`). Beyond that a host never picks the path.
 //! - The path written is built, normalised without following anything, and refused unless it sits
 //!   under `dest` (and under `dest/<inventory_hostname>/` without `flat`). Measured on
 //!   ansible-core 2.19.12, the reference checks the containment before it builds the path, so a
@@ -30,6 +30,8 @@ use volant_protocol::encoding::{b64_decode, sha1_hex};
 use super::copy::{failing, stat, stat_of};
 use super::{Context, Plugin, Step, Sub, lost};
 use crate::executor::as_bool_value;
+
+mod dest;
 
 /// The reference's failure when the source is a directory, from `stat` or from `slurp`.
 const IS_A_DIRECTORY: &str = "remote file is a directory, fetch cannot work on directories";
@@ -56,6 +58,8 @@ struct Fetch {
     root: PathBuf,
     /// `inventory_hostname`, one path component; unused under `flat`.
     host: String,
+    /// The directories `dest` must stay inside when a managed host named it.
+    within: Option<Vec<PathBuf>>,
     flat: bool,
     fail_on_missing: bool,
     validate_checksum: bool,
@@ -89,9 +93,6 @@ impl Fetch {
         if let Some(msg) = msg {
             return Err(msg.into());
         }
-        if ctx.args_untrusted.contains("dest") {
-            return Err("the 'dest' of this task was named by a managed host, and a controller path a host chose is never written".into());
-        }
         let text = |name| {
             arg(name)
                 .and_then(Value::as_str)
@@ -99,6 +100,12 @@ impl Fetch {
                 .to_string()
         };
         let (src, dest) = (text("src"), text("dest"));
+        let within = if ctx.args_untrusted.contains("dest") {
+            dest::check_text(&dest, ctx.host_named_dest_dirs)?;
+            Some(ctx.host_named_dest_dirs.to_vec())
+        } else {
+            None
+        };
         let flat = flag(args, "flat", false);
         let host = ctx
             .item_vars
@@ -130,6 +137,7 @@ impl Fetch {
             src,
             dest,
             host,
+            within,
             flat,
             fail_on_missing: flag(args, "fail_on_missing", true),
             validate_checksum: flag(args, "validate_checksum", true),
@@ -137,10 +145,19 @@ impl Fetch {
             remote_checksum: None,
             state: State::Start,
         };
+        fetch.contained()?;
         // Once before the host is asked anything, on the path as the playbook wrote it, and again
         // on the one the host names back.
         fetch.place(&fetch.src)?;
         Ok(fetch)
+    }
+
+    /// The refusal of a `dest` a host named that resolves outside `host_named_dest_dirs`.
+    fn contained(&self) -> Result<(), String> {
+        match &self.within {
+            Some(dirs) => dest::check_resolved(&self.root, &self.dest, dirs),
+            None => Ok(()),
+        }
     }
 
     /// The controller path the source is written to, or the refusal. Lexical only.
@@ -171,6 +188,7 @@ impl Fetch {
     /// [`Self::place`], then what the file system says about it: a `flat` destination that is a
     /// directory, and a symbolic link anywhere below `dest`.
     fn target(&self, source: &str) -> Result<PathBuf, String> {
+        self.contained()?;
         let path = self.place(source)?;
         walk(self.walk_root(), &path, false)?;
         if self.flat && path.is_dir() {
