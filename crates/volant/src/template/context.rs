@@ -209,9 +209,13 @@ impl Context {
     }
 }
 
-/// Starts a render over `ctx`: clears the mark of the last one and returns the reads so far.
+/// Starts a render over `ctx`: clears the mark of the last one and what it changed in lists and
+/// mappings, and returns the reads so far.
 pub(super) fn begin(ctx: &minijinja::Value) -> usize {
     set_literal(ctx, false);
+    if let Some(root) = ctx.downcast_object_ref::<Context>() {
+        root.forget_changes();
+    }
     reads(ctx)
 }
 
