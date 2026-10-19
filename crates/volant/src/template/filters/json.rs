@@ -137,14 +137,18 @@ pub(super) fn from_yaml(value: Value) -> Result<Value, Error> {
     let Some(text) = value.as_str() else {
         return Ok(value);
     };
-    let docs = crate::yaml::load(text, "from_yaml").map_err(|e| invalid(format!("{e:#}")))?;
-    match docs.as_slice() {
-        [] => Ok(Value::from(())),
-        [doc] => crate::yaml::to_json(doc)
+    let docs = crate::yaml::load(text, "from_yaml").map_err(|e| {
+        if crate::yaml::is_second_document(&e) {
+            invalid("from_yaml: expected a single document in the stream")
+        } else {
+            invalid(format!("{e:#}"))
+        }
+    })?;
+    // `load` refuses a second document, so there is at most one.
+    match docs.first() {
+        None => Ok(Value::from(())),
+        Some(doc) => crate::yaml::to_json(doc)
             .map(from_json_value)
             .map_err(|e| invalid(format!("from_yaml: {e:#}"))),
-        _ => Err(invalid(
-            "from_yaml: expected a single document in the stream",
-        )),
     }
 }

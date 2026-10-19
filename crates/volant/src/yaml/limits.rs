@@ -12,6 +12,10 @@ use std::collections::HashMap;
 
 use saphyr_parser::{Event, Marker, Parser, ScanError, SpannedEventReceiver};
 
+/// What PyYAML says of a stream that holds a second document.
+pub(super) const SECOND_DOCUMENT: &str =
+    "expected a single document in the stream but found another document";
+
 /// The deepest nesting of collections a document may have: the level ansible-core 2.19.12 loads
 /// a file down to. It stops a file at 490 with `maximum recursion depth exceeded`, whether the
 /// levels are block or flow collections.
@@ -70,10 +74,7 @@ impl Guard {
                 // Refusing it here keeps a stream from adding up to more than one text may.
                 self.documents += 1;
                 if self.documents > 1 {
-                    return Err(ScanError::new_str(
-                        at,
-                        "expected a single document in the stream but found another document",
-                    ));
+                    return Err(ScanError::new_str(at, SECOND_DOCUMENT));
                 }
             }
             Event::SequenceStart(anchor, _) | Event::MappingStart(anchor, _) => {

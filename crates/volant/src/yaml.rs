@@ -32,6 +32,15 @@ pub fn load<'a>(text: &'a str, source: &str) -> anyhow::Result<Vec<Yaml<'a>>> {
     lower_all(docs, source)
 }
 
+/// Whether `error`, from [`load`] or [`load_with_origins`], refused a stream for holding a second
+/// document. Callers word that refusal the way ansible-core does where it reads the file.
+pub fn is_second_document(error: &anyhow::Error) -> bool {
+    error
+        .root_cause()
+        .downcast_ref::<saphyr_parser::ScanError>()
+        .is_some_and(|e| e.info() == limits::SECOND_DOCUMENT)
+}
+
 /// Every document of `text` with saphyr's positions, a key written twice keeping its last value.
 fn marked<'a>(text: &'a str, source: &str) -> anyhow::Result<Vec<MarkedYaml<'a>>> {
     let mut loader = YamlLoader::<MarkedYaml>::default();
