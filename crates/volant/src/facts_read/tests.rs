@@ -332,6 +332,24 @@ fn a_literal_fact_read_is_one_key() {
     }
 }
 
+/// The action plugins read a fact themselves: `yum` is the `dnf` plugin, so it reads `pkg_mgr`.
+#[test]
+fn a_plugin_reads_the_fact_it_picks_its_backend_from() {
+    for module in [
+        "dnf",
+        "yum",
+        "ansible.builtin.yum",
+        "ansible.legacy.package",
+    ] {
+        let tree = Tree::new();
+        tree.file(
+            "site.yml",
+            &format!("- hosts: all\n  tasks:\n    - name: t\n      {module}: name=bash\n"),
+        );
+        assert_eq!(keys(&tree.read("h1\n")), &set(&["pkg_mgr"]), "{module}");
+    }
+}
+
 /// A key the native does not collect keeps the Python `setup`, and the profile names it.
 #[test]
 fn a_key_outside_the_native_keeps_python_facts() {

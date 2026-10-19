@@ -372,3 +372,34 @@ exit {code}
     );
     assert_eq!(resolve::pick(&list(&[&without]), || None), None);
 }
+
+/// A `json.py` or `ansible.py` in the working directory does not decide the probe's answer, which
+/// `python -c` alone would let it do by putting that directory first on the module path.
+#[test]
+fn a_file_in_the_working_directory_is_not_imported_by_the_probe() {
+    let tmp = scratch();
+    fs::write(tmp.path().join("json.py"), "raise SystemExit(7)\n").unwrap();
+    // The control: started without the probe's flags, the same directory does shadow the module.
+    let shadowed = Command::new("python3")
+        .args(["-c", "import json"])
+        .current_dir(tmp.path())
+        .status()
+        .expect("python3 is on PATH wherever these tests run");
+    assert_eq!(shadowed.code(), Some(7), "the file is not shadowing json");
+    assert!(resolve::imports("python3", "json", Some(tmp.path())));
+}
+
+/// The runtime's commands, `python -m ansible.cli.galaxy` among them, do not import a module from
+/// the working directory in place of the real one.
+#[test]
+fn the_runtimes_commands_do_not_import_from_the_working_directory() {
+    let tmp = scratch();
+    fs::write(tmp.path().join("json.py"), "raise SystemExit(7)\n").unwrap();
+    let status = install::python_command(Path::new("python3"))
+        .args(["-m", "json.tool", "--help"])
+        .current_dir(tmp.path())
+        .stdout(Stdio::null())
+        .status()
+        .expect("python3 is on PATH wherever these tests run");
+    assert!(status.success(), "{status:?}");
+}

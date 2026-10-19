@@ -2176,6 +2176,45 @@ async fn the_package_manager_is_picked_in_the_reference_s_order_and_words() {
     assert_eq!(batches_sent(&agent).len(), 1, "{:?}", agent.sent);
 }
 
+/// `yum` in any spelling is the `dnf` plugin: with the host's package manager known, it runs the
+/// `dnf` module and nothing else.
+#[tokio::test]
+async fn a_yum_task_runs_the_dnf_module() {
+    let mut stop = watch::channel(false).1;
+    for spelling in ["yum", "ansible.builtin.yum", "ansible.legacy.yum"] {
+        let kind = crate::action_plugins::kind(spelling).expect("yum is an action plugin");
+        let mut agent = FakeAgent::answering(
+            [
+                vec![state("ab", true)],
+                one_result(1, json!({"changed": true, "msg": "installed", "rc": 0})).to_vec(),
+            ]
+            .concat(),
+        );
+        let (ran, _) = plugin_item(
+            kind,
+            json!({"name": "bash", "state": "present"}),
+            json!({"ansible_facts": {"pkg_mgr": "dnf"}}),
+            &mut agent,
+            &python3(),
+            &mut stop,
+        )
+        .await;
+        let sent = batches_sent(&agent);
+        let modules: Vec<&str> = sent.iter().map(|b| b[0].module.as_str()).collect();
+        assert_eq!(modules, ["dnf"], "{spelling}: {:?}", agent.sent);
+        assert_eq!(
+            Value::Object(sent[0][0].args.clone()),
+            json!({"name": "bash", "state": "present"}),
+            "{spelling}"
+        );
+        assert_eq!(
+            Value::Object(ran.expect("the item finished").0),
+            json!({"changed": true, "msg": "installed", "rc": 0}),
+            "{spelling}"
+        );
+    }
+}
+
 /// A dnf task asks setup then runs its backend, or fails in the reference's words without dnf.
 #[tokio::test]
 #[expect(clippy::too_many_lines)]
