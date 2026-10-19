@@ -1425,13 +1425,18 @@ fn fake_password_host(name: &str, expected: &str) -> std::path::PathBuf {
     "ansible_password=s3cret-conn-pw ansible_ssh_executable={dir}/bin/ssh-alt", &[], 0, "changed: [box]"
 )]
 fn a_connection_password_variable_reaches_ssh_through_askpass_only(
-    #[context] ctx: rstest::Context,
     #[case] vars: &str,
     #[case] file: &[&str],
     #[case] code: i32,
     #[case] says: &str,
 ) {
-    let name = format!("pw-{}", ctx.case.unwrap_or_default());
+    // One directory per case: the cases run side by side under `cargo test`.
+    let name = {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (vars, file).hash(&mut hasher);
+        format!("pw-{:x}", hasher.finish())
+    };
     let dir = fake_password_host(&name, "s3cret-conn-pw");
     let vars = vars.replace("{dir}", &dir.display().to_string());
     std::fs::write(
