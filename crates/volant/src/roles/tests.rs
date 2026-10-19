@@ -178,14 +178,8 @@ fn escape_tree() -> tempfile::TempDir {
     tmp
 }
 
-/// `tasks_from`, `vars_from`, `defaults_from` and `handlers_from` against the reference's
-/// `_load_role_yaml`, each row measured on ansible-core 2.19.12 with the same tree.
-///
-/// A value is accepted when the file it names, with `.`, `..` and repeated separators folded out
-/// of the path, lies under the matching directory of the role. Nothing else matters: an absolute
-/// path that lands inside is accepted, a symlink inside the directory is followed wherever it
-/// points, and a sibling directory of the role such as `vars/` is outside `tasks/`. `ok` is what
-/// the file says it is; `refused` is the full sentence, with `{root}` for the temporary tree.
+/// A `*_from` name is accepted when its folded path lies under the matching role directory,
+/// as `_load_role_yaml` of ansible-core 2.19.12 does; `{root}` is the temporary tree.
 #[rstest]
 // Plain names, with and without the extension, in a sub-directory, and through a `..` that comes
 // back in.
@@ -339,9 +333,8 @@ fn check_from(sub: &str, from: &str, want: Result<&str, &str>) {
     }
 }
 
-/// The links the reference follows. It folds the text of the path and never asks the file system
-/// where a link leads, so a link that leaves the directory is followed, and a directory that only
-/// links elsewhere is read through. Measured on ansible-core 2.19.12.
+/// The reference folds the text of the path and never resolves a link, so a link inside the
+/// directory is followed wherever it points. Measured on ansible-core 2.19.12.
 #[cfg(unix)]
 #[rstest]
 #[case("tasks", "link_in", Ok("ran-install"))]
