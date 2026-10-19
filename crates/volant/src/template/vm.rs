@@ -48,13 +48,16 @@ pub(crate) fn holds_template(value: &Value) -> bool {
 
 /// `{{ expr }}` and nothing else: no text around, no second expression, no statement. A `}}`
 /// inside is no end when it closes a bracket the expression opened or sits in a string literal:
-/// `{'a': {'x': 5}}` closing on `}}}` and `'}}'` are one expression, `1 }}{{ 2` is two.
+/// `{'a': {'x': 5}}` closing on `}}}` and `'}}'` are one expression, `1 }}{{ 2` is two. A `-`
+/// right after `{{` or right before `}}` is whitespace control, never a minus sign.
 pub(super) fn single_expression(text: &str) -> Option<&str> {
     let t = text.trim();
     let inner = t.strip_prefix("{{")?.strip_suffix("}}")?;
     if !closes_only_what_it_opens(inner) {
         return None;
     }
+    let inner = inner.strip_prefix('-').unwrap_or(inner);
+    let inner = inner.strip_suffix('-').unwrap_or(inner);
     Some(inner.trim())
 }
 
@@ -64,7 +67,7 @@ pub(super) fn single_expression(text: &str) -> Option<&str> {
 fn closes_only_what_it_opens(expr: &str) -> bool {
     let mut depth = 0usize;
     let mut quote = None;
-    let mut chars = expr.chars();
+    let mut chars = expr.chars().peekable();
     while let Some(c) = chars.next() {
         match (quote, c) {
             (Some(_), '\\') => {
@@ -72,7 +75,7 @@ fn closes_only_what_it_opens(expr: &str) -> bool {
             }
             (Some(q), c) if c == q => quote = None,
             (None, '\'' | '"') => quote = Some(c),
-            (None, '{') if matches!(chars.clone().next(), Some('%' | '#')) => return false,
+            (None, '{') if matches!(chars.peek(), Some('%' | '#')) => return false,
             (None, '{' | '[' | '(') => depth += 1,
             (None, '}' | ']' | ')') => match depth.checked_sub(1) {
                 Some(d) => depth = d,
@@ -193,10 +196,11 @@ impl Emitted {
     /// (its value, as it is) or none (`None`). `text` is what the whole render wrote. An
     /// expression that is the only thing written has written exactly its own text; any more text
     /// means a text node beside it. A capture prints through a buffer into the same output, so
-    /// with one in the code the count says nothing and only the text can be judged.
+    /// with one in the code the count says nothing: the result is a string, or `None` when nothing
+    /// was printed at all.
     pub(super) fn single(self, text: &str) -> Node {
         if self.captures {
-            return if text.is_empty() {
+            return if text.is_empty() && self.count == 0 {
                 Node::None
             } else {
                 Node::Text
@@ -275,7 +279,7 @@ pub(super) fn render_counted(
         // `{{ "<b>" }}` writes `<b>`.
         default_auto_escape: Arc::new(|_| AutoEscape::None),
     };
-    let mut compiled = CompiledTemplate::new(name, source, &config)?;
+    let mut compiled = no_panic(|| CompiledTemplate::new(name, source, &config))?;
     let mut captures = route_calls(&mut compiled.instructions);
     for block in compiled.blocks.values_mut() {
         captures |= route_calls(block);
@@ -301,13 +305,28 @@ pub(super) fn render_counted(
     Ok((out, emitted))
 }
 
+/// Runs the lexer and the parser of minijinja, and turns a panic of theirs into an error. Its
+/// lexer counts the columns of a line in sixteen bits, and a syntax error 65,535 characters into
+/// a line overflows that counter, which panics in a debug build. Text from a playbook must not
+/// be able to stop the run.
+fn no_panic<T>(
+    compile: impl FnOnce() -> Result<T, minijinja::Error>,
+) -> Result<T, minijinja::Error> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(compile)).unwrap_or_else(|_| {
+        Err(minijinja::Error::new(
+            ErrorKind::SyntaxError,
+            "the template has a syntax error on a line too long to be reported",
+        ))
+    })
+}
+
 /// `env.compile_expression(expr)?.eval(ctx)`, with `~` routed through [`concat()`].
 pub(super) fn eval_expr(
     templar: &Templar,
     expr: &str,
     ctx: &minijinja::Value,
 ) -> Result<minijinja::Value, minijinja::Error> {
-    let ast = parse_expr(expr)?;
+    let ast = no_panic(|| parse_expr(expr))?;
     let mut codegen = CodeGenerator::new("<expression>", expr);
     codegen.compile_expr(&ast);
     let (mut instructions, _) = codegen.finish();

@@ -168,7 +168,7 @@ impl Templar {
                 break;
             }
             let Value::String(text) = &value else { break };
-            if !Self::is_template(text) {
+            if !Self::holds_expression(text) {
                 break;
             }
             let before = reads(ctx);

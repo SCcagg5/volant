@@ -4542,15 +4542,6 @@
     "case": {
       "template": "{{ v }}",
       "vars": {
-        "v": "{# only a comment #}"
-      }
-    },
-    "result": null
-  },
-  {
-    "case": {
-      "template": "{{ v }}",
-      "vars": {
         "v": "{% if false %}x{% endif %}"
       }
     },

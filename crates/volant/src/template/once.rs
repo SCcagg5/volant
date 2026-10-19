@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! One pass over a string, as the reference's `Templar.template` does it.
 
+use std::borrow::Cow;
+
 use minijinja::machinery::WhitespaceConfig;
 use serde_json::Value;
 
@@ -22,6 +24,13 @@ impl Templar {
         false
     }
 
+    /// Whether `text` holds `{{` or `{%`: a rendered result that does is rendered again. `{#` is
+    /// left out on purpose: a result that holds one is text an expression made (`{{ '{#' }}`),
+    /// and the reference does not render it again.
+    pub(super) fn holds_expression(text: &str) -> bool {
+        text.contains("{{") || text.contains("{%")
+    }
+
     /// Whether `text` holds a statement block or a comment, the two tags that print nothing and so
     /// can leave a result with one node (or none) where the text around them is not a node.
     fn has_statement(text: &str) -> bool {
@@ -40,31 +49,48 @@ impl Templar {
         if !Self::is_template(text) {
             return Ok(Value::String(text.to_string()));
         }
-        // Whitespace around the expression is text: the reference keeps it, so the result is a
-        // string. One line end after it is not: the lexer drops it.
-        let body = text
-            .strip_suffix("\r\n")
-            .or_else(|| text.strip_suffix('\n'))
-            .unwrap_or(text);
-        if body.trim() == body
-            && let Some(expr) = single_expression(body)
-        {
+        // The lexer reads a lone `\r` and `\r\n` as `\n`, then drops one line end at the end.
+        let source = if text.contains('\r') {
+            Cow::Owned(text.replace("\r\n", "\n").replace('\r', "\n"))
+        } else {
+            Cow::Borrowed(text)
+        };
+        let body = source.strip_suffix('\n').unwrap_or(&source);
+        match self.render_body(text, body, ctx) {
+            // The lexer of the reference stops quietly when a comment opens at the very end of
+            // the source. A `{#` only counts for that when it opens one, which is why the render
+            // is tried first: `{{#` is a syntax error.
+            Err(err) if err.0.contains("unexpected end of comment") => {
+                let cut = without_open_comment(body);
+                if cut.len() == body.len() {
+                    Err(err)
+                } else {
+                    self.render_body(text, cut, ctx)
+                }
+            }
+            other => other,
+        }
+    }
+
+    /// [`Templar::render_once`] on `body`, the text with its one line end dropped.
+    fn render_body(
+        &self,
+        text: &str,
+        body: &str,
+        ctx: &minijinja::Value,
+    ) -> Result<Value, TemplateError> {
+        if let Some(expr) = lone_expression(body) {
             let value = self.evaluate_in(expr, ctx)?;
             return Ok(with_line_ends(value, text));
         }
-        // The lexer reads a lone `\r` and `\r\n` as `\n`.
-        let source = if text.contains('\r') {
-            std::borrow::Cow::Owned(text.replace("\r\n", "\n").replace('\r', "\n"))
-        } else {
-            std::borrow::Cow::Borrowed(text)
-        };
+        // The line end is dropped by hand, so the lexer is told to keep what is left.
         let ws = WhitespaceConfig {
-            keep_trailing_newline: false,
+            keep_trailing_newline: true,
             lstrip_blocks: false,
             trim_blocks: true,
         };
         let (out, emitted) =
-            render_counted(self, "<string>", &source, ctx, ws).map_err(convert_error)?;
+            render_counted(self, "<string>", body, ctx, ws).map_err(convert_error)?;
         // Without a statement, a comment or a `none` every `{{ }}` is a node of its own and the
         // text between is one too, so one node means the text is one expression, handled above.
         if Self::has_statement(text) || emitted.printed_none() {
@@ -81,6 +107,35 @@ impl Templar {
         }
         Ok(with_line_ends(Value::String(out), text))
     }
+}
+
+/// `body` without a comment that opens at its very end and never closes. The reference accepts
+/// one, and it means nothing. `{#-` also strips the text before it. Anything after the `{#`, a
+/// space included, makes it an error, so the text is left as it is then.
+fn without_open_comment(body: &str) -> &str {
+    if let Some(rest) = body.strip_suffix("{#") {
+        rest
+    } else if let Some(rest) = body.strip_suffix("{#-") {
+        rest.trim_end()
+    } else if let Some(rest) = body.strip_suffix("{#+") {
+        rest
+    } else {
+        body
+    }
+}
+
+/// The expression of a string that is one `{{ }}` and no text. Whitespace around it is text, and
+/// so makes a string of the result, unless the tag strips it: `{{-` takes the whitespace before
+/// it and `-}}` the whitespace after it.
+fn lone_expression(body: &str) -> Option<&str> {
+    let tag = body.trim();
+    let expr = single_expression(tag)?;
+    let before = body.len() - body.trim_start().len();
+    let after = body.len() - body.trim_end().len();
+    if (before > 0 && !tag.starts_with("{{-")) || (after > 0 && !tag.ends_with("-}}")) {
+        return None;
+    }
+    Some(expr)
 }
 
 /// A string result gets back the line ends the lexer dropped from the end of `template`: as many

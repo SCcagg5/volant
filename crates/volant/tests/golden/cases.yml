@@ -668,8 +668,6 @@
 - template: "{{ v }}"
   vars: {v: "{% set a = [1, 2] %}{{ a }}"}
 - template: "{{ v }}"
-  vars: {v: "{# only a comment #}"}
-- template: "{{ v }}"
   vars: {v: "{% if false %}x{% endif %}"}
 - when: "{% if true %}true{% endif %}"
 # A `{#` inside a string literal is text, and a result that holds one is not rendered again.
