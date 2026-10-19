@@ -1493,7 +1493,10 @@ fn a_connection_password_variable_reaches_ssh_through_askpass_only(
     }
     if vars.contains("ssh_executable") {
         assert!(
-            log.lines().all(|line| line.contains("/bin/ssh-alt ")),
+            // A script the agent sends spans several lines; only the first of a call names the program.
+            log.lines()
+                .filter(|line| line.starts_with('/'))
+                .all(|line| line.contains("/bin/ssh-alt ")),
             "a call went to another program than the host named: {log}"
         );
     }
