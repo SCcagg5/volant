@@ -484,6 +484,7 @@ async fn run_all(
         // force_handlers` are the same request.
         force_handlers: args.force_handlers || config.force_handlers,
         batching: config.batching,
+        host_named_paths: config.host_named_paths,
         control_dir: config
             .ssh_control_master
             .then(crate::transport::control_dir)

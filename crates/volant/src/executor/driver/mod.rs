@@ -1783,6 +1783,7 @@ pub(super) async fn drive_host(
                         templar: &templar,
                         origin: &step.origin,
                         playbook_dir: &playbook_dir,
+                        host_named_paths: options.host_named_paths,
                         tx: &tx,
                         index: *index,
                     };

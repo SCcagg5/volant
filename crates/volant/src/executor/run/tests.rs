@@ -1917,6 +1917,7 @@ async fn plugin_item_on<R: Relink<FakeAgent>>(
                 templar: &templar,
                 origin: &origin,
                 playbook_dir: Path::new("."),
+                host_named_paths: crate::config::HostNamedPaths::default(),
                 warnings: &mut warnings,
 
                 environment: None,
@@ -3219,6 +3220,7 @@ async fn copy_attempts<C: AgentChannel>(
         templar: &templar,
         origin: &origin,
         playbook_dir: Path::new("."),
+        host_named_paths: crate::config::HostNamedPaths::default(),
         tx: &sink,
         index: 0,
     };
@@ -5008,6 +5010,7 @@ async fn a_link_another_driver_keeps_is_checked_again_after_a_reboot() {
         forks: 1,
         force_handlers: false,
         batching: false,
+        host_named_paths: crate::config::HostNamedPaths::default(),
         control_dir: None,
         stop,
         abort: Arc::new(super::super::Abort::new(stop_tx)),

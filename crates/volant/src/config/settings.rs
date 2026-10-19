@@ -69,6 +69,19 @@ pub(super) fn runtime_mode(value: &str, origin: &str) -> anyhow::Result<crate::r
     })
 }
 
+/// `[volant] host_named_paths`: one of its three words, refused otherwise.
+pub(super) fn host_named_paths(value: &str, origin: &str) -> anyhow::Result<super::HostNamedPaths> {
+    super::HostNamedPaths::parse(value.trim()).ok_or_else(|| {
+        crate::stats::Refusal::at(
+            5,
+            format!(
+                "Config 'VOLANT_HOST_NAMED_PATHS' from '{origin}' has an invalid value: '{}'; expected one of allow, contained, refuse",
+                value.trim()
+            ),
+        )
+    })
+}
+
 /// A negative `forks` is clamped to zero, where the single startup check refuses it with the
 /// reference's own words and the same exit 2 a literal zero gets: measured, `forks = -1` exits
 /// 2 with `The number of processes (--forks) must be >= 1`.

@@ -96,6 +96,8 @@ async fn controller_side(
             templar,
             origin: &step.origin,
             playbook_dir: std::path::Path::new("."),
+            // These plugins read no controller file.
+            host_named_paths: crate::config::HostNamedPaths::Refuse,
             warnings: &mut warnings,
             environment: Some(&item.environment),
             timeout: task.timeout,

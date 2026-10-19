@@ -31,6 +31,8 @@ pub(in crate::executor) struct PluginStart<'a> {
     pub(in crate::executor) templar: &'a Templar,
     pub(in crate::executor) origin: &'a crate::compile::Origin,
     pub(in crate::executor) playbook_dir: &'a std::path::Path,
+    /// What the task does with a controller file a managed host named.
+    pub(in crate::executor) host_named_paths: crate::config::HostNamedPaths,
     /// Where an `async` task's `ASYNC` and `RETRYING` lines go, and the step they belong to.
     pub(in crate::executor) tx: &'a tokio::sync::mpsc::Sender<crate::executor::coordinator::Event>,
     pub(in crate::executor) index: usize,
@@ -92,6 +94,7 @@ pub(in crate::executor) async fn run_plugin_attempts<C: AgentChannel, R: Relink<
                     templar: start.templar,
                     origin: start.origin,
                     playbook_dir: start.playbook_dir,
+                    host_named_paths: start.host_named_paths,
                     warnings: &mut *warnings,
                     environment: Some(&item.environment),
                     timeout: task.timeout,
