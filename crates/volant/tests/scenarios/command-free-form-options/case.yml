@@ -1,0 +1,6 @@
+# The options of a free-form `command`, `shell`, `raw` and `script` line: only `creates`, `removes`,
+# `chdir`, `executable`, `stdin` and `strip_empty_ends` leave the line, and any other `key=value`
+# word stays in the command. Each result is printed without its clock keys.
+args: [-i, inv.ini, play.yml]
+needs: ["ansible-core"]
+modes: [check]

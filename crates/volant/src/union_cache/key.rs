@@ -93,6 +93,7 @@ pub fn key(
     let mut files = configs(
         std::env::var_os("ANSIBLE_CONFIG").as_deref(),
         std::env::var_os("HOME").as_deref().map(Path::new),
+        Path::new("."),
     );
     files.extend(plugin_files(plugin_dirs, SystemTime::now())?);
     // The `-M` directories hold modules directly, not under a `library/`.
@@ -194,16 +195,72 @@ fn files_under(dir: &Path, walked: &mut BTreeSet<PathBuf>, out: &mut Vec<(PathBu
     }
 }
 
+/// The largest configuration file whose contents go into the key. A larger file contributes its
+/// size and its mtime instead: no real `ansible.cfg` comes near this, and a file that big is
+/// not worth reading for a key.
+pub(super) const CONFIG_BOUND: u64 = 1 << 20;
+
+/// What a configuration file adds to the key: its contents when it is a regular file of at most
+/// [`CONFIG_BOUND`] bytes, its size and mtime when it is larger, nothing otherwise.
+///
+/// Nothing for a FIFO, a device or a directory: the file is opened without waiting for a writer,
+/// and its type is read from the open file, so a FIFO cannot stall the run and a device such as
+/// `/dev/zero` is never read. A link to a regular file is followed, as the helper follows it.
+fn config_stamp(path: &Path) -> Option<Vec<u8>> {
+    use std::io::Read as _;
+    let file = open_without_waiting(path).ok()?;
+    let meta = file.metadata().ok()?;
+    if !meta.is_file() {
+        return None;
+    }
+    let stamp = || {
+        let mtime = Source::now(path).map_or(0, |found| found.mtime_ns);
+        let mut stamp = b"over the bound:".to_vec();
+        stamp.extend_from_slice(&meta.len().to_le_bytes());
+        stamp.extend_from_slice(&mtime.to_le_bytes());
+        stamp
+    };
+    if meta.len() > CONFIG_BOUND {
+        return Some(stamp());
+    }
+    let mut text = Vec::new();
+    file.take(CONFIG_BOUND + 1).read_to_end(&mut text).ok()?;
+    // It grew while it was read.
+    Some(if text.len() as u64 > CONFIG_BOUND {
+        stamp()
+    } else {
+        text
+    })
+}
+
+#[cfg(unix)]
+fn open_without_waiting(path: &Path) -> io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_without_waiting(path: &Path) -> io::Result<fs::File> {
+    fs::File::open(path)
+}
+
 /// Every configuration file ansible-core's `find_ini_config_file` may pick, with its contents:
-/// `$ANSIBLE_CONFIG` as a file, or as a directory holding `ansible.cfg`, then `./ansible.cfg`,
-/// `~/.ansible.cfg` and `/etc/ansible/ansible.cfg`.
+/// `$ANSIBLE_CONFIG` as a file, or as a directory holding `ansible.cfg`, then `cwd/ansible.cfg`
+/// (not when `cwd` is world-writable, which the reference skips), `~/.ansible.cfg` and
+/// `/etc/ansible/ansible.cfg`.
 ///
 /// All of those that exist, not the one it picks: which one wins depends on rules (a missing
-/// `ANSIBLE_CONFIG` falls through, a world-writable working directory is skipped) that a copy
-/// here could get wrong, and a file hashed for nothing costs a rebuild, never a stale union.
+/// `ANSIBLE_CONFIG` falls through) that a copy here could get wrong, and a file hashed for
+/// nothing costs a rebuild, never a stale union. A world-writable working directory is the one
+/// rule copied, because the file in it is the one a stranger can write. Only regular files are
+/// read, up to [`CONFIG_BOUND`] bytes (see [`config_stamp`]).
 pub(super) fn configs(
     ansible_config: Option<&std::ffi::OsStr>,
     home: Option<&Path>,
+    cwd: &Path,
 ) -> Vec<(PathBuf, Vec<u8>)> {
     let mut candidates = Vec::new();
     if let Some(explicit) = ansible_config {
@@ -218,14 +275,16 @@ pub(super) fn configs(
             candidates.push(form);
         }
     }
-    candidates.push(PathBuf::from("ansible.cfg"));
+    if !crate::config::is_world_writable(cwd) {
+        candidates.push(cwd.join("ansible.cfg"));
+    }
     if let Some(home) = home {
         candidates.push(home.join(".ansible.cfg"));
     }
     candidates.push(PathBuf::from("/etc/ansible/ansible.cfg"));
     candidates
         .into_iter()
-        .filter_map(|path| fs::read(&path).ok().map(|text| (path, text)))
+        .filter_map(|path| config_stamp(&path).map(|text| (path, text)))
         .collect()
 }
 

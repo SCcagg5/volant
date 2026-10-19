@@ -116,10 +116,12 @@ pub(crate) fn install(runtimes: &Path, manifest: &Manifest) -> Result<Installed,
 
 /// A command for the runtime's interpreter with only the environment it needs: no `PYTHONPATH`,
 /// no user site, no `PIP_*` setting from the user, so nothing outside the runtime changes what
-/// it loads or installs.
+/// it loads or installs. `-I` also keeps the working directory off the module path, which `-m`
+/// would otherwise put there first.
 pub(crate) fn python_command(python: &Path) -> Command {
     let mut command = Command::new(python);
     command
+        .arg("-I")
         .env_clear()
         .env("PYTHONNOUSERSITE", "1")
         .env("PIP_DISABLE_PIP_VERSION_CHECK", "1")
@@ -153,7 +155,7 @@ fn install_wheels(python: &Path, platform: &Platform, wheels: &Path) -> Result<(
         )
     })?;
     let output = python_command(python)
-        .args(["-I", "-m", "pip", "install", "--isolated", "--no-cache-dir"])
+        .args(["-m", "pip", "install", "--isolated", "--no-cache-dir"])
         .args(["--no-index", "--find-links"])
         .arg(wheels)
         .args(["--require-hashes", "--only-binary", ":all:"])
@@ -176,7 +178,6 @@ fn install_wheels(python: &Path, platform: &Platform, wheels: &Path) -> Result<(
 pub(super) fn probe(python: &Path, version: &str) -> Result<(), String> {
     let output = python_command(python)
         .args([
-            "-I",
             "-c",
             "import sys, ansible; sys.stdout.write(ansible.__version__)",
         ])
@@ -360,7 +361,7 @@ impl Drop for Lock {
 
 /// Whether a process `pid` exists. One that belongs to another user counts.
 #[cfg(unix)]
-fn alive(pid: i32) -> bool {
+pub(crate) fn alive(pid: i32) -> bool {
     if pid <= 0 {
         return false;
     }
@@ -370,7 +371,7 @@ fn alive(pid: i32) -> bool {
 }
 
 #[cfg(not(unix))]
-fn alive(_: i32) -> bool {
+pub(crate) fn alive(_: i32) -> bool {
     true
 }
 
