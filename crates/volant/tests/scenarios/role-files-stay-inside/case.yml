@@ -2,6 +2,7 @@
 # matching directory of the role. A name that leaves it is refused when the play is read.
 runs:
   - args: [inside.yml]
+  - args: [inside-include.yml]
   - args: [escape-tasks.yml]
   - args: [escape-vars.yml]
   - args: [escape-defaults.yml]

@@ -4,6 +4,10 @@
     "stdout": "\nPLAY [localhost] ***************************************************************\n\nTASK [rr : debug] **************************************************************\nok: [localhost] => {\n    \"msg\": \"tasks install, extra=from-extra\"\n}\n\nTASK [rr : debug] **************************************************************\nok: [localhost] => {\n    \"msg\": \"tasks install, extra=from-extra\"\n}\n\nTASK [rr : debug] **************************************************************\nok: [localhost] => {\n    \"msg\": \"tasks sub/x\"\n}\n\nTASK [rr : debug] **************************************************************\nok: [localhost] => {\n    \"msg\": \"tasks install, extra=from-extra\"\n}\n\nTASK [rr : debug] **************************************************************\nok: [localhost] => {\n    \"msg\": \"tasks install, extra=from-extra\"\n}\n\nPLAY RECAP *********************************************************************\nlocalhost                  : ok=5    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   \n\n"
   },
   {
+    "code": 0,
+    "stdout": "\nPLAY [localhost] ***************************************************************\n\nTASK [install entry] ***********************************************************\nincluded: rr for localhost\n\nTASK [rr : debug] **************************************************************\nok: [localhost] => {\n    \"msg\": \"tasks install, extra=unset\"\n}\n\nTASK [nested entry] ************************************************************\nincluded: rr for localhost\n\nTASK [rr : debug] **************************************************************\nok: [localhost] => {\n    \"msg\": \"tasks sub/x\"\n}\n\nPLAY RECAP *********************************************************************\nlocalhost                  : ok=4    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   \n\n"
+  },
+  {
     "code": 4,
     "stdout": ""
   },
