@@ -1,0 +1,7 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: an empty apply is none
+      include_tasks:
+        file: inc.yml
+        apply: {}

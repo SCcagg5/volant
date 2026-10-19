@@ -1,0 +1,27 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    shared_v: play-var
+  tasks:
+    - name: private by flag
+      include_role:
+        name: r
+        public: false
+    - name: after the private include
+      debug:
+        msg: "false: rdef={{ rdef | default('unset') }} rvar={{ rvar | default('unset') }}"
+    - name: private by default
+      include_role:
+        name: q
+    - name: after the default include
+      debug:
+        msg: "default: qdef={{ qdef | default('unset') }}"
+    - name: public by a template
+      include_role:
+        name: r
+        public: "{{ flag }}"
+      vars:
+        flag: true
+    - name: after the templated include
+      debug:
+        msg: "templated: rdef={{ rdef | default('unset') }} rvar={{ rvar | default('unset') }}"

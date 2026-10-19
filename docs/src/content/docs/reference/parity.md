@@ -20,7 +20,7 @@ Each row is a keyword, option or plugin that ansible-core 2.19.12 ships, or a mo
 | YAML tag | 2 | 0 | 0 | 0 |
 | module | 71 | 0 | 0 | 0 |
 | action plugin | 28 | 0 | 0 | 0 |
-| filter | 113 | 9 | 0 | 0 |
+| filter | 114 | 8 | 0 | 0 |
 | test | 80 | 2 | 0 | 0 |
 | lookup | 25 | 0 | 0 | 0 |
 | become | 2 | 0 | 0 | 1 |
@@ -448,7 +448,7 @@ Each row is a keyword, option or plugin that ansible-core 2.19.12 ships, or a mo
 | `random` | <span class="kw kw-runs">runs</span> | through the Python helper; needs the plugin's Python libraries |
 | `realpath` | <span class="kw kw-runs">runs</span> | through the Python helper; needs the plugin's Python libraries |
 | `regex_escape` | <span class="kw kw-runs">runs</span> |  |
-| `regex_findall` | <span class="kw kw-partial">partial</span> | a pattern with a group returns the whole match |
+| `regex_findall` | <span class="kw kw-runs">runs</span> |  |
 | `regex_replace` | <span class="kw kw-runs">runs</span> |  |
 | `regex_search` | <span class="kw kw-runs">runs</span> |  |
 | `reject` | <span class="kw kw-runs">runs</span> |  |

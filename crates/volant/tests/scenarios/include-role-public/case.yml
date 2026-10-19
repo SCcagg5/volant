@@ -1,0 +1,10 @@
+# `public: true` lends the role's defaults and vars to what runs after the statement, for every
+# host; the default keeps them to the role.
+runs:
+  - args: [-i, inv.ini, public.yml]
+  - args: [-i, inv.ini, private.yml]
+  - args: [-i, inv.ini, skipped-and-facts.yml]
+  - args: [-i, inv.ini, places.yml]
+  - args: [-i, inv.ini, other-host.yml]
+  - args: [-i, inv.ini, roles-list.yml]
+  - args: [-i, inv-vars.ini, inventory-vars.yml]

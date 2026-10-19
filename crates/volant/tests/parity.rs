@@ -181,11 +181,6 @@ const ARGUMENT_GAPS: &[(&str, &str, &str)] = &[
     ),
     ("filter", "b64encode", "only utf-8 encoding is supported"),
     (
-        "filter",
-        "regex_findall",
-        "a pattern with a group returns the whole match",
-    ),
-    (
         "test",
         "version",
         "the strict and version_type arguments are not supported",

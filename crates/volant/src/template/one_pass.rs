@@ -4,6 +4,7 @@
 use std::sync::atomic::Ordering;
 
 use minijinja::machinery::WhitespaceConfig;
+use minijinja::syntax::SyntaxConfig;
 use serde_json::Value;
 
 use super::context::take_failure;
@@ -31,7 +32,7 @@ impl Templar {
             keep_trailing_newline: true,
             ..WhitespaceConfig::default()
         };
-        let rendered = render_str(self, "<string>", text, ctx, ws)
+        let rendered = render_str(self, "<string>", text, ctx, ws, SyntaxConfig::default())
             .map(Value::String)
             .map_err(convert_error);
         take_failure(ctx).map_or(rendered, Err)

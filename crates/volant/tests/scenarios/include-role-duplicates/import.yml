@@ -1,0 +1,23 @@
+- hosts: h1
+  gather_facts: false
+  roles:
+    - r
+  tasks:
+    - name: the roles list is not compared
+      import_role:
+        name: r
+    - name: false, after the import above
+      import_role:
+        name: r
+        allow_duplicates: false
+    - name: false again
+      import_role:
+        name: r
+        allow_duplicates: false
+    - name: another role
+      import_role:
+        name: q
+        allow_duplicates: false
+    - name: done
+      debug:
+        msg: done
