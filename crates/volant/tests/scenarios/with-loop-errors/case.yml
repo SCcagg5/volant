@@ -1,0 +1,8 @@
+# A loop that fails before its first item: a value that is one undefined variable, and a lookup
+# that raises.
+runs:
+  - args: [undefined-loop.yml]
+  - args: [undefined-with.yml]
+  - args: [lookup-raises.yml]
+  - args: [lookup-raises-ignored.yml]
+needs: ["ansible-core"]

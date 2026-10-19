@@ -1,0 +1,8 @@
+# A with_ key whose name is no lookup plugin is an invalid attribute of the task, and a task that
+# holds nothing else has no action.
+runs:
+  - args: [short.yml]
+  - args: [builtin.yml]
+  - args: [collection.yml]
+  - args: [alone.yml]
+needs: ["ansible-core"]

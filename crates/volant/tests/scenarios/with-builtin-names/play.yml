@@ -1,0 +1,25 @@
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: items under ansible.builtin
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_ansible.builtin.items: [[1, 2], [3, [4]]]
+      loop_control:
+        label: "L-{{ item }}"
+        index_var: i
+
+    - name: items under ansible.legacy
+      debug:
+        msg: "{{ item }}"
+      with_ansible.legacy.items: [[1, 2], [3]]
+
+    - name: dict under ansible.builtin
+      debug:
+        msg: "{{ item.key }}={{ item.value }}"
+      with_ansible.builtin.dict: {a: 1, b: 2}
+
+    - name: nested under ansible.legacy
+      debug:
+        msg: "{{ item.0 }}{{ item.1 }}"
+      with_ansible.legacy.nested: [[a, b], [1]]
