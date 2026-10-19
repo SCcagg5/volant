@@ -87,6 +87,12 @@ pub struct VarStore {
     /// Of the `set_fact` layer's facts, the names that came from a managed host rather than
     /// from the playbook.
     untrusted: BTreeMap<String, BTreeSet<String>>,
+    /// The host names and group names `add_host` took from text the playbook did not write: a
+    /// name that still holds a template after the task rendered it. Reading one of them back
+    /// through `groups`, `hostvars`, `group_names`, a play's host list or `inventory_hostname`
+    /// taints the render, so the name is shown as it is and never evaluated.
+    data_hosts: BTreeSet<String>,
+    data_groups: BTreeSet<String>,
     extra: Map<String, Value>,
     /// What `ansible_forks` reports, which the reference sets from the run's own `forks`.
     forks: usize,
@@ -163,6 +169,11 @@ pub(crate) fn holds_template(value: &Value) -> bool {
         Value::Object(map) => map.values().any(holds_template),
         _ => false,
     }
+}
+
+/// Whether a host or group name still holds a template, a comment included.
+pub(crate) fn is_data_name(name: &str) -> bool {
+    Templar::is_template(name) || name.contains("{#")
 }
 
 /// The play and batch host lists one `shared` map was built from.

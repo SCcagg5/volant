@@ -8,7 +8,7 @@ use std::sync::Arc;
 use serde_json::{Map, Value};
 
 use super::load::load_vars_dir;
-use super::{Added, VarStore, holds_template};
+use super::{Added, VarStore, holds_template, is_data_name};
 use crate::bridge::Bridge;
 use crate::inventory::{Inventory, PluginConfig, Source};
 use crate::stats::CustomStats;
@@ -109,6 +109,8 @@ impl VarStore {
             smart: false,
             cache_failure: None,
             untrusted: inventory.untrusted_vars(),
+            data_hosts: BTreeSet::new(),
+            data_groups: BTreeSet::new(),
             extra,
             forks: crate::config::DEFAULT_FORKS,
             run_tags: vec!["all".to_string()],
@@ -221,9 +223,17 @@ impl VarStore {
             .into_iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
+        // The same holds for a name: a host or a group named from a registered value is data
+        // wherever a template reads it back.
+        if is_data_name(name) {
+            self.data_hosts.insert(name.to_string());
+        }
         self.dynamic.add_host(name, line.clone());
         self.added.push(Added::Host(name.to_string(), line));
         for group in groups.iter().filter(|g| *g != "all") {
+            if is_data_name(group) {
+                self.data_groups.insert(group.clone());
+            }
             self.dynamic.add_member(name, group);
             self.added
                 .push(Added::Member(name.to_string(), group.clone()));
