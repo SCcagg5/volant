@@ -179,6 +179,11 @@ impl Object for Context {
     }
 
     fn enumerate(self: &Arc<Self>) -> Enumerator {
+        // The host's own names, `map` over the base a loop's items share: a later layer lists
+        // only the names neither of them holds, so a name is never listed twice.
+        let own = |key: &str| {
+            self.vars.contains_key(key) || self.base.as_ref().is_some_and(|b| b.contains_key(key))
+        };
         let mut keys: Vec<minijinja::Value> = self
             .vars
             .keys()
@@ -189,18 +194,16 @@ impl Object for Context {
                 keys.push(minijinja::Value::from(key.as_str()));
             }
         }
-        if self.hostvars.is_some() && !self.vars.contains_key("hostvars") {
+        if self.hostvars.is_some() && !own("hostvars") {
             keys.push(minijinja::Value::from("hostvars"));
         }
         for key in self.shared.iter().flat_map(|s| s.keys()) {
-            if !self.vars.contains_key(key) {
+            if !own(key) {
                 keys.push(minijinja::Value::from(key.as_str()));
             }
         }
         for key in self.facts.iter().flat_map(|f| f.keys()) {
-            if !self.vars.contains_key(key)
-                && !self.shared.as_ref().is_some_and(|s| s.contains_key(key))
-            {
+            if !own(key) && !self.shared.as_ref().is_some_and(|s| s.contains_key(key)) {
                 keys.push(minijinja::Value::from(key.as_str()));
             }
         }

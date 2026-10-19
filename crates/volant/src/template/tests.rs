@@ -299,17 +299,34 @@ fn the_context_hands_out_the_shared_view_and_ranks_inventory_wide_names() {
         // and for nothing else.
         assert_eq!(t.render("{{ own }}", vars).unwrap(), json!(1));
     }
-    {
+    // The host's own names whole in its map, or split with the base a loop's items share: a
+    // name either layer holds is listed once.
+    for (own, base) in [
+        (
+            json!({"groups": "a set_fact wrote this", "own": 1}),
+            json!({}),
+        ),
+        (
+            json!({"own": 1}),
+            json!({"groups": "a set_fact wrote this"}),
+        ),
+        (
+            json!({}),
+            json!({"groups": "a set_fact wrote this", "own": 1}),
+        ),
+    ] {
         let shared = Arc::new(vars(json!({"groups": {"web": ["h1"]}})));
-        let fact = vars(json!({"groups": "a set_fact wrote this", "own": 1}));
+        let facts = Arc::new(vars(json!({"own": 2})));
+        let own = vars(own);
+        let base = Arc::new(vars(base));
         let (ctx, _) = context_of(Vars {
-            map: &fact,
+            map: &own,
             hostvars: None,
             shared: Some(&shared),
-            facts: None,
+            facts: Some(&facts),
             untrusted: None,
             untrusted_hosts: None,
-            base: None,
+            base: Some(&base),
         });
         let mut names: Vec<String> = ctx
             .try_iter()
@@ -317,7 +334,7 @@ fn the_context_hands_out_the_shared_view_and_ranks_inventory_wide_names() {
             .map(|name| name.to_string())
             .collect();
         names.sort();
-        assert_eq!(names, ["groups", "own"]);
+        assert_eq!(names, ["groups", "own"], "{own:?} over {base:?}");
     }
 }
 

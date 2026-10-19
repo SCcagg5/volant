@@ -39,6 +39,11 @@ fn peak_megabytes(dir: &std::path::Path, playbook: &str) -> u64 {
         }
         if let Some(status) = child.try_wait().expect("the child is polled") {
             assert!(status.success(), "the run failed: {status}");
+            // A run that ends before the first read would otherwise pass any bound.
+            assert!(
+                peak_kb > 0,
+                "no memory reading was taken while the run lasted"
+            );
             return peak_kb / 1024;
         }
         if started.elapsed() > Duration::from_secs(300) {
@@ -49,9 +54,8 @@ fn peak_megabytes(dir: &std::path::Path, playbook: &str) -> u64 {
     }
 }
 
-/// A command prints `LINES` lines and a loop walks them. Every item used to own a copy of the
-/// host's variables, `r` and its lines among them, so the memory was the number of items times
-/// the size of the result: about 1 GB for these 3,000 lines in a debug build, 70 MB now.
+/// A loop walks the `LINES` lines a command printed. Each item used to own a copy of the host's
+/// variables, `r` among them, so the memory was the number of items times the result's size.
 #[test]
 fn a_loop_over_a_long_result_does_not_copy_it_for_every_item() {
     const LINES: usize = 3000;

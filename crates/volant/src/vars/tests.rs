@@ -1190,4 +1190,17 @@ fn the_variables_items_share_keep_templates_apart_and_stay_readable() {
         templar.render("{{ plain }}-{{ printed }}", &vars).unwrap(),
         json!("2-{{ 7 * 6 }}")
     );
+    // A template left in the map that reads the host's text from the share renders it as data
+    // once the item is bound, and is data itself from then on.
+    vars.insert("item".into(), json!("a"));
+    vars.insert("echo".into(), json!("{{ printed }}-{{ item }}"));
+    let (map, untrusted) = templar.resolve_vars_tainted(&vars);
+    assert_eq!(map["built"], json!("a"));
+    assert!(untrusted.contains("echo") && !untrusted.contains("built"));
+    vars.map = map;
+    vars.untrusted = untrusted;
+    assert_eq!(
+        templar.render("{{ echo }}", &vars).unwrap(),
+        json!("{{ 7 * 6 }}-a")
+    );
 }
