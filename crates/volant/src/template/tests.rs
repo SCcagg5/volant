@@ -1230,8 +1230,7 @@ fn a_raw_block_in_text_from_a_host_is_never_rendered() {
 }
 
 /// A variable whose value is a template is rendered when a template reads it, so a filter or an
-/// operator sees the final value, in play vars, mappings and lists alike. Measured on
-/// ansible-core 2.19.12: every row answers the same there.
+/// operator sees the final value, in play vars, mappings and lists alike, as in ansible-core.
 #[rstest::rstest]
 #[case::arithmetic(json!({"c": 7, "b": "{{ c }}", "s": "{{ b | int + 1 }}"}), "{{ s }}", json!(8))]
 #[case::int_filter(json!({"c": 7, "b": "{{ c }}"}), "{{ b | int }}", json!(7))]
@@ -1451,9 +1450,8 @@ fn unsafe_text_and_facts_are_data_through_a_nested_variable() {
     }
 }
 
-/// A variable is rendered by a read only when everything its text reads is author-written: a
-/// chain over the inventory's names, the shared lists, `hostvars` or a lookup by text is left as
-/// written, at any depth, and a name the engine binds for itself is read as it is bound.
+/// A read renders a variable only when all it reads is author-written: a chain over inventory
+/// names, shared lists, `hostvars` or a lookup by text stays as written, at any depth.
 #[test]
 fn a_nested_read_renders_only_variables_that_read_author_text() {
     let t = templar();
@@ -1466,6 +1464,8 @@ fn a_nested_read_renders_only_variables_that_read_author_text() {
         "pl": "{{ ph | list | last }}",
         "lk": "{{ lookup('vars', 'gn') }}",
         "lp": "{{ lk | length }}",
+        "la": "{% set f = lookup %}{{ f('vars', 'gn') }}",
+        "lb": "{{ la | length }}",
         "dir": "/srv/{{ inventory_hostname }}",
         "inventory_hostname": "h1",
         "c": 7,
@@ -1496,6 +1496,7 @@ fn a_nested_read_renders_only_variables_that_read_author_text() {
         ("{{ gl | length }}", "{{ gk | last }}"),
         ("{{ pl | length }}", "{{ ph | list | last }}"),
         ("{{ lp | length }}", "{{ lk | length }}"),
+        ("{{ lb | length }}", "{{ la | length }}"),
     ] {
         assert_eq!(t.render(text, vars()), Ok(json!(raw.len())), "{text}");
     }

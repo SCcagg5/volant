@@ -106,6 +106,11 @@ pub(super) fn template_reads(source: &str) -> Option<TemplateReads> {
         let mut idx = 0;
         while let Some(op) = instructions.get(idx) {
             match op {
+                // The function read as a value, then called under another name, is a lookup by
+                // text just the same.
+                Instruction::Lookup(name) if matches!(*name, "lookup" | "query" | "q") => {
+                    reads.dynamic = true;
+                }
                 Instruction::Lookup(name) => {
                     reads.names.insert((*name).to_string());
                 }

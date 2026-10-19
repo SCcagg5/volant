@@ -7225,10 +7225,8 @@ fn chain_reads(indent: &str) -> String {
     text
 }
 
-/// Names and results a host sent, read through chains of up to five variables built over the
-/// inventory's own names, in every layer a variable can come from, never run on the controller.
-/// A `set_fact` stores the text it rendered, so that layer is checked for the registered result
-/// only.
+/// Host text read through chains of up to five variables, in every layer, never runs on the
+/// controller. A `set_fact` stores rendered text, so that layer checks the registered result only.
 #[rstest::rstest]
 #[case::groups("groups", "name: extra, groups: [\"{{ r.stdout }}\"]")]
 #[case::play_hosts("ansible_play_hosts_all", "name: \"{{ r.stdout }}\"")]
