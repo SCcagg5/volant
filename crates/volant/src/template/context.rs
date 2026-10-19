@@ -18,6 +18,22 @@ use super::{
 };
 use crate::inventory::is_localhost;
 
+/// Names of the map that hold the inventory's own names: the host's name, its short name and its
+/// groups. Together with the shared layer they are what a name added to the inventory during the
+/// run, from text a host sent, reaches a template through. `hostvars` is not among them: a
+/// variable of another host may hold a template of its own, which a read renders.
+const INVENTORY_NAMES: [&str; 3] = [
+    "inventory_hostname",
+    "inventory_hostname_short",
+    "group_names",
+];
+
+/// Whether `key` is bound by the engine for its own use and never written by a playbook: the
+/// internal bindings of a render. A read of such a name gives the value as bound.
+fn engine_owned(key: &str) -> bool {
+    key.starts_with("__volant_") || key.contains("::")
+}
+
 /// Names being resolved at once before a read is called a loop. The reference stops at Python's
 /// recursion limit, and a chain this long is never an intended one.
 const MAX_RESOLVING: usize = 64;
@@ -194,6 +210,8 @@ pub(super) struct Context {
     /// Names whose rendered value was built from something a managed host wrote. A read of one is
     /// as much a read of host data as a read of the name it was built from.
     soiled: Mutex<BTreeSet<String>>,
+    /// Whether the render read the inventory's own names since the flag was last cleared.
+    inventory_read: AtomicBool,
     /// Whether `soiled` holds a name, so that a render that resolved nothing never takes its lock.
     any_soiled: AtomicBool,
     /// Set when `failed` is: the first error a nested render raised that the read cannot carry.
@@ -226,6 +244,10 @@ impl Context {
             stack.push(key.to_string());
         }
         let ctx = minijinja::Value::from_dyn_object(Arc::clone(self));
+        // A failure the render under way already met stays its own: the nested render reports
+        // the failures of its variable, and takes only those.
+        let earlier = self.failure.lock().expect("template failure").take();
+        let earlier_failed = self.failed.swap(false, Ordering::Relaxed);
         // The render under way keeps what it has read so far; the nested one starts clean so that
         // it can tell whether this variable's own text came from a host.
         let before = self.tainted.swap(false, Ordering::Relaxed);
@@ -236,6 +258,10 @@ impl Context {
         from_host |= self.tainted.load(Ordering::Relaxed);
         self.tainted.store(before || from_host, Ordering::Relaxed);
         self.resolving.lock().expect("template resolving").pop();
+        if earlier_failed {
+            *self.failure.lock().expect("template failure") = earlier;
+            self.failed.store(true, Ordering::Relaxed);
+        }
         if from_host {
             self.soiled
                 .lock()
@@ -298,7 +324,7 @@ impl Context {
             return Some((view, true));
         }
         if let Some(value) = self.vars.get(key) {
-            if !untrusted && holds_template(value) {
+            if !untrusted && !engine_owned(key) && holds_template(value) {
                 return Some(self.resolve(key, value));
             }
             return Some((minijinja::Value::from_serialize(value), true));
@@ -309,6 +335,22 @@ impl Context {
         let value = self.base.as_ref()?.get(key)?;
         Some((minijinja::Value::from_serialize(value), true))
     }
+}
+
+/// Runs one render pass and says whether it read the inventory's own names: the shared layer,
+/// the host's name and its groups. What it read stays marked for a pass that
+/// contains this one.
+pub(super) fn tracking_inventory<T>(ctx: &minijinja::Value, pass: impl FnOnce() -> T) -> (T, bool) {
+    let Some(context) = ctx.downcast_object_ref::<Context>() else {
+        return (pass(), false);
+    };
+    let earlier = context.inventory_read.swap(false, Ordering::Relaxed);
+    let out = pass();
+    let read = context.inventory_read.load(Ordering::Relaxed);
+    context
+        .inventory_read
+        .store(earlier || read, Ordering::Relaxed);
+    (out, read)
 }
 
 /// The error a nested render raised that its reader could not take, if one did, and clears it. A
@@ -390,7 +432,16 @@ impl Object for Context {
         }
         self.reads.fetch_add(1, Ordering::Relaxed);
         // Before the memo, never after: a second read of the same name is answered from the
-        // cache and would otherwise leave the render looking clean.
+        // cache and would otherwise leave the render looking clean. The same goes for the
+        // inventory's own names.
+        if INVENTORY_NAMES.contains(&key)
+            || self
+                .shared
+                .as_ref()
+                .is_some_and(|shared| shared.contains_key(key))
+        {
+            self.inventory_read.store(true, Ordering::Relaxed);
+        }
         // A `hostvars` the map carries as a plain value lists its hosts on any read, so a host
         // name that came from a managed host taints every read of it.
         let untrusted = self.untrusted.contains(key);
@@ -525,6 +576,7 @@ pub(super) fn context_of(templar: &Templar, vars: Vars<'_>) -> (minijinja::Value
         templar: templar.clone(),
         resolving: Mutex::new(Vec::new()),
         soiled: Mutex::new(BTreeSet::new()),
+        inventory_read: AtomicBool::new(false),
         any_soiled: AtomicBool::new(false),
         failure: Mutex::new(None),
         failed: AtomicBool::new(false),

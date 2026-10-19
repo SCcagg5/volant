@@ -13,10 +13,14 @@ use serde_json::{Map, Value};
 use crate::bridge::{Bridge, PluginKind};
 
 use super::bridged;
-use super::context::{Vars, begin, context_of, is_literal, reads, take_failure};
+use super::context::{
+    Vars, begin, context_of, is_literal, reads, take_failure, tracking_inventory,
+};
 use super::env::{environment, holds_undefined, truthy, type_name};
 use super::filters;
-use super::vm::{convert_error, eval_expr, keep_literal, render_str, single_expression};
+use super::vm::{
+    convert_error, eval_expr, holds_template, keep_literal, render_str, single_expression,
+};
 use super::{RESOLVING, Tainted, TemplateError};
 
 /// A handle on the environment and the bridge, cheap to clone: a render's context holds one so
@@ -187,8 +191,14 @@ impl Templar {
         // context, and a tainted field must not make the next field data too.
         tainted.store(false, Ordering::Relaxed);
         let before = begin(ctx);
-        let mut value = self.render_once(text, ctx)?;
+        let (first, read_inventory) = tracking_inventory(ctx, || self.render_once(text, ctx));
+        let mut value = first?;
         keep_literal(text, &value, ctx, true, reads(ctx) == before);
+        // A name added to the inventory from text a host sent is read here as the playbook's.
+        // No inventory name holds a template of its own, so one that does is data.
+        if read_inventory && holds_template(&value) {
+            tainted.store(true, Ordering::Relaxed);
+        }
         // A variable can hold a template of its own, so Ansible renders a result again while it
         // still carries a marker. Three further passes: a chain longer than that is a loop, and
         // an unchanged result ends it earlier. Not when the pass read a value that came from a

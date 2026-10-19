@@ -136,7 +136,7 @@ pub(super) fn with_lookup_items(
         None => Vec::new(),
     };
     // Bound in a copy only this call reads, under a name no playbook writes: the terms reach the
-    // lookup as values, never as text to compile.
+    // lookup as values, never as text to compile. A read of the name gives them as bound.
     const TERMS: &str = "__volant_with_terms";
     let mut scope = vars.clone();
     scope.insert(TERMS.into(), Value::Array(terms));
