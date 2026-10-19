@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
+use super::prepare::{strict_boolean, undefined_name};
 use super::{RunState, python_type};
 use crate::inventory::Host;
 use crate::playbook::Play;
@@ -42,6 +43,46 @@ pub(super) fn max_fail_percentage(
         .filter(|n| n.is_finite())
         .map(Some)
         .ok_or_else(|| refuse(format!("The value {rendered} is not a number.")))
+}
+
+/// What the play's `gather_facts` and `force_handlers` came to, when the playbook wrote either as
+/// a template.
+#[derive(Default)]
+pub(super) struct PlayFlags {
+    pub(super) gather_facts: Option<bool>,
+    pub(super) force_handlers: Option<bool>,
+}
+
+/// Renders the play's `gather_facts` and `force_handlers` templates once, when the play starts,
+/// against the play's variables, as the reference does for every keyword of the play. A value that
+/// is not a boolean stops the run before the play's banner, in the reference's words.
+pub(super) fn play_flags(
+    play: &Play,
+    templar: &Templar,
+    vars: &Map<String, Value>,
+) -> anyhow::Result<PlayFlags> {
+    let read = |key: &str, template: &Option<String>| -> anyhow::Result<Option<bool>> {
+        let Some(raw) = template else {
+            return Ok(None);
+        };
+        // `[ERROR]:` as the reference prints it: the keyword is read while the run goes.
+        let refuse = |why: String| {
+            crate::stats::Refusal::plain(4, format!("Error processing keyword '{key}': {why}"))
+        };
+        let rendered = templar
+            .render(raw, vars)
+            .map_err(|err| refuse(undefined_name(raw, err.0)))?;
+        strict_boolean(&rendered).map(Some).ok_or_else(|| {
+            refuse(format!(
+                "The value {} could not be converted to 'bool'.",
+                crate::playbook::python_repr(&rendered)
+            ))
+        })
+    };
+    Ok(PlayFlags {
+        gather_facts: read("gather_facts", &play.deferred.gather_facts)?,
+        force_handlers: read("force_handlers", &play.deferred.force_handlers)?,
+    })
 }
 
 /// The play's `gather_subset`, `gather_timeout` and `fact_path`, checked when the play starts,

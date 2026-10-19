@@ -7047,6 +7047,120 @@ fn the_system_runtime_keeps_the_refusal_and_installs_nothing() {
     assert!(!data.exists(), "a runtime was installed");
 }
 
+/// A templated `no_log` hides a failed task's result as a literal one does, at whatever step of
+/// preparing it failed; unreadable or not a boolean, the result stays hidden.
+#[rstest]
+fn a_templated_no_log_hides_a_task_that_failed_before_it_ran(
+    #[values(
+        "arguments",
+        "when",
+        "loop",
+        "label",
+        "delegate",
+        "vars",
+        "environment",
+        "notify",
+        "set_fact",
+        "handler"
+    )]
+    kind: &str,
+    #[values("task", "block", "play")] level: &str,
+) {
+    // A name only this host's inventory entry carries, in the text each of these failures shows.
+    let fails = "{{ lookup('file', '/nonexistent/' ~ sec) }}";
+    let task = match kind {
+        "arguments" => format!("debug: {{msg: \"{fails}\"}}"),
+        "when" => format!("debug: {{msg: x}}\nwhen: \"{fails}\""),
+        "loop" => format!("debug: {{msg: x}}\nloop: \"{fails}\""),
+        "label" => {
+            format!("debug: {{msg: x}}\nloop: [1]\nloop_control: {{label: \"{fails}\"}}")
+        }
+        "delegate" => format!("debug: {{msg: x}}\ndelegate_to: \"{fails}\""),
+        "vars" => format!("debug: {{msg: \"{{{{ v }}}}\"}}\nvars: {{v: \"{fails}\"}}"),
+        "environment" => format!("command: \"true\"\nenvironment: {{X: \"{fails}\"}}"),
+        "notify" => format!("command: \"true\"\nchanged_when: true\nnotify: \"{fails}\""),
+        "set_fact" => format!("set_fact: {{y: \"{fails}\"}}"),
+        _ => "command: \"true\"\nchanged_when: true\nnotify: h".to_string(),
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let inventory = dir.path().join("inv.ini");
+    std::fs::write(
+        &inventory,
+        "h1 ansible_connection=local ansible_python_interpreter=/usr/bin/python3 sec=SECRETVALUE\n",
+    )
+    .unwrap();
+    // What `no_log` is written as, and whether the result is then hidden.
+    for (written, hidden) in [
+        ("\"{{ hide }}\"", true),
+        ("\"{{ show }}\"", false),
+        ("\"{{ nowhere }}\"", true),
+        ("\"{{ 'maybe' }}\"", true),
+        ("true", true),
+    ] {
+        let indent = |text: &str, by: usize| text.replace('\n', &format!("\n{}", " ".repeat(by)));
+        let line = format!("no_log: {written}");
+        let (play_keyword, body) = match (kind, level) {
+            ("handler", _) => (
+                String::new(),
+                format!(
+                    "    - {}\n  handlers:\n    - name: h\n      debug: {{msg: \"{fails}\"}}\n      {line}\n",
+                    indent(&task, 6)
+                ),
+            ),
+            (_, "task") => (
+                String::new(),
+                format!("    - {}\n      {line}\n", indent(&task, 6)),
+            ),
+            (_, "block") => (
+                String::new(),
+                format!(
+                    "    - block:\n        - {}\n      {line}\n",
+                    indent(&task, 10)
+                ),
+            ),
+            _ => (
+                format!("  {line}\n"),
+                format!("    - {}\n", indent(&task, 6)),
+            ),
+        };
+        let book = dir.path().join("play.yml");
+        std::fs::write(
+            &book,
+            format!(
+                "- hosts: h1\n  gather_facts: false\n  vars: {{hide: true, show: false}}\n{play_keyword}  tasks:\n{body}"
+            ),
+        )
+        .unwrap();
+        let out = volant_within(
+            &[
+                "playbook",
+                "-i",
+                &inventory.display().to_string(),
+                &book.display().to_string(),
+            ],
+            DEFAULT_DEADLINE,
+        );
+        let shown = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let what = format!("{kind} at {level} with no_log: {written}\n{shown}");
+        if kind == "handler" && level != "task" {
+            // The handler is written under `handlers:`, where only its own `no_log` applies.
+            continue;
+        }
+        assert!(shown.contains("FAILED!"), "the task did not fail: {what}");
+        if hidden {
+            assert!(!shown.contains("SECRETVALUE"), "{what}");
+            assert!(shown.contains("the output has been hidden"), "{what}");
+        } else {
+            assert!(shown.contains("SECRETVALUE"), "{what}");
+            assert!(!shown.contains("the output has been hidden"), "{what}");
+        }
+    }
+}
+
 /// A host that answers with a YAML document nested far past any real one fails its own task, and
 /// the run goes on for the other host instead of the process aborting on a stack overflow.
 #[test]

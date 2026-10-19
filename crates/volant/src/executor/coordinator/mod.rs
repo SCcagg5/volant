@@ -34,7 +34,7 @@ use events::{
     unreachable_left,
 };
 use meta::{MetaContext, apply_meta};
-use publish::{Coordinator, keep_links, take_links, task_name};
+use publish::{Coordinator, Rendering, keep_links, take_links, task_name};
 pub(in crate::executor) use publish::{escalated_links, render_name};
 pub use types::Progress;
 pub(in crate::executor) use types::{BatchEnd, Event, MetaEffect};
@@ -109,7 +109,7 @@ pub(super) async fn run_batch(
         play_vars: play.vars.clone(),
         vars_files: vars_files.clone(),
         all_play_hosts: all.to_vec(),
-        r#become: play.r#become,
+        r#become: (play.r#become, play.deferred.r#become.clone()),
         become_user: play.become_user.clone(),
         python: state.python.clone(),
         step: options.step.clone().map(debugger::Stepper::new),
@@ -135,6 +135,7 @@ pub(super) async fn run_batch(
         removed: HashSet::new(),
         ending: BTreeSet::new(),
         dismissed: BTreeSet::new(),
+        rendering: Some(Rendering::new(&plan, &plan_tx, state, options)),
     };
     let mut round = Round {
         dormant: dormant.to_vec(),

@@ -1,0 +1,11 @@
+- hosts: h1,h2
+  gather_facts: false
+  vars:
+    flag_f: false
+  tasks:
+    - name: One host fails
+      fail: {msg: boom}
+      when: inventory_hostname == 'h1'
+      any_errors_fatal: "{{ flag_f }}"
+    - name: Not reached by the other host
+      debug: {msg: after}

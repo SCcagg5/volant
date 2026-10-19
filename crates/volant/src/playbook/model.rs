@@ -8,6 +8,7 @@ use volant_protocol::modules::short_name;
 
 use crate::roles::RoleEntry;
 
+use super::deferred::Deferred;
 use super::fields::Debugger;
 use super::keywords::{Flag, META_ONCE, is_meta};
 use super::origin::Origin;
@@ -102,6 +103,9 @@ pub struct Play {
     pub any_errors_fatal: Option<bool>,
     pub ignore_errors: Option<Flag>,
     pub ignore_unreachable: Option<bool>,
+    /// The keywords above, and `become`, `gather_facts` and `force_handlers`, written as
+    /// templates: rendered when the task runs, or when the play starts for the last two.
+    pub deferred: Deferred,
     /// `max_fail_percentage`, as written: a number, or a template rendered when the play
     /// starts. Play-only - a task or a block carrying it is refused at load.
     pub max_fail_percentage: Option<Value>,
@@ -264,6 +268,9 @@ pub struct PlayTask {
     /// it was written for. Kept as written because it is a template rendered per task.
     pub delegate_facts: Option<bool>,
     pub delegate_to: Option<String>,
+    /// The keywords of this task, its blocks, its role and its play that are templates, which
+    /// the executor renders for the host that runs it; see [`Deferred`].
+    pub deferred: Deferred,
     /// Where the task was written, for the `Origin:` of a failure's error block.
     pub origin: Option<Origin>,
     /// Where some of its values were written - `until`, `retries`, `delay` and a `debug`'s `var` -
@@ -335,6 +342,7 @@ impl PlayTask {
             ignore_unreachable: None,
             delegate_facts: None,
             delegate_to: None,
+            deferred: Deferred::default(),
             origin: None,
             value_origins: std::collections::BTreeMap::new(),
         }
@@ -408,7 +416,8 @@ impl PlayTask {
     /// `keywords::tests::run_once_is_the_only_barrier_keyword`: a second row marked `barrier`
     /// would look declared and be ignored here, and that test refuses one.
     pub fn barrier(&self) -> bool {
-        (self.runs_once() && crate::keywords::is_barrier("run_once"))
+        ((self.runs_once() || self.deferred.run_once.is_some())
+            && crate::keywords::is_barrier("run_once"))
             || self.pauses()
             || self.adds_host()
             || self.fails_all()
@@ -417,8 +426,13 @@ impl PlayTask {
 
     /// Whether a failure of this task on one host fails the whole batch. A barrier too: the
     /// hosts meet in front of it and learn together how it ended.
+    ///
+    /// A template counts as true whatever it renders to. Measured on ansible-core 2.19.12: the
+    /// linear strategy reads the keyword before it is rendered, so `any_errors_fatal: "{{ x }}"`
+    /// takes the batch down with it for a false `x` too, and the task's own host then renders the
+    /// value and fails on one that is not a boolean.
     pub fn fails_all(&self) -> bool {
-        self.any_errors_fatal == Some(true)
+        self.any_errors_fatal == Some(true) || self.deferred.any_errors_fatal.is_some()
     }
 
     /// Whether an unreachable host stays in the play after this task.

@@ -364,7 +364,9 @@ pub(super) fn boolean_keyword(
 ) -> Result<bool, TemplateError> {
     let keyword =
         |detail: String| TemplateError(format!("Error processing keyword '{key}': {detail}"));
-    let rendered = templar.render(raw, vars).map_err(|e| keyword(e.0))?;
+    let rendered = templar
+        .render(raw, vars)
+        .map_err(|e| keyword(undefined_name(raw, e.0)))?;
     strict_boolean(&rendered).ok_or_else(|| {
         keyword(format!(
             "The value {} could not be converted to 'bool'.",
@@ -377,7 +379,7 @@ pub(super) fn boolean_keyword(
 /// `ansible/module_utils/parsing/convert_bool.py` (2.19.12), which a boolean keyword is read
 /// with: a real boolean; `1`, `1.0`, `0`, `0.0`; or one of `y yes on 1 true t` and
 /// `n no off 0 false f`, trimmed and in any case. Anything else is not a boolean.
-pub(super) fn strict_boolean(value: &Value) -> Option<bool> {
+pub(in crate::executor) fn strict_boolean(value: &Value) -> Option<bool> {
     let word = match value {
         Value::Bool(b) => return Some(*b),
         Value::Number(n) => n.to_string(),

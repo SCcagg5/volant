@@ -16,7 +16,7 @@ use crate::transport::ConnectionDefaults;
 use crate::vars::VarStore;
 
 use super::coordinator::{Event, Progress};
-use super::prepare::{Item, PlayPlan, Prepared, pause_of, prepare};
+use super::prepare::{Item, PlayPlan, Prepared, hide_after_failure, pause_of, prepare, resolve};
 use super::run::{break_after, classify, empty_loop_result, loops, registered_value};
 
 /// One expansion a host asked for at an include step.
@@ -63,7 +63,12 @@ pub(super) fn resolve_include(
     defaults: &ConnectionDefaults,
     warnings: &mut Vec<String>,
     abort: &super::Abort,
-) -> (Vec<IncludeGroup>, Vec<Shown>, std::time::Duration) {
+) -> (
+    Vec<IncludeGroup>,
+    Vec<Shown>,
+    std::time::Duration,
+    Option<Box<Step>>,
+) {
     let items = match prepare(step, host, plan, live, templar, store, defaults, warnings) {
         Ok(
             Prepared::Skipped(items)
@@ -85,9 +90,31 @@ pub(super) fn resolve_include(
                     ignored: None,
                 }],
                 std::time::Duration::ZERO,
+                hide_after_failure(step, host, plan, live, templar, store),
             );
         }
     };
+    // The statement's own keywords that are templates, rendered for this host: its `no_log`
+    // censors the `included:` line, and a value the reference cannot take fails the statement.
+    let ready: Vec<&crate::vars::HostVars> = items
+        .iter()
+        .filter(|i| i.skipped.is_none())
+        .map(|i| &i.vars)
+        .collect();
+    let resolution = resolve(step, &ready, templar);
+    warnings.extend(resolution.warnings);
+    let copy = resolution.step;
+    if let Some(err) = resolution.error {
+        let shown = vec![Shown {
+            element: None,
+            label: None,
+            result: TaskResult::failed_with(super::prepare::failure_text(&err)),
+            failed: true,
+            ignored: None,
+        }];
+        return (Vec::new(), shown, std::time::Duration::ZERO, copy);
+    }
+    let step = copy.as_deref().unwrap_or(step);
     // `break_when` ends an include loop after the item it holds for, a skipped one included, and
     // `pause` waits after every other item that has another behind it: measured on ansible-core
     // 2.19.12, `include_tasks` over `[1, 2, 3]` with `break_when: item == 2` includes 1 and 2.
@@ -179,7 +206,7 @@ pub(super) fn resolve_include(
                         .is_some() =>
                 {
                     abort.raise_with(4, format!("{err:#}"));
-                    return (Vec::new(), Vec::new(), std::time::Duration::ZERO);
+                    return (Vec::new(), Vec::new(), std::time::Duration::ZERO, copy);
                 }
                 Err(err) => {
                     let mut body = Map::new();
@@ -207,7 +234,7 @@ pub(super) fn resolve_include(
     } else {
         passed.saturating_sub(1)
     };
-    (groups, shown, pause.unwrap_or_default() * owed)
+    (groups, shown, pause.unwrap_or_default() * owed, copy)
 }
 
 /// One item of an include statement that has a line to show: a `when` left it out, or resolving
