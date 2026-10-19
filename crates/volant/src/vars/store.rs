@@ -244,10 +244,27 @@ impl VarStore {
         }
     }
 
+    /// Marks names as data whatever they hold: the render that made them read a value that came
+    /// from a managed host, so braces the playbook joins from them later are text too. The names
+    /// that hold a template are marked by `add_host` and `group_by` themselves.
+    pub fn mark_data_names(&mut self, hosts: &[&str], groups: &[&str]) {
+        self.data_hosts
+            .extend(hosts.iter().map(ToString::to_string));
+        self.data_groups
+            .extend(groups.iter().map(ToString::to_string));
+        self.untrusted_hosts = None;
+    }
+
     /// `group_by`: `host` joins `group`, which is made a child of each of `parents`.
     pub fn add_to_group(&mut self, host: &str, group: &str, parents: &[String]) {
         if group != "all" {
+            if is_data_name(group) {
+                self.data_groups.insert(group.to_string());
+            }
             for parent in parents.iter().filter(|p| *p != "all") {
+                if is_data_name(parent) {
+                    self.data_groups.insert(parent.clone());
+                }
                 self.dynamic.add_child(parent, group);
                 self.added
                     .push(Added::Child(parent.clone(), group.to_string()));

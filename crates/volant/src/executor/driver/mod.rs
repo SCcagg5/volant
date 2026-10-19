@@ -1237,7 +1237,7 @@ pub(super) async fn drive_host(
                             &results,
                             &templar,
                         );
-                        record_inventory_results(&mut vars, task, &name, &results);
+                        record_inventory_results(&mut vars, task, &items, &name, &results);
                     }
                     let rescuable = !handlers_only && rescue_target(&c, pos).is_some();
                     // Whether a body shows at verbosity 0 is each result's own: see

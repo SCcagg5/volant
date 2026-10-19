@@ -66,7 +66,7 @@ impl VarStore {
             .unwrap_or(&scope.all_play_hosts);
         let reads = [
             ("groups", true),
-            ("hostvars", !self.data_hosts.is_empty()),
+            ("hostvars", true),
             ("inventory_hostname", self.data_hosts.contains(host)),
             ("inventory_hostname_short", self.data_hosts.contains(host)),
             (

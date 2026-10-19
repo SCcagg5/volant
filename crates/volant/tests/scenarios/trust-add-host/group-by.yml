@@ -27,11 +27,11 @@
       loop: "{{ groups.keys() | list | sort }}"
     - name: The host reads its own groups
       debug:
-        msg: "{{ group_names | sort | join(',') }}"
+        msg: "{{ group_names | reject('equalto', 'ungrouped') | sort | join(',') }}"
 
 - hosts: h1
   gather_facts: false
   tasks:
     - name: The next play reads them again
       debug:
-        msg: "{{ group_names | sort | join(',') }} {{ groups.keys() | list | sort | join(',') }}"
+        msg: "{{ group_names | reject('equalto', 'ungrouped') | sort | join(',') }} {{ groups.keys() | list | sort | join(',') }}"
