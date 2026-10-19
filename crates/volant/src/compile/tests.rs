@@ -976,6 +976,20 @@ fn a_play_that_gathers_facts_opens_with_the_setup_module() {
     assert_eq!(c.steps[0].task.name, "body");
 }
 
+/// The gather step of a tagged play carries the play's tags and not `always`.
+#[test]
+fn the_gather_step_of_a_tagged_play_has_the_tags_of_the_play() {
+    let pb = play("- hosts: all\n  tags: [x]\n  tasks:\n    - command: \"true\"\n");
+    let gathering = |selection: &TagSelection| {
+        compile(&pb.plays[0], &RoleSearch::default(), selection).expect("a compiled play")
+    };
+    assert!(gathering(&selection(&["x"], &[])).gathers);
+    assert!(!gathering(&selection(&["always"], &[])).gathers);
+    assert!(!gathering(&selection(&["other"], &[])).gathers);
+    assert!(gathering(&selection(&[], &["always"])).gathers);
+    assert!(!gathering(&selection(&[], &["x"])).gathers);
+}
+
 /// The three flush points close the three sections, and neither they nor a handler are listed
 /// anywhere.
 #[test]
