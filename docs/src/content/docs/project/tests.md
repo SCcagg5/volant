@@ -27,11 +27,12 @@ A scenario is a directory under `crates/volant/tests/scenarios`:
 3. Run `just golden scenario`. It writes `expected.json` in the directory.
 4. Run `touch crates/volant/tests/reference.rs` and then the tests. The list of scenarios is fixed when that file compiles, so a new directory is not seen until it is rebuilt.
 
-Each run of Volant happens in a fresh copy of the directory, with `--forks 1` unless the case says otherwise. The test compares the exit code and the complete standard output, with timings masked. Three more keys are available in `case.yml`:
+Each run of Volant happens in a fresh copy of the directory, with `--forks 1` unless the case says otherwise. The test compares the exit code and the complete standard output, with timings masked. Four more keys are available in `case.yml`:
 
 - `env` sets environment variables for the run.
 - `forks` raises the number of forks above one. Hosts may then print in a different order, so list the lines whose order may differ in `unordered`, as regular expressions. `unordered` without `forks` is refused.
 - `needs` names what the machine must have: `ansible-core`, `sudo` or `systemd`. A case whose needs are not met is skipped, except when `VOLANT_PYTHON` is set, which turns the skip into a failure.
+- `links` maps a path to the target of a link that each copy gets at that path. Use it for a link that git or cargo cannot hold, such as a link to a file that does not exist: `cargo package` refuses a tracked link like that.
 
 ## Run them
 

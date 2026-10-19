@@ -7,12 +7,14 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 mod bridged;
+mod clock;
 mod context;
 mod env;
 mod file;
 mod filters;
 pub(crate) use filters::python_json;
 mod globals;
+mod lipsum;
 mod lookups;
 mod once;
 mod one_pass;
