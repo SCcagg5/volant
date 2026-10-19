@@ -49,6 +49,8 @@ A `delegate_to` that renders from a host value names a host with that text, what
 
 The `src` of `copy`, `template`, `script`, `unarchive` and `assemble` is read as the reference reads it by default, and `[volant] host_named_paths` can restrict a `src` whose render read a managed host to the `files` and `templates` directories of the task (`contained`) or refuse it (`refuse`). See [Action plugins](/reference/action-plugins/#a-source-file-a-managed-host-named).
 
+The `dest` of `fetch` is a path the controller writes. When its render read a managed host, `fetch` refuses it unless `[volant] host_named_dest_dirs` names a directory that the resolved path lies strictly inside. See [A dest a managed host named](/reference/action-plugins/#a-dest-a-managed-host-named).
+
 ## How fine-grained it is
 
 Volant tracks trust per variable, not per string. Ansible tags each string object, so a trusted string keeps its trust through a template and loses it only when an expression builds a new string from it. In Volant, a value is untrusted when the render that produced it read something a host contributed. The answer is the same wherever a host took part. Volant is more permissive on a value the playbook computed from its own text.
