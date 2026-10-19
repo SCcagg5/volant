@@ -35,6 +35,28 @@ A `when` whose value is not a boolean is rejected as well.
 
 A condition wrapped in `{{ }}` that renders to a string is evaluated once more as a condition, as ansible-core 2.19 does. With `healthy: "true"` in the play's `vars`, `when: "{{ healthy }}"` runs the task. This second evaluation never happens when the first render read a value from a managed host: the task fails with `Encountered untrusted template or expression.` instead. See [Trusted and untrusted values](/variables/trust/).
 
+## Variables that hold templates
+
+A variable whose value is a template is rendered when another template reads it, so a filter or an operator always sees the final value:
+
+```yaml
+vars:
+  host: example.org
+  url: "http://{{ host }}:8080/x"
+  port: "{{ 8080 }}"
+tasks:
+  - debug:
+      msg: "{{ url | length }} {{ port | int + 1 }}"   # 25 8081
+```
+
+This holds in play, block and task `vars`, `group_vars`, role defaults, `vars_files`, `include_vars` and extra vars, and for a list or mapping that holds templates. A member that fails to render raises nothing until something reads it.
+
+A variable that reads a name with no value has none either: `default` and `is defined` see it as undefined. A variable that reads itself, directly or through others, fails with `Recursive loop detected in template: maximum recursion depth exceeded`, also behind `default`, as in ansible-core.
+
+A variable from a managed host is not rendered, and neither is a variable built from one. Reading it through a filter gives its text. See [Trusted and untrusted values](/variables/trust/).
+
+A variable is rendered by a read only when everything its text reads is written by the playbook, or is a value a managed host sent, which stays data. A variable that reads `groups`, `hostvars`, `vars`, `inventory_hostname`, `group_names`, one of the play host lists, or calls `lookup` or `query`, is left as written, and so is a variable that reads one of those through other variables. Names in the inventory can be added during the run from text a host sent, so values derived from them stay data. A variable left this way is rendered when the task uses it, as before. `hostvars['other']['name']` also gives the raw text of a variable that holds a template.
+
 ## What is available
 
 On top of MiniJinja's own Jinja2 builtins, Volant adds these from Ansible:

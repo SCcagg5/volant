@@ -1,0 +1,104 @@
+- hosts: web
+  gather_facts: false
+  vars:
+    pc: 7
+    pb: "{{ pc }}"
+    ps: "{{ pb | int + 1 }}"
+    host: example.org
+    url: "http://{{ host }}:8080/x"
+    port_s: "{{ 8080 }}"
+    cond: "{{ port_s | int > 8000 }}"
+    l: ["{{ host }}"]
+    d: {k: "{{ pc }}", n: {m: "{{ host }}"}}
+    d1: "{{ pc }}"
+    d2: "{{ d1 }}"
+    d3: "{{ d2 | int * 2 }}"
+    missing_ref: "{{ no_such_variable }}"
+    omitted: "{{ missing_ref | default(omit) }}"
+    from_missing: "{{ missing_ref | default('fallback') }}"
+  vars_files: [extra.yml]
+  roles: [r1]
+  tasks:
+    - name: Play variables
+      debug:
+        msg: "{{ ps }} {{ pb | int }} {{ d3 }} {{ url | length }} {{ url | regex_replace('example', 'zz') }} {{ url | b64encode }}"
+
+    - name: A list and a mapping that hold templates
+      debug:
+        msg: "{{ l | map('upper') | list }} {{ d.k | int + 1 }} {{ d.n.m | upper }}"
+
+    - name: A condition built from another variable
+      debug:
+        msg: cond holds
+      when: cond
+
+    - name: A nested variable without a value
+      debug:
+        msg: "{{ from_missing }} {{ missing_ref is defined }}"
+
+    - name: An omitted argument
+      command:
+        cmd: echo omitted
+        chdir: "{{ omitted }}"
+      changed_when: false
+
+    - name: Inventory variables
+      debug:
+        msg: "{{ gs }} {{ gurl | length }} {{ gcond }} {{ hs }} {{ hl | map('upper') | list }}"
+
+    - name: Variables of a vars file and of extra vars
+      debug:
+        msg: "{{ is_ }} {{ e_s }}"
+
+    - name: Task and block variables
+      debug:
+        msg: "{{ t2 }} {{ item | int + 1 }}"
+      vars:
+        t1: "{{ pc }}"
+        t2: "{{ t1 | int + 100 }}"
+      loop: ["{{ pc }}"]
+
+    - block:
+        - name: Block variables
+          debug:
+            msg: "{{ bk2 }}"
+      vars:
+        bk1: "{{ pc }}"
+        bk2: "{{ bk1 | int + 200 }}"
+
+    - name: Facts set by an earlier task
+      set_fact:
+        sfa: "{{ pc }}"
+
+    - name: A fact that another reads
+      set_fact:
+        sfb: "{{ sfa | int + 300 }}"
+
+    - name: Read both
+      debug:
+        msg: "{{ sfa }} {{ sfb }}"
+
+    - name: Variables loaded at run time
+      include_vars:
+        file: extra.yml
+        name: loaded
+
+    - name: Read them
+      debug:
+        msg: "{{ loaded.is_ }} {{ loaded.ib | int }}"
+
+    - name: Text that looks like a template, read from a file
+      command: cat payload.txt
+      register: motd
+
+    - name: Through a variable, a filter and a set_fact
+      set_fact:
+        copy: "{{ motd.stdout }}"
+      vars:
+        shout: "{{ motd.stdout | upper }}"
+
+    - name: It stays text
+      debug:
+        msg: "{{ copy | length }} {{ copy | upper }} {{ shout }}"
+      vars:
+        shout: "{{ motd.stdout | upper }}"
