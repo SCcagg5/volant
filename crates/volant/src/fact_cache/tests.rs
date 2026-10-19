@@ -189,7 +189,7 @@ fn a_deeply_nested_fact_comes_back_from_the_file() {
 #[test]
 fn a_fact_too_deep_to_read_back_is_not_written() {
     let mut value = json!("x");
-    for _ in 0..400 {
+    for _ in 0..600 {
         value = json!([value]);
     }
     let facts = json!({"deep": tag(&value)});
@@ -206,7 +206,7 @@ fn a_fact_too_deep_to_read_back_is_not_written() {
 /// deeper than the loader allows, which only another program writes, is ignored, not an error.
 #[rstest]
 #[case::a_file_an_earlier_run_wrote(300, true)]
-#[case::a_file_no_loader_value_makes(600, false)]
+#[case::a_file_no_loader_value_makes(1100, false)]
 fn a_deep_file_is_read_or_ignored(#[case] levels: usize, #[case] read: bool) {
     let dir = tempfile::tempdir().unwrap();
     let payload = format!("{{\"k\": {}1{}}}", "[".repeat(levels), "]".repeat(levels));
