@@ -123,7 +123,7 @@ impl Templar {
             match emitted.single(&out) {
                 Node::None => return Ok(Value::Null),
                 Node::Value(value) => {
-                    let value = serde_json::to_value(&value).map_err(|e| {
+                    let value = super::pymethods::bytes::to_json(&value).map_err(|e| {
                         TemplateError(format!("cannot convert template result: {e}"))
                     })?;
                     return Ok(with_line_ends(value, text));

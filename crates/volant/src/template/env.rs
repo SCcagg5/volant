@@ -46,6 +46,15 @@ pub(super) fn environment(base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) -> En
         if value.is_none() {
             return Ok(());
         }
+        // Bytes print as the text they hold, as ansible-core joins them into the text.
+        if let Some(bytes) = super::pymethods::bytes::of(value) {
+            let text = bytes
+                .text()
+                .map_err(|e| minijinja::Error::new(ErrorKind::InvalidOperation, e))?;
+            return out.write_str(text).map_err(|_| {
+                minijinja::Error::new(ErrorKind::WriteFailure, "failed to write output")
+            });
+        }
         match container_repr(value) {
             Some(text) => out.write_str(&text).map_err(|_| {
                 minijinja::Error::new(ErrorKind::WriteFailure, "failed to write output")
@@ -94,6 +103,9 @@ pub(super) fn container_repr(value: &minijinja::Value) -> Option<String> {
     }
     if let Some(range) = value.downcast_object_ref::<Range>() {
         return Some(range.to_string());
+    }
+    if super::pymethods::bytes::holds(value) {
+        return Some(super::pymethods::format::repr(value));
     }
     if !matches!(
         value.kind(),

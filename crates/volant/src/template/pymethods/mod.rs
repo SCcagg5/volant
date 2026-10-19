@@ -7,6 +7,8 @@ use minijinja::value::ValueKind;
 use minijinja::{Environment, Error, ErrorKind, State, Value};
 
 mod args;
+pub(crate) mod bytes;
+mod codec;
 mod dicts;
 mod digits;
 pub(crate) mod format;
@@ -56,6 +58,13 @@ fn call(state: &State, value: &Value, method: &str, args: &[Value]) -> Result<Va
                 "object of type 'str' has no attribute '{method}'"
             )));
         }
+    }
+    if let Some(held) = bytes::of(value) {
+        if super::any_undefined(args) {
+            return Err(Error::from(ErrorKind::UndefinedError));
+        }
+        return bytes::call(held, method, args)
+            .unwrap_or_else(|| Err(Error::from(ErrorKind::UnknownMethod)));
     }
     if matches!(value.kind(), ValueKind::Seq | ValueKind::Iterable)
         && !is_list(value)
@@ -204,6 +213,7 @@ fn string(s: &str, name: &str, args: &[Value]) -> Option<Result<Value, Error>> {
             .one(name)
             .and_then(|table| translate::translate(s, table)),
         "maketrans" => translate::maketrans(&call),
+        "encode" => bytes::encode(s, &call),
         _ => return None,
     })
 }

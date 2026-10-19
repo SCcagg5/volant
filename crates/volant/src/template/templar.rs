@@ -389,7 +389,7 @@ impl Templar {
                 ErrorKind::UndefinedError,
             )));
         }
-        serde_json::to_value(&value)
+        super::pymethods::bytes::to_json(&value)
             .map_err(|e| TemplateError(format!("cannot convert template result: {e}")))
     }
 

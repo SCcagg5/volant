@@ -245,6 +245,8 @@ pub fn register(
             "UndefinedMarker"
         } else if v.downcast_object_ref::<super::clock::DateTime>().is_some() {
             "datetime"
+        } else if super::pymethods::bytes::of(&v).is_some() {
+            "bytes"
         } else {
             super::type_name(&json(&v))
         }
@@ -289,6 +291,9 @@ fn json(v: &Value) -> serde_json::Value {
 fn data(v: &Value) -> Result<serde_json::Value, Error> {
     if super::holds_undefined(v) {
         return Err(Error::from(ErrorKind::UndefinedError));
+    }
+    if super::pymethods::bytes::holds(v) {
+        return Err(invalid("this filter does not take bytes yet"));
     }
     Ok(json(v))
 }
