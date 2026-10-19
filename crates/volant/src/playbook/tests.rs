@@ -646,9 +646,8 @@ fn load_files(files: &[(&str, &str)]) -> anyhow::Result<Playbook> {
 const SUB: &str =
     "- hosts: all\n  tags: [own]\n  vars: {v: own, w: 1}\n  tasks:\n    - debug: {msg: x}\n";
 
-/// What an `import_playbook` entry says reaches every play of the file: its tags join the
-/// play's, its variables win over the play's own, a `tags` among them is taken out, and its
-/// conditions are kept for the tasks and, separately, for the fact gathering.
+/// An `import_playbook` entry hands its tags, variables and conditions to every imported play;
+/// a `tags` among the variables is taken out, and the fact gathering keeps its own conditions.
 #[test]
 fn an_import_playbook_entry_hands_when_tags_and_vars_to_the_imported_plays() {
     let pb = load_files(&[
