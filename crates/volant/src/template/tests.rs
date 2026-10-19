@@ -283,15 +283,18 @@ fn the_context_hands_out_the_shared_view_and_ranks_inventory_wide_names() {
     {
         let shared = Arc::new(vars(json!({"a": {"y": 1}, "b": {"y": 2}})));
         let empty = Map::new();
-        let (ctx, _) = context_of(Vars {
-            map: &empty,
-            hostvars: Some(&shared),
-            shared: None,
-            facts: None,
-            untrusted: None,
-            untrusted_hosts: None,
-            base: None,
-        });
+        let (ctx, _) = context_of(
+            &templar(),
+            Vars {
+                map: &empty,
+                hostvars: Some(&shared),
+                shared: None,
+                facts: None,
+                untrusted: None,
+                untrusted_hosts: None,
+                base: None,
+            },
+        );
         let first = ctx
             .get_attr("hostvars")
             .expect("hostvars is in the context")
@@ -354,15 +357,18 @@ fn the_context_hands_out_the_shared_view_and_ranks_inventory_wide_names() {
         let facts = Arc::new(vars(json!({"own": 2})));
         let own = vars(own);
         let base = Arc::new(vars(base));
-        let (ctx, _) = context_of(Vars {
-            map: &own,
-            hostvars: None,
-            shared: Some(&shared),
-            facts: Some(&facts),
-            untrusted: None,
-            untrusted_hosts: None,
-            base: Some(&base),
-        });
+        let (ctx, _) = context_of(
+            &templar(),
+            Vars {
+                map: &own,
+                hostvars: None,
+                shared: Some(&shared),
+                facts: Some(&facts),
+                untrusted: None,
+                untrusted_hosts: None,
+                base: Some(&base),
+            },
+        );
         let mut names: Vec<String> = ctx
             .try_iter()
             .expect("the root context walks as a mapping")
@@ -1111,4 +1117,226 @@ fn a_raw_block_in_text_from_a_host_is_never_rendered() {
         data.contains("a"),
         "a name built from a host's text is data"
     );
+}
+
+/// A variable whose value is a template is rendered when a template reads it, so a filter or an
+/// operator sees the final value, in play vars, mappings and lists alike. Measured on
+/// ansible-core 2.19.12: every row answers the same there.
+#[rstest::rstest]
+#[case::arithmetic(json!({"c": 7, "b": "{{ c }}", "s": "{{ b | int + 1 }}"}), "{{ s }}", json!(8))]
+#[case::int_filter(json!({"c": 7, "b": "{{ c }}"}), "{{ b | int }}", json!(7))]
+#[case::plain_read(json!({"c": 7, "b": "{{ c }}"}), "{{ b }}", json!(7))]
+#[case::depth_three(
+    json!({"c": 7, "d1": "{{ c }}", "d2": "{{ d1 }}", "d3": "{{ d2 | int * 2 }}"}),
+    "{{ d3 }}",
+    json!(14)
+)]
+#[case::length(
+    json!({"host": "example.org", "url": "http://{{ host }}:8080/x"}),
+    "{{ url | length }}",
+    json!(25)
+)]
+#[case::regex_replace(
+    json!({"host": "example.org", "url": "http://{{ host }}:8080/x"}),
+    "{{ url | regex_replace('example', 'zz') }}",
+    json!("http://zz.org:8080/x")
+)]
+#[case::b64encode(
+    json!({"host": "example.org", "url": "http://{{ host }}:8080/x"}),
+    "{{ url | b64encode }}",
+    json!("aHR0cDovL2V4YW1wbGUub3JnOjgwODAveA==")
+)]
+#[case::list_member(
+    json!({"host": "example.org", "l": ["{{ host }}"]}),
+    "{{ l | map('upper') | list }}",
+    json!(["EXAMPLE.ORG"])
+)]
+#[case::list_sum(
+    json!({"c": 7, "l": ["{{ c }}", "{{ c | int + 1 }}"]}),
+    "{{ l | map('int') | sum }}",
+    json!(15)
+)]
+#[case::dict_member(
+    json!({"c": 7, "d": {"k": "{{ c }}", "n": {"m": "{{ c }}"}}}),
+    "{{ d.k | int + d.n.m | int }}",
+    json!(14)
+)]
+#[case::dict_through_a_variable(
+    json!({"c": 7, "d": {"k": "{{ c }}"}, "e": "{{ d }}"}),
+    "{{ e.k | int + 1 }}",
+    json!(8)
+)]
+#[case::member_nothing_reads(
+    json!({"d": {"bad": "{{ missing }}", "ok": 1}}),
+    "{{ d.ok }}",
+    json!(1)
+)]
+#[case::default_on_a_nested_undefined(
+    json!({"u": "{{ missing }}"}),
+    "{{ u | default('dflt') }}",
+    json!("dflt")
+)]
+#[case::defined_on_a_nested_undefined(json!({"u": "{{ missing }}"}), "{{ u is defined }}", json!(false))]
+#[case::default_omit(
+    json!({"omit": "__omit__", "u": "{{ missing | default(omit) }}"}),
+    "{{ u == omit }}",
+    json!(true)
+)]
+#[case::text_around(
+    json!({"c": 7, "b": "{{ c }}", "t": "x-{{ b }}-y"}),
+    "{{ t | upper }}",
+    json!("X-7-Y")
+)]
+#[case::in_a_statement(
+    json!({"c": 7, "b": "{{ c }}"}),
+    "{% if b | int > 5 %}big{% else %}small{% endif %}",
+    json!("big")
+)]
+#[case::each_read_alike(
+    json!({"c": 7, "b": "{{ c }}"}),
+    "{{ b | int }}-{{ b | int + 1 }}-{{ b }}",
+    json!("7-8-7")
+)]
+fn a_variable_holding_a_template_is_rendered_when_it_is_read(
+    #[case] map: Value,
+    #[case] text: &str,
+    #[case] want: Value,
+) {
+    let t = templar();
+    assert_eq!(t.render(text, &vars(map)), Ok(want), "{text}");
+}
+
+/// The same variables through the pass that resolves a map ahead of a task, and through the
+/// condition a task asks.
+#[test]
+fn a_map_resolves_in_dependency_order_and_a_condition_reads_it() {
+    let t = templar();
+    let map = vars(json!({
+        "s": "{{ b | int + 1 }}", "b": "{{ c }}", "c": 7,
+        "cond": "{{ port | int > 8000 }}", "port": "{{ 8080 }}",
+    }));
+    let (resolved, untrusted) = t.resolve_vars_tainted(&map);
+    assert_eq!(resolved["s"], json!(8));
+    assert_eq!(resolved["cond"], json!(true));
+    assert!(untrusted.is_empty());
+    assert_eq!(t.condition("cond", &map), Ok(true));
+    assert_eq!(t.condition("{{ b | int == 7 }}", &map), Ok(true));
+    assert_eq!(
+        t.render_file("{{ s }}", &map, &FileRender::default()),
+        Ok("8".to_string())
+    );
+}
+
+/// A variable that reads itself, directly or through others, fails as the reference's does, even
+/// behind `default`; a template that fails for another reason fails the read that needs it.
+#[rstest::rstest]
+#[case::itself(json!({"a": "{{ a }}"}), "{{ a }}", RECURSION)]
+#[case::through_another(json!({"a": "{{ b }}", "b": "{{ a }}"}), "{{ a }}", RECURSION)]
+#[case::through_a_filter(
+    json!({"a": "{{ b | int + 1 }}", "b": "{{ a | int + 1 }}"}),
+    "{{ a | length }}",
+    RECURSION
+)]
+#[case::behind_default(json!({"a": "{{ a | default('x') }}"}), "{{ a }}", RECURSION)]
+#[case::behind_default_at_the_read(json!({"a": "{{ a }}"}), "{{ a | default('x') }}", RECURSION)]
+#[case::a_failure_that_is_not_undefined(
+    json!({"a": "{{ 1 | nosuchfilter }}"}),
+    "{{ a | default('x') }}",
+    "nosuchfilter"
+)]
+fn a_variable_that_cannot_render_fails_the_read_that_needs_it(
+    #[case] map: Value,
+    #[case] text: &str,
+    #[case] error: &str,
+) {
+    let t = templar();
+    let err = t.render(text, &vars(map)).unwrap_err();
+    assert!(err.0.contains(error), "{text}: {err}");
+    assert!(!err.is_undefined(), "{text}: {err}");
+}
+
+#[test]
+fn an_undefined_nested_variable_is_an_undefined_read_when_used() {
+    let t = templar();
+    let map = vars(json!({"u": "{{ missing }}", "v": "{{ u }}"}));
+    for text in ["{{ u }}", "{{ v | upper }}", "{{ u | length }}"] {
+        let err = t.render(text, &map).unwrap_err();
+        assert!(err.is_undefined(), "{text}: {err}");
+    }
+}
+
+/// What came from a managed host is data wherever it is read: through a variable, through two,
+/// through a filter, and on a second read of the same name.
+#[test]
+fn text_from_a_host_is_data_through_a_nested_variable() {
+    let t = templar();
+    let untrusted: BTreeSet<String> = ["reg".to_string()].into();
+    let map = vars(json!({
+        "c": 7, "reg": "{{ c }}",
+        "d": "{{ reg }}", "e": "{{ d | upper }}",
+        "l": ["{{ reg }}"], "m": {"k": "{{ reg }}"},
+    }));
+    let vars = || Vars {
+        map: &map,
+        hostvars: None,
+        shared: None,
+        facts: None,
+        untrusted: Some(&untrusted),
+        untrusted_hosts: None,
+        base: None,
+    };
+    for (text, want) in [
+        ("{{ reg | length }}", json!(7)),
+        ("{{ d | length }}", json!(7)),
+        ("{{ d | upper }}", json!("{{ C }}")),
+        ("{{ e }}", json!("{{ C }}")),
+        ("{{ e | length }}", json!(7)),
+        ("{{ l | map('length') | list }}", json!([7])),
+        ("{{ m.k | length }}", json!(7)),
+        // The second read comes from the cache and still marks the render as data.
+        ("{{ (d | length) ~ (d | upper) }}", json!("7{{ C }}")),
+        ("{{ (e | length) ~ (e | upper) }}", json!("7{{ C }}")),
+    ] {
+        assert_eq!(t.render(text, vars()), Ok(want), "{text}");
+    }
+    assert_eq!(t.condition("d | length == 7", vars()), Ok(true));
+    let (resolved, soiled) = t.resolve_vars_tainted(vars());
+    assert_eq!(resolved["e"], json!("{{ C }}"));
+    for name in ["reg", "d", "e", "l", "m"] {
+        assert!(soiled.contains(name), "{name}");
+    }
+    assert!(!soiled.contains("c"));
+}
+
+/// `!unsafe` text stays text through a variable that reads it, and a gathered fact is never
+/// rendered when a variable reads it.
+#[test]
+fn unsafe_text_and_facts_are_data_through_a_nested_variable() {
+    let t = templar();
+    let map = vars(json!({
+        "c": 7,
+        "u": crate::yaml::unsafe_data(json!("{{ c }}")),
+        "v": "{{ u }}",
+        "w": "{{ f }}",
+    }));
+    let facts = Arc::new(vars(json!({"f": "{{ c }}"})));
+    let untrusted: BTreeSet<String> = ["f".to_string()].into();
+    let vars = Vars {
+        map: &map,
+        hostvars: None,
+        shared: None,
+        facts: Some(&facts),
+        untrusted: Some(&untrusted),
+        untrusted_hosts: None,
+        base: None,
+    };
+    for (text, want) in [
+        ("{{ u | length }}", json!(7)),
+        ("{{ v | length }}", json!(7)),
+        ("{{ v | upper }}", json!("{{ C }}")),
+        ("{{ f | length }}", json!(7)),
+        ("{{ w | length }}", json!(7)),
+    ] {
+        assert_eq!(t.render(text, vars), Ok(want), "{text}");
+    }
 }

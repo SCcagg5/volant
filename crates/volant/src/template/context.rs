@@ -10,10 +10,17 @@ use minijinja::value::{Enumerator, Object};
 use serde_json::{Map, Value};
 
 use super::env::chained_attr;
+use super::templar::Templar;
+use super::vm::holds_template;
 use super::{
-    ATTR_KEY, CONCAT_KEY, CONTEXT_KEY, HOSTVARS_KEYS, ITEM_KEY, QUERY_KEY, TAINT_KEY, Tainted,
+    ATTR_KEY, CONCAT_KEY, CONTEXT_KEY, HOSTVARS_KEYS, ITEM_KEY, QUERY_KEY, RECURSION, TAINT_KEY,
+    Tainted, TemplateError,
 };
 use crate::inventory::is_localhost;
+
+/// Names being resolved at once before a read is called a loop. The reference stops at Python's
+/// recursion limit, and a chain this long is never an intended one.
+const MAX_RESOLVING: usize = 64;
 
 /// The name, in the variables an extended loop shares between its items, under which the list of
 /// all the items is kept once. It is no variable: a render never finds it by name, it reads it
@@ -136,17 +143,29 @@ impl<'a> From<&'a Map<String, Value>> for Vars<'a> {
 struct Memo(Mutex<HashMap<String, minijinja::Value>>);
 
 impl Memo {
+    pub(super) fn lookup(&self, key: &str) -> Option<minijinja::Value> {
+        self.0.lock().expect("template memo").get(key).cloned()
+    }
+
+    /// Not held across the conversion: resolving a variable renders a template that reads other
+    /// variables, and those reads come back here.
+    pub(super) fn store(&self, key: &str, value: &minijinja::Value) {
+        self.0
+            .lock()
+            .expect("template memo")
+            .insert(key.to_string(), value.clone());
+    }
+
     pub(super) fn get(
         &self,
         key: &str,
         convert: impl FnOnce() -> Option<minijinja::Value>,
     ) -> Option<minijinja::Value> {
-        let mut cache = self.0.lock().expect("template memo");
-        if let Some(value) = cache.get(key) {
-            return Some(value.clone());
+        if let Some(value) = self.lookup(key) {
+            return Some(value);
         }
         let value = convert()?;
-        cache.insert(key.to_string(), value.clone());
+        self.store(key, &value);
         Some(value)
     }
 }
@@ -169,6 +188,135 @@ pub(super) struct Context {
     /// How many names the render has read, to tell a pass that read none.
     reads: AtomicUsize,
     memo: Memo,
+    templar: Templar,
+    /// The names whose value is being rendered now, in the order the reads nested.
+    resolving: Mutex<Vec<String>>,
+    /// Names whose rendered value was built from something a managed host wrote. A read of one is
+    /// as much a read of host data as a read of the name it was built from.
+    soiled: Mutex<BTreeSet<String>>,
+    /// Set when `failed` is: the first error a nested render raised that the read cannot carry.
+    failure: Mutex<Option<TemplateError>>,
+    failed: AtomicBool,
+}
+
+impl Context {
+    fn fail(&self, error: TemplateError) {
+        self.failure
+            .lock()
+            .expect("template failure")
+            .get_or_insert(error);
+        self.failed.store(true, Ordering::Relaxed);
+    }
+
+    /// What a variable holding a template reads as: the value the template renders to, with the
+    /// context the reading template runs in, as the reference does when it reads a variable. The
+    /// name was not a managed host's when it got here, so its text is the playbook's.
+    ///
+    /// Not stored when the render did not finish, so a later read tries again.
+    fn resolve(self: &Arc<Self>, key: &str, raw: &Value) -> (minijinja::Value, bool) {
+        {
+            let mut stack = self.resolving.lock().expect("template resolving");
+            if stack.len() >= MAX_RESOLVING || stack.iter().any(|name| name == key) {
+                drop(stack);
+                self.fail(TemplateError(RECURSION.into()));
+                return (minijinja::Value::UNDEFINED, false);
+            }
+            stack.push(key.to_string());
+        }
+        let ctx = minijinja::Value::from_dyn_object(Arc::clone(self));
+        // The render under way keeps what it has read so far; the nested one starts clean so that
+        // it can tell whether this variable's own text came from a host.
+        let before = self.tainted.swap(false, Ordering::Relaxed);
+        let mut from_host = false;
+        let rendered = self
+            .templar
+            .render_read(raw, &ctx, &self.tainted, &mut from_host);
+        from_host |= self.tainted.load(Ordering::Relaxed);
+        self.tainted.store(before || from_host, Ordering::Relaxed);
+        self.resolving.lock().expect("template resolving").pop();
+        if from_host {
+            self.soiled
+                .lock()
+                .expect("template soiled")
+                .insert(key.to_string());
+        }
+        match rendered {
+            Ok(value) => (minijinja::Value::from_serialize(&value), true),
+            // A variable that reads a name with no value has none either, which is what
+            // `default` and `is defined` ask.
+            Err(error) if error.is_undefined() => (minijinja::Value::UNDEFINED, false),
+            Err(error) => {
+                self.fail(error);
+                (minijinja::Value::UNDEFINED, false)
+            }
+        }
+    }
+
+    fn read(self: &Arc<Self>, key: &str) -> Option<(minijinja::Value, bool)> {
+        // A map that carries a `hostvars` key of its own - a fixture, a recorded scope -
+        // keeps being read from the map when no view came with it, so the two sources never
+        // disagree about which one answers.
+        if key == "hostvars"
+            && let Some(hostvars) = &self.hostvars
+        {
+            let view = minijinja::Value::from_object(Hostvars {
+                hosts: Arc::clone(hostvars),
+                listed: self.shared.clone(),
+                untrusted_hosts: self.untrusted_hosts.clone(),
+                keys_untrusted: self.untrusted.contains(HOSTVARS_KEYS),
+                tainted: Arc::clone(&self.tainted),
+                memo: Memo::default(),
+            });
+            return Some((view, true));
+        }
+        // Before the host's own map, never after: these are the inventory-wide values, and
+        // they used to be merged into that map last, so they beat a fact of the same name.
+        // A loop variable or a registered name that collides with one of them is not here
+        // to be found: `HostVars::insert` drops it from the host's shared map as it writes.
+        if let Some(shared) = &self.shared
+            && let Some(value) = shared.get(key)
+        {
+            return Some((minijinja::Value::from_serialize(value), true));
+        }
+        // Between the two: the facts that answer, the ones no layer of the map outranks.
+        if let Some(facts) = &self.facts
+            && let Some(value) = facts.get(key)
+        {
+            return Some((minijinja::Value::from_serialize(value), true));
+        }
+        if key == LOOP_KEY
+            && let (Some(Value::Object(fields)), Some(base)) = (self.vars.get(key), &self.base)
+            && base.contains_key(ALLITEMS_KEY)
+        {
+            let view = minijinja::Value::from_object(LoopView {
+                fields: fields.clone(),
+                base: Arc::clone(base),
+            });
+            return Some((view, true));
+        }
+        if let Some(value) = self.vars.get(key) {
+            if !self.untrusted.contains(key) && holds_template(value) {
+                return Some(self.resolve(key, value));
+            }
+            return Some((minijinja::Value::from_serialize(value), true));
+        }
+        // The variables the items of a loop share hold no template that a render could change:
+        // `HostVars::shared_by_items` keeps in `map` every value that has one, except the text of
+        // a managed host, which is data. So a read of this layer has nothing to resolve.
+        let value = self.base.as_ref()?.get(key)?;
+        Some((minijinja::Value::from_serialize(value), true))
+    }
+}
+
+/// The error a nested render raised that its reader could not take, if one did, and clears it. A
+/// read cannot raise from inside the engine: it answers undefined, and the render that made the
+/// read reports the cause in place of whatever that undefined value did to it.
+pub(super) fn take_failure(ctx: &minijinja::Value) -> Option<TemplateError> {
+    let ctx = ctx.downcast_object_ref::<Context>()?;
+    if !ctx.failed.swap(false, Ordering::Relaxed) {
+        return None;
+    }
+    ctx.failure.lock().expect("template failure").take()
 }
 
 /// Starts a render over `ctx`: clears the mark of the last one and returns the reads so far.
@@ -243,57 +391,21 @@ impl Object for Context {
         // A `hostvars` the map carries as a plain value lists its hosts on any read, so a host
         // name that came from a managed host taints every read of it.
         if self.untrusted.contains(key)
+            || self.soiled.lock().expect("template soiled").contains(key)
             || (key == "hostvars"
                 && self.hostvars.is_none()
                 && self.untrusted.contains(HOSTVARS_KEYS))
         {
             self.tainted.store(true, Ordering::Relaxed);
         }
-        self.memo.get(key, || {
-            // A map that carries a `hostvars` key of its own - a fixture, a recorded scope -
-            // keeps being read from the map when no view came with it, so the two sources never
-            // disagree about which one answers.
-            if key == "hostvars"
-                && let Some(hostvars) = &self.hostvars
-            {
-                return Some(minijinja::Value::from_object(Hostvars {
-                    hosts: Arc::clone(hostvars),
-                    listed: self.shared.clone(),
-                    untrusted_hosts: self.untrusted_hosts.clone(),
-                    keys_untrusted: self.untrusted.contains(HOSTVARS_KEYS),
-                    tainted: Arc::clone(&self.tainted),
-                    memo: Memo::default(),
-                }));
-            }
-            // Before the host's own map, never after: these are the inventory-wide values, and
-            // they used to be merged into that map last, so they beat a fact of the same name.
-            // A loop variable or a registered name that collides with one of them is not here
-            // to be found: `HostVars::insert` drops it from the host's shared map as it writes.
-            if let Some(shared) = &self.shared
-                && let Some(value) = shared.get(key)
-            {
-                return Some(minijinja::Value::from_serialize(value));
-            }
-            // Between the two: the facts that answer, the ones no layer of the map outranks.
-            if let Some(facts) = &self.facts
-                && let Some(value) = facts.get(key)
-            {
-                return Some(minijinja::Value::from_serialize(value));
-            }
-            if key == LOOP_KEY
-                && let (Some(Value::Object(fields)), Some(base)) = (self.vars.get(key), &self.base)
-                && base.contains_key(ALLITEMS_KEY)
-            {
-                return Some(minijinja::Value::from_object(LoopView {
-                    fields: fields.clone(),
-                    base: Arc::clone(base),
-                }));
-            }
-            self.vars
-                .get(key)
-                .or_else(|| self.base.as_ref().and_then(|base| base.get(key)))
-                .map(minijinja::Value::from_serialize)
-        })
+        if let Some(value) = self.memo.lookup(key) {
+            return Some(value);
+        }
+        let (value, keep) = self.read(key)?;
+        if keep {
+            self.memo.store(key, &value);
+        }
+        Some(value)
     }
 
     fn enumerate(self: &Arc<Self>) -> Enumerator {
@@ -391,7 +503,7 @@ impl Object for Hostvars {
     }
 }
 
-pub(super) fn context_of(vars: Vars<'_>) -> (minijinja::Value, Tainted) {
+pub(super) fn context_of(templar: &Templar, vars: Vars<'_>) -> (minijinja::Value, Tainted) {
     let tainted: Tainted = Arc::new(AtomicBool::new(false));
     let ctx = minijinja::Value::from_object(Context {
         vars: vars.map.clone(),
@@ -405,6 +517,11 @@ pub(super) fn context_of(vars: Vars<'_>) -> (minijinja::Value, Tainted) {
         literal: AtomicBool::new(false),
         reads: AtomicUsize::new(0),
         memo: Memo::default(),
+        templar: templar.clone(),
+        resolving: Mutex::new(Vec::new()),
+        soiled: Mutex::new(BTreeSet::new()),
+        failure: Mutex::new(None),
+        failed: AtomicBool::new(false),
     });
     (ctx, tainted)
 }
