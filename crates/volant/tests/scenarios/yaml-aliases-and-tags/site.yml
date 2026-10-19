@@ -1,0 +1,63 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    anchor_int: &n 5
+    alias_int: *n
+    anchor_float: &f 1.5
+    alias_float: *f
+    anchor_bool: &y yes
+    alias_bool: *y
+    anchor_octal: &o 010
+    alias_octal: *o
+    anchor_quoted: &q "5"
+    alias_quoted: *q
+    anchor_block: &b |
+      two
+      lines
+    alias_block: *b
+    anchor_seq: &s [1, yes, "no"]
+    alias_seq: *s
+    alias_in_flow: [*n, *y, *o, x]
+    alias_as_key: {*q : value}
+    unsafe_int: !unsafe 5
+    unsafe_octal: !unsafe 010
+    unsafe_hex: !unsafe 0x1F
+    unsafe_bool: !unsafe yes
+    unsafe_quoted: !unsafe "5"
+    unsafe_null: !unsafe ~
+    unsafe_seq: !unsafe [yes, 010]
+    anchored_unsafe: &u !unsafe 5
+    alias_unsafe: *u
+    tag_str: !!str 5
+    tag_str_bool: !!str yes
+    tag_int: !!int "5"
+    tag_int_hex: !!int 0x10
+    tag_float: !!float 5
+    tag_float_quoted: !!float "1.5"
+    tag_bool: !!bool "yes"
+    tag_null: !!null x
+    anchored_tag: &t !!int "8"
+    alias_tag: *t
+    sexagesimal_int: 1:30
+    sexagesimal_float: 1:30.5
+    signed_fraction: +.5
+    negative_fraction: -.5
+    octal: 010
+    not_octal: 08
+    prefixed_octal: 0o10
+    hex: 0x1F
+    grouped: 1_000
+    exponent: 1e3
+    signed_exponent: 1.0e+3
+    spellings: [Yes, No, on, OFF, yEs, ~, null, NULL, nuLL]
+    date: 2020-01-02
+    datetime: 2020-01-02 10:11:12
+    utc_datetime: 2020-01-02T10:11:12Z
+    names: [anchor_int, alias_int, anchor_float, alias_float, anchor_bool, alias_bool, anchor_octal, alias_octal, anchor_quoted, alias_quoted, anchor_block, alias_block, anchor_seq, alias_seq, alias_in_flow, alias_as_key, unsafe_int, unsafe_octal, unsafe_hex, unsafe_bool, unsafe_quoted, unsafe_null, unsafe_seq, anchored_unsafe, alias_unsafe, tag_str, tag_str_bool, tag_int, tag_int_hex, tag_float, tag_float_quoted, tag_bool, tag_null, anchored_tag, alias_tag, sexagesimal_int, sexagesimal_float, signed_fraction, negative_fraction, octal, not_octal, prefixed_octal, hex, grouped, exponent, signed_exponent, spellings, date, datetime, utc_datetime, g_int, g_alias, g_yes, g_yes_alias, g_unsafe, g_unsafe_yes, g_seq, i_int, i_alias, i_null, i_null_alias, i_unsafe, i_unsafe_quoted]
+  tasks:
+    - include_vars: extra.yml
+    - debug:
+        msg: "{{ item }} = {{ lookup('vars', item) | to_json }}"
+      loop: "{{ names }}"
+      loop_control:
+        label: "{{ item }}"
