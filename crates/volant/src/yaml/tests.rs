@@ -255,23 +255,21 @@ fn json_depth(value: &Value) -> usize {
     deepest
 }
 
-/// A document may nest 255 levels, in every shape: that is how deep the scanner lets a flow
-/// collection go, and a block collection now stops at the same level. ansible-core 2.19.12 loads
-/// a file down to 489 levels (`-e @file`, `vars_files` and the playbook itself, every shape
-/// below) and stops it at 490 with `maximum recursion depth exceeded`. Volant stops earlier
-/// because a debug build converts a level with about 3.6 KB of stack: 489 levels nearly fill a
-/// 2 MiB thread.
+/// A document may nest 489 levels: ansible-core 2.19.12 loads a file down to that level
+/// (`-e @file`, `vars_files` and the playbook itself, every shape below) and stops it at 490 with
+/// `maximum recursion depth exceeded`. The scanner stops a flow collection at 255 levels, a limit
+/// of its own that the reference does not have, so a deeper flow collection is refused here.
 #[test]
 fn nesting_deeper_than_the_reference_loads_is_refused_not_a_stack_overflow() {
     for shape in SHAPES {
         // A block document written one level to a line grows with the square of its depth.
         let per_line =
             shape.contains("per line") || matches!(shape, "block mapping" | "mixed block");
-        for depth in [200, 255, 256, 313, 314, 315, 489, 490, 1000, 100_000] {
+        for depth in [200, 255, 256, 313, 314, 315, 488, 489, 490, 1000, 100_000] {
             if per_line && depth > 1000 {
                 continue;
             }
-            let loads = depth <= 255;
+            let loads = depth <= 489 && !(shape.starts_with("flow") && depth > 255);
             let text = nested(shape, depth);
             let loaded = load(&text, "deep.yml");
             if loads {
@@ -306,7 +304,7 @@ fn an_alias_chain_counts_toward_the_nesting_limit() {
         text
     };
     // The mapping that holds the chain is the first level.
-    for (levels, loads) in [(100, true), (254, true), (255, false), (3000, false)] {
+    for (levels, loads) in [(100, true), (488, true), (489, false), (3000, false)] {
         let text = chain(levels);
         let loaded = load(&text, "chain.yml");
         assert_eq!(loaded.is_ok(), loads, "{levels}: {:?}", loaded.err());
@@ -498,5 +496,39 @@ fn nested_unsafe_wraps_a_string_once() {
             value = value["a"].take();
         }
         assert_eq!(value, once, "{levels} levels");
+    }
+}
+
+/// The deepest document converts on three quarters of the 2 MiB stack of a worker thread, in a
+/// debug build, where a frame is largest. Each shape is one that costs more than a plain level:
+/// a tag on every level, and block and flow mixed.
+#[test]
+fn a_document_at_the_limit_converts_on_a_small_stack() {
+    let mut tagged = String::new();
+    for level in 0..489 {
+        let _ = writeln!(tagged, "{}- !unsafe", " ".repeat(level));
+    }
+    tagged.push_str(&" ".repeat(489));
+    tagged.push_str("x\n");
+    let shapes = [
+        ("plain", "- ".repeat(489) + "x\n"),
+        ("tagged", tagged),
+        (
+            "mixed",
+            "- ".repeat(244) + &"[".repeat(245) + "x" + &"]".repeat(245) + "\n",
+        ),
+    ];
+    for (what, text) in shapes {
+        let worker = std::thread::Builder::new()
+            .stack_size(1_572_864)
+            .spawn(move || {
+                let docs = load(&text, "deep.yml").unwrap();
+                let json = to_json(&docs[0]).unwrap();
+                assert!(json_depth(&json) >= 489, "{what}");
+            });
+        worker
+            .unwrap()
+            .join()
+            .unwrap_or_else(|_| panic!("{what} failed"));
     }
 }
