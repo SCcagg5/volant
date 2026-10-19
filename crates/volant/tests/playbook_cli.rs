@@ -4984,6 +4984,8 @@ fn a_fact_carrying_a_result_cannot_name_a_variable() {
     "delegate-name-in-vars.yml",
     "changed: [h1 -> {{ lookup('pipe', 'touch "
 )]
+#[case::braces_built_in_a_loop("delegate-braces-loop.yml", "UNREACHABLE")]
+#[case::braces_built_in_a_handler("delegate-braces-handler.yml", "UNREACHABLE")]
 fn a_delegate_named_by_a_result_stays_text(#[case] playbook: &str, #[case] shown: &str) {
     let (dir, marker) = trust_dir(
         &format!("delegate-{}", playbook.trim_end_matches(".yml")),
@@ -4996,6 +4998,8 @@ fn a_delegate_named_by_a_result_stays_text(#[case] playbook: &str, #[case] shown
             dir.join("inv.ini").to_str().expect("a path"),
             "-e",
             &format!("payload={}", dir.join("payload.txt").display()),
+            "-e",
+            &format!("bare={}", dir.join("bare.txt").display()),
             &fixture(&format!("trust/{playbook}")),
         ],
         std::time::Duration::from_secs(30),
