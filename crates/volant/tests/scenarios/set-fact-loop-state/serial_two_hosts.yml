@@ -1,0 +1,10 @@
+- hosts: all
+  gather_facts: false
+  serial: 1
+  vars:
+    x: []
+  tasks:
+    - set_fact:
+        x: "{{ x + [item] }}"
+      loop: "{{ [1, 2, 3] if inventory_hostname == 'h1' else [10, 20] }}"
+    - debug: {msg: "{{ inventory_hostname }} {{ x }}"}

@@ -1,0 +1,9 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    x: [1, 2, 3]
+  tasks:
+    - set_fact:
+        y: "{{ (y | default([])) + [item] }}"
+      loop: "{{ x }}"
+    - debug: {var: y}
