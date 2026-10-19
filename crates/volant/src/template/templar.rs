@@ -16,9 +16,8 @@ use super::bridged;
 use super::context::{Vars, begin, context_of, is_literal, reads, take_failure};
 use super::env::{environment, holds_undefined, truthy, type_name};
 use super::filters;
-use super::vm::{
-    TemplateReads, convert_error, eval_expr, keep_literal, single_expression, template_reads,
-};
+use super::scan::single_expression;
+use super::vm::{TemplateReads, convert_error, eval_expr, keep_literal, template_reads};
 use super::{RESOLVING, Tainted, TemplateError};
 
 /// A handle on the environment and the bridge, cheap to clone: a render's context holds one so

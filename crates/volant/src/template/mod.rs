@@ -20,6 +20,7 @@ mod once;
 mod one_pass;
 mod pymethods;
 mod resolve;
+mod scan;
 mod templar;
 mod test_plugins;
 mod vm;

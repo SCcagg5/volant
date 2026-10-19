@@ -8,7 +8,8 @@ use minijinja::syntax::SyntaxConfig;
 use serde_json::Value;
 
 use super::file::trailing_newlines;
-use super::vm::{LONG_LINE, Node, convert_error, render_counted, single_expression};
+use super::scan::single_expression;
+use super::vm::{LONG_LINE, Node, convert_error, render_counted};
 use super::{Templar, TemplateError, take_failure};
 
 impl Templar {

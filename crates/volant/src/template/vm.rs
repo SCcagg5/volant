@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Running compiled templates: the bytecode rewrite, one-expression detection and the
-//! conversion of minijinja's errors into [`TemplateError`].
+//! Running compiled templates: the bytecode rewrite and the conversion of minijinja's errors
+//! into [`TemplateError`].
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -17,11 +17,11 @@ use serde_json::Value;
 use super::bridged;
 use super::context::set_literal;
 use super::env::{attr_call, const_call, container_repr, holds_undefined, var_call};
-use super::pymethods::mutable::MUTATORS;
+use super::scan::{mutates, opens_raw, writes_a_tuple};
 use super::templar::Templar;
 use super::{
-    CONCAT_KEY, CONST_KEY, ITEM_KEY, MITEM_KEY, MKLIST_KEY, MKMAP_KEY, QUERY_KEY, REM_KEY,
-    REMT_KEY, TemplateError, UNDEFINED, VAULT_NAME,
+    CONCAT_KEY, ITEM_KEY, MITEM_KEY, MKLIST_KEY, MKMAP_KEY, QUERY_KEY, REM_KEY, REMT_KEY,
+    TemplateError, UNDEFINED, VAULT_NAME,
 };
 
 /// Replaces every `!unsafe` wrapper inside `value` by its text, and every `!vault` wrapper that
@@ -48,47 +48,6 @@ pub(crate) fn holds_template(value: &Value) -> bool {
         Value::Object(map) => map.values().any(holds_template),
         _ => false,
     }
-}
-
-/// `{{ expr }}` and nothing else: no text around, no second expression, no statement. A `}}`
-/// inside is no end when it closes a bracket the expression opened or sits in a string literal:
-/// `{'a': {'x': 5}}` closing on `}}}` and `'}}'` are one expression, `1 }}{{ 2` is two. A `-`
-/// right after `{{` or right before `}}` is whitespace control, never a minus sign.
-pub(super) fn single_expression(text: &str) -> Option<&str> {
-    let t = text.trim();
-    let inner = t.strip_prefix("{{")?.strip_suffix("}}")?;
-    if !closes_only_what_it_opens(inner) {
-        return None;
-    }
-    let inner = inner.strip_prefix('-').unwrap_or(inner);
-    let inner = inner.strip_suffix('-').unwrap_or(inner);
-    Some(inner.trim())
-}
-
-/// Whether every bracket `expr` closes outside a string literal is one it opened, and no
-/// statement or comment opens there. A `{%` inside a string literal is text. minijinja's own
-/// parser cannot be asked: its lexer panics on a `}` with nothing open.
-fn closes_only_what_it_opens(expr: &str) -> bool {
-    let mut depth = 0usize;
-    let mut quote = None;
-    let mut chars = expr.chars().peekable();
-    while let Some(c) = chars.next() {
-        match (quote, c) {
-            (Some(_), '\\') => {
-                chars.next();
-            }
-            (Some(q), c) if c == q => quote = None,
-            (None, '\'' | '"') => quote = Some(c),
-            (None, '{') if matches!(chars.peek(), Some('%' | '#')) => return false,
-            (None, '{' | '[' | '(') => depth += 1,
-            (None, '}' | ']' | ')') => match depth.checked_sub(1) {
-                Some(d) => depth = d,
-                None => return false,
-            },
-            _ => {}
-        }
-    }
-    true
 }
 
 /// What a template reads: the names it looks up, and whether it calls something that looks a
@@ -322,38 +281,6 @@ pub(super) fn note_emit(out: &minijinja::Output<'_>, value: &minijinja::Value) {
     });
 }
 
-/// Whether an instruction pushes a list written out in the template, `(a, b)` or `['a', 'b']`: what
-/// stands on the right of `%` as a tuple does. A list that a variable holds, or a call answers, is
-/// one argument, as it is in Python.
-fn writes_a_tuple(op: Option<&Instruction<'_>>) -> bool {
-    match op {
-        Some(Instruction::BuildList(Some(_))) => true,
-        Some(Instruction::LoadConst(value)) => value.kind() == minijinja::value::ValueKind::Seq,
-        // The same two, after the rewrite of a template that changes lists in place.
-        Some(Instruction::CallFunction(name, _)) => {
-            *name == MKLIST_KEY
-                || name
-                    .strip_prefix(CONST_KEY)
-                    .is_some_and(|json| json.starts_with('['))
-        }
-        _ => false,
-    }
-}
-
-/// Whether compiled code calls a method that changes a list or mapping in place.
-pub(super) fn mutates(instructions: &Instructions<'_>) -> bool {
-    let mut at = 0;
-    while let Some(op) = instructions.get(at) {
-        if let Instruction::CallMethod(name, _) = op
-            && MUTATORS.contains(name)
-        {
-            return true;
-        }
-        at += 1;
-    }
-    false
-}
-
 /// `env.render_named_str`, with `~` routed through [`concat()`]. Compiled once per call, as
 /// `render_named_str` does, with the whitespace and syntax settings given. The only place that
 /// decides auto-escape. The environment is the templar's, with the filters and tests the
@@ -501,19 +428,4 @@ pub(super) fn keep_literal(
     if read_none || raw {
         set_literal(ctx, true);
     }
-}
-
-/// Whether `text` holds a `{% raw %}` tag, with or without whitespace control.
-fn opens_raw(text: &str) -> bool {
-    let mut rest = text;
-    while let Some(at) = rest.find("{%") {
-        rest = &rest[at + 2..];
-        let tag = rest.trim_start_matches(['-', '+']).trim_start();
-        if let Some(after) = tag.strip_prefix("raw")
-            && after.starts_with(|c: char| c.is_whitespace() || matches!(c, '-' | '+' | '%'))
-        {
-            return true;
-        }
-    }
-    false
 }
