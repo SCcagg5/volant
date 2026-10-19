@@ -16,11 +16,8 @@ use super::pymethods::mutable::{identity, mutable};
 use super::templar::Templar;
 use super::{
     ATTR_KEY, CONCAT_KEY, CONST_KEY, CONTEXT_KEY, HOSTVARS_KEYS, ITEM_KEY, MATTR_KEY, MITEM_KEY,
-<<<<<<< HEAD
-    MKLIST_KEY, MKMAP_KEY, QUERY_KEY, TAINT_KEY, Tainted, TemplateError, VAR_KEY,
-=======
-    MKLIST_KEY, MKMAP_KEY, QUERY_KEY, REM_KEY, REMT_KEY, TAINT_KEY, Tainted, VAR_KEY,
->>>>>>> 1a3bc19a (feat(template): format a text with the % operator as Python does)
+    MKLIST_KEY, MKMAP_KEY, QUERY_KEY, REM_KEY, REMT_KEY, TAINT_KEY, Tainted, TemplateError,
+    VAR_KEY,
 };
 use crate::inventory::is_localhost;
 

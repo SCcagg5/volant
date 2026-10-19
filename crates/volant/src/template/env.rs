@@ -20,12 +20,8 @@ use super::globals;
 use super::pymethods::mutable::{
     MutDict, MutList, is_literal, is_mutable, key, mutable, snapshot_answer,
 };
-<<<<<<< HEAD
-use super::vm::{concat, note_emit};
-=======
 use super::pymethods::percent;
-use super::vm::concat;
->>>>>>> 1a3bc19a (feat(template): format a text with the % operator as Python does)
+use super::vm::{concat, note_emit};
 use super::{
     ATTR_KEY, CONCAT_KEY, CONST_KEY, CONTEXT_KEY, ITEM_KEY, MATTR_KEY, MITEM_KEY, MKLIST_KEY,
     MKMAP_KEY, REM_KEY, REMT_KEY, VAR_KEY,
