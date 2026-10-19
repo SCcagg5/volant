@@ -1,0 +1,33 @@
+- hosts: h1
+  gather_facts: true
+  gather_subset: [min]
+  vars:
+    T: "{{ playbook_dir }}/t"
+  tasks:
+    - name: Set up
+      file: {path: "{{ T }}", state: directory}
+    - name: template named by a fact
+      template: {src: "{{ ansible_os_family }}.j2", dest: "{{ T }}/fact.txt"}
+    - name: template found by with_first_found
+      template: {src: "{{ item }}", dest: "{{ T }}/first.txt"}
+      with_first_found:
+        - "{{ ansible_os_family }}.j2"
+        - default.j2
+      loop_control: {label: found}
+    - name: copy named by a fact
+      copy: {src: "{{ ansible_system }}.txt", dest: "{{ T }}/copy.txt"}
+    - name: Name a template by a command
+      command: echo plain.j2
+      register: named
+      changed_when: false
+    - name: template named by a registered result
+      template: {src: "{{ named.stdout }}", dest: "{{ T }}/registered.txt"}
+    - name: script named by a fact
+      script: "{{ ansible_system }}.sh"
+      register: ran
+    - name: What the tasks sent
+      command: cat {{ T }}/fact.txt {{ T }}/first.txt {{ T }}/copy.txt {{ T }}/registered.txt
+      register: sent
+      changed_when: false
+    - debug: {var: sent.stdout_lines}
+    - debug: {var: ran.stdout_lines}

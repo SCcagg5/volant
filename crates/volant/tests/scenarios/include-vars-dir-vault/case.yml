@@ -1,0 +1,5 @@
+# A vaulted file in a directory is read like a vaulted file on its own, and hides the task's result.
+runs:
+  - args: [-i, inv.ini, --vault-password-file, pw1, -v, play.yml]
+  - args: [-i, inv.ini, --vault-password-file, pw2, play.yml]
+  - args: [-i, inv.ini, play.yml]

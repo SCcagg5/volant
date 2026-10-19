@@ -1,0 +1,21 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: a retried read of a vaulted file
+      include_vars: {file: secrets/vaulted.yml}
+      register: r
+      until: false
+      retries: 2
+      delay: 0
+      ignore_errors: true
+
+    - name: a loop item that read one
+      include_vars: {file: "{{ item }}"}
+      loop: [secrets/vaulted.yml]
+
+    - name: a failure after a vaulted file was read
+      include_vars: {dir: broken}
+      ignore_errors: true
+
+    - name: the plain read
+      include_vars: {file: secrets/vaulted.yml, name: held}

@@ -563,3 +563,72 @@ fn the_mode_of_a_directory_decides_whether_others_can_write_it(
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
     assert!(is_world_writable(&dir.path().join("gone")));
 }
+
+/// `[volant] host_named_paths` takes its three words, `allow` when absent, and refuses any other
+/// with the key, the words and the value.
+#[rstest::rstest]
+#[case::absent("[defaults]\nforks = 3\n", Ok(HostNamedPaths::Allow))]
+#[case::allow("[volant]\nhost_named_paths = allow\n", Ok(HostNamedPaths::Allow))]
+#[case::contained(
+    "[volant]\nhost_named_paths = contained\n",
+    Ok(HostNamedPaths::Contained)
+)]
+#[case::refuse("[volant]\nhost_named_paths = refuse\n", Ok(HostNamedPaths::Refuse))]
+#[case::spaced("[volant]\nhost_named_paths =  refuse \n", Ok(HostNamedPaths::Refuse))]
+#[case::other(
+    "[volant]\nhost_named_paths = sometimes\n",
+    Err(
+        "Config 'VOLANT_HOST_NAMED_PATHS' from 'ansible.cfg' has an invalid value: 'sometimes'; expected one of allow, contained, refuse"
+    )
+)]
+#[case::capitalised(
+    "[volant]\nhost_named_paths = Allow\n",
+    Err("has an invalid value: 'Allow'; expected one of allow, contained, refuse")
+)]
+#[case::empty(
+    "[volant]\nhost_named_paths =\n",
+    Err("has an invalid value: ''; expected one of allow, contained, refuse")
+)]
+#[case::wrong_section("[defaults]\nhost_named_paths = refuse\n", Ok(HostNamedPaths::Allow))]
+fn the_volant_section_picks_how_a_host_named_source_is_read(
+    #[case] text: &str,
+    #[case] expected: Result<HostNamedPaths, &str>,
+) {
+    match (parse(text, Path::new("."), "ansible.cfg"), expected) {
+        (Ok(config), Ok(mode)) => assert_eq!(config.host_named_paths, mode),
+        (Err(err), Err(says)) => {
+            assert_eq!(crate::stats::error_code(&err), 5, "{err:#}");
+            assert!(format!("{err:#}").contains(says), "{err:#}");
+        }
+        (got, expected) => panic!(
+            "got {:?}, expected {expected:?}",
+            got.map(|c| c.host_named_paths)
+        ),
+    }
+}
+
+/// `VOLANT_HOST_NAMED_PATHS` wins over the file and is refused the same way.
+#[test]
+fn volant_host_named_paths_in_the_environment_sets_the_mode() {
+    unsafe {
+        std::env::set_var("ANSIBLE_CONFIG", "/nonexistent/volant/ansible.cfg");
+        std::env::set_var("VOLANT_HOST_NAMED_PATHS", "contained");
+    }
+    assert_eq!(
+        Config::load().unwrap().host_named_paths,
+        HostNamedPaths::Contained
+    );
+    unsafe { std::env::set_var("VOLANT_HOST_NAMED_PATHS", "maybe") };
+    let err = Config::load().unwrap_err();
+    assert!(
+        format!("{err:#}").contains(
+            "Config 'VOLANT_HOST_NAMED_PATHS' from 'env: VOLANT_HOST_NAMED_PATHS' has an invalid value: 'maybe'; expected one of allow, contained, refuse"
+        ),
+        "{err:#}"
+    );
+    unsafe { std::env::remove_var("VOLANT_HOST_NAMED_PATHS") };
+    assert_eq!(
+        Config::load().unwrap().host_named_paths,
+        HostNamedPaths::Allow
+    );
+}

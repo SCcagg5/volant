@@ -19,9 +19,10 @@ use serde_json::{Map, Value, json};
 use tokio::sync::Notify;
 use volant_protocol::TaskResult;
 
-use super::files::refuse_host_named;
+use super::files::{ansible_bool, check_host_named, contained_refusal};
 use super::{Context, Plugin, Step, Sub, lost};
 use crate::bridge::{Ask, BridgeError, Reply};
+use crate::config::HostNamedPaths;
 
 mod asks;
 mod helpers;
@@ -116,6 +117,98 @@ fn flat_vars(vars: &crate::vars::HostVars) -> Map<String, Value> {
     flat
 }
 
+/// The controller files the arguments of ansible-core's plugin `name` name, held to
+/// `host_named_paths` when a managed host named them.
+///
+/// Read off the plugins of ansible-core 2.19.12, the arguments that take a controller path are
+/// `src` of `copy`, `template`, `unarchive`, `assemble` and `uri` (and of a collection's plugin
+/// that reads one), unless `remote_src` says the source is on the host; the first word of
+/// `_raw_params` or of `cmd` for `script`; and the `filename` of each field of a `uri`
+/// `body` in `form-multipart`. `assemble` takes its source from the host unless `remote_src` is
+/// false.
+fn check_sources(name: &str, ctx: &Context<'_>) -> Result<(), String> {
+    let subdir = if matches!(name, "template" | "win_template") {
+        "templates"
+    } else {
+        "files"
+    };
+    let check = |arg: &str, named: &str| {
+        check_host_named(
+            ctx.host_named_paths,
+            ctx.args_untrusted,
+            arg,
+            named,
+            subdir,
+            ctx.origin,
+            ctx.playbook_dir,
+        )
+    };
+    let text = |arg: &str| {
+        ctx.args
+            .get(arg)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    };
+    // Only the plugins that read `remote_src` are told by it: `template`, `script` and a
+    // collection's plugin read `src` off the controller whatever it says. `unarchive` reads
+    // `copy: no` as `remote_src: yes` when `remote_src` is not given. `fetch` reads its `src`
+    // off the host.
+    let remote_src = ctx.args.get("remote_src");
+    let remote = match name {
+        "copy" | "uri" => remote_src.is_some_and(ansible_bool),
+        "unarchive" => match (remote_src, ctx.args.get("copy")) {
+            (Some(value), _) => ansible_bool(value),
+            (None, copy) => copy.is_some_and(|copy| !ansible_bool(copy)),
+        },
+        "assemble" => remote_src.is_none_or(ansible_bool),
+        "fetch" => true,
+        _ => false,
+    };
+    if !remote {
+        check("src", text("src"))?;
+        if let Some(Value::Object(fields)) = ctx.args.get("body") {
+            for field in fields.values().filter_map(Value::as_object) {
+                let file = field.get("filename").and_then(Value::as_str);
+                if let Some(file) = file.filter(|_| field.get("content").is_none_or(is_empty)) {
+                    check("body", file)?;
+                }
+            }
+        }
+    }
+    for arg in ["_raw_params", "cmd"] {
+        // A script's file is the first word of its line, as Python's `shlex.split` reads it.
+        // The `shlex` crate reads a word that starts with `#` as a comment, so a line that opens
+        // with one is held to `contained` by the word as written.
+        let line = text(arg).trim();
+        if line.starts_with('#') {
+            let word = line.split_whitespace().next().unwrap_or_default();
+            if ctx.host_named_paths == HostNamedPaths::Contained && ctx.args_untrusted.contains(arg)
+            {
+                return Err(contained_refusal(arg, word));
+            }
+            check(arg, word)?;
+            continue;
+        }
+        let first = shlex::split(line)
+            .and_then(|words| words.into_iter().next())
+            .unwrap_or_default();
+        check(arg, &first)?;
+    }
+    Ok(())
+}
+
+/// Whether a `content` value is what Python reads as false.
+fn is_empty(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Bool(b) => !b,
+        Value::String(s) => s.is_empty(),
+        Value::Array(a) => a.is_empty(),
+        Value::Object(o) => o.is_empty(),
+        Value::Number(n) => n.as_f64() == Some(0.0),
+    }
+}
+
 /// ansible-core's plugin `name`, which may run `modules` and no other module.
 #[expect(clippy::too_many_lines)]
 pub(super) fn start(
@@ -124,11 +217,10 @@ pub(super) fn start(
     ctx: Context<'_>,
 ) -> Box<dyn Plugin> {
     // `find_needle` lets ansible-core's plugins read any controller file a `src` or a script's
-    // line names, and put it on the host: a name a managed host chose is never followed.
-    for arg in ["src", "_raw_params"] {
-        if let Err(msg) = refuse_host_named(ctx.args_untrusted, arg) {
-            return super::copy::failing(msg);
-        }
+    // line names, and put it on the host: a name a managed host chose is followed as far as
+    // `host_named_paths` allows.
+    if let Err(msg) = check_sources(name, &ctx) {
+        return super::copy::failing(msg);
     }
     let Some(bridge) = ctx.templar.bridge().cloned() else {
         return super::copy::failing(format!(
