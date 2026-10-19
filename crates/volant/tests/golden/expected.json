@@ -3470,5 +3470,2379 @@
       }
     },
     "result": "{% raw %}{{ x }}{% endraw %}{{ x }}|{{ r }}"
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b,c'.split(',') }}"
+    },
+    "result": [
+      "a",
+      "b",
+      "c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b,c'.split(',', 1) }}"
+    },
+    "result": [
+      "a",
+      "b,c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b,c'.split(',', 0) }}"
+    },
+    "result": [
+      "a,b,c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b,c'.split(',', -1) }}"
+    },
+    "result": [
+      "a",
+      "b",
+      "c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b,c'.split(sep=',') }}"
+    },
+    "result": [
+      "a",
+      "b",
+      "c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b,c'.split(maxsplit=1, sep=',') }}"
+    },
+    "result": [
+      "a",
+      "b,c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b,c'.split(',', maxsplit=1) }}"
+    },
+    "result": [
+      "a",
+      "b,c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'a b  c'.split() }}"
+    },
+    "result": [
+      "a",
+      "b",
+      "c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ '  a b  '.split() }}"
+    },
+    "result": [
+      "a",
+      "b"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ '  a b  c  '.split(None, 1) }}"
+    },
+    "result": [
+      "a",
+      "b  c  "
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ '  a b  c  '.split(maxsplit=1) }}"
+    },
+    "result": [
+      "a",
+      "b  c  "
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ ''.split() }}"
+    },
+    "result": []
+  },
+  {
+    "case": {
+      "template": "{{ ''.split(',') }}"
+    },
+    "result": [
+      ""
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ ',a,,b,'.split(',') }}"
+    },
+    "result": [
+      "",
+      "a",
+      "",
+      "b",
+      ""
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'a--b--c'.split('--') }}"
+    },
+    "result": [
+      "a",
+      "b",
+      "c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.split('') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: empty separator"
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b'.split(1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: must be str or None, not int"
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b'.split(',', 'x') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: 'str' object cannot be interpreted as an integer"
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b'.split(',', 1, 2) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: split() takes at most 2 arguments (3 given)"
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b'.split(foo=1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: split() got an unexpected keyword argument 'foo'"
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b'.split(',', sep=',') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: argument for split() given by name ('sep') and position (1)"
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b,c'.rsplit(',') }}"
+    },
+    "result": [
+      "a",
+      "b",
+      "c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b,c'.rsplit(',', 1) }}"
+    },
+    "result": [
+      "a,b",
+      "c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b,c'.rsplit(',', 0) }}"
+    },
+    "result": [
+      "a,b,c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b,c'.rsplit(maxsplit=1, sep=',') }}"
+    },
+    "result": [
+      "a,b",
+      "c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ '  a b  c  '.rsplit(None, 1) }}"
+    },
+    "result": [
+      "  a b",
+      "c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ '  a b  c  '.rsplit() }}"
+    },
+    "result": [
+      "a",
+      "b",
+      "c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'a.b.c.d'.rsplit('.', 2) }}"
+    },
+    "result": [
+      "a.b",
+      "c",
+      "d"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.rsplit('') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: empty separator"
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b'.rsplit(',', 1, 2) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: rsplit() takes at most 2 arguments (3 given)"
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b'.rsplit(1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: must be str or None, not int"
+  },
+  {
+    "case": {
+      "template": "{{ '  xx  '.strip() }}"
+    },
+    "result": "xx"
+  },
+  {
+    "case": {
+      "template": "{{ 'xxaxx'.strip('x') }}"
+    },
+    "result": "a"
+  },
+  {
+    "case": {
+      "template": "{{ 'xyaxy'.strip('xy') }}"
+    },
+    "result": "a"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.strip('') }}"
+    },
+    "result": "abc"
+  },
+  {
+    "case": {
+      "template": "{{ '  a  '.strip(None) }}"
+    },
+    "result": "a"
+  },
+  {
+    "case": {
+      "template": "{{ '  a  '.lstrip() }}"
+    },
+    "result": "a  "
+  },
+  {
+    "case": {
+      "template": "{{ 'xxaxx'.lstrip('x') }}"
+    },
+    "result": "axx"
+  },
+  {
+    "case": {
+      "template": "{{ '  a  '.rstrip() }}"
+    },
+    "result": "  a"
+  },
+  {
+    "case": {
+      "template": "{{ 'xxaxx'.rstrip('x') }}"
+    },
+    "result": "xxa"
+  },
+  {
+    "case": {
+      "template": "{{ 'a'.strip(1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: strip arg must be None or str"
+  },
+  {
+    "case": {
+      "template": "{{ 'a'.strip('a', 'b') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: strip expected at most 1 argument, got 2"
+  },
+  {
+    "case": {
+      "template": "{{ 'a'.strip(chars='a') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: str.strip() takes no keyword arguments"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.startswith('a') }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.startswith('b') }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.startswith(('x', 'a')) }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.startswith(('x', 'y')) }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.startswith('b', 1) }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.startswith('b', 1, 2) }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.startswith('bc', 1, 2) }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.startswith('c', -1) }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.startswith('') }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.startswith('', 10) }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.startswith('', 3) }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.startswith(1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: startswith first arg must be str or a tuple of str, not int"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.startswith() }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: startswith expected at least 1 argument, got 0"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.startswith('a', 'x') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: slice indices must be integers or None or have an __index__ method"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.endswith('c') }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.endswith('b') }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.endswith(('x', 'c')) }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.endswith('b', 0, 2) }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.endswith('b', 0, -1) }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.endswith('') }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.endswith(1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: endswith first arg must be str or a tuple of str, not int"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.endswith('c', 1, None) }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.replace('b', 'X') }}"
+    },
+    "result": "aXcaXc"
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.replace('b', 'X', 1) }}"
+    },
+    "result": "aXcabc"
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.replace('b', 'X', 0) }}"
+    },
+    "result": "abcabc"
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.replace('b', 'X', -1) }}"
+    },
+    "result": "aXcaXc"
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.replace('b', 'X', count=1) }}"
+    },
+    "result": "aXcabc"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.replace('', '-') }}"
+    },
+    "result": "-a-b-c-"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.replace('', '-', 2) }}"
+    },
+    "result": "-a-bc"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.replace('b') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: replace() takes at least 2 positional arguments (1 given)"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.replace(1, 'x') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: replace() argument 1 must be str, not int"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.replace('b', 1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: replace() argument 2 must be str, not int"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.replace('b', 'x', 'y') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: 'str' object cannot be interpreted as an integer"
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.find('b') }}"
+    },
+    "result": 1
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.find('b', 2) }}"
+    },
+    "result": 4
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.find('b', 2, 4) }}"
+    },
+    "result": -1
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.find('b', -2) }}"
+    },
+    "result": 4
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.find('z') }}"
+    },
+    "result": -1
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.find('') }}"
+    },
+    "result": 0
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.find('', 10) }}"
+    },
+    "result": -1
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.find('', 6) }}"
+    },
+    "result": 6
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.find('c', None, 2) }}"
+    },
+    "result": -1
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.find(1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: find() argument 1 must be str, not int"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.find() }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: find expected at least 1 argument, got 0"
+  },
+  {
+    "case": {
+      "template": "{{ 'éabé'.find('b') }}"
+    },
+    "result": 2
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.rfind('b') }}"
+    },
+    "result": 4
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.rfind('b', 0, 3) }}"
+    },
+    "result": 1
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.rfind('z') }}"
+    },
+    "result": -1
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.rfind('') }}"
+    },
+    "result": 6
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.rfind('', 2, 4) }}"
+    },
+    "result": 4
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.index('b') }}"
+    },
+    "result": 1
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.index('b', 2) }}"
+    },
+    "result": 4
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.index('z') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: substring not found"
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.index('b', 2, 3) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: substring not found"
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.index(1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: index() argument 1 must be str, not int"
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.rindex('b') }}"
+    },
+    "result": 4
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.rindex('b', 0, 3) }}"
+    },
+    "result": 1
+  },
+  {
+    "case": {
+      "template": "{{ 'abcabc'.rindex('z') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: substring not found"
+  },
+  {
+    "case": {
+      "template": "{{ 'aaaa'.count('a') }}"
+    },
+    "result": 4
+  },
+  {
+    "case": {
+      "template": "{{ 'aaaa'.count('aa') }}"
+    },
+    "result": 2
+  },
+  {
+    "case": {
+      "template": "{{ 'aaaa'.count('') }}"
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ 'aaaa'.count('a', 1) }}"
+    },
+    "result": 3
+  },
+  {
+    "case": {
+      "template": "{{ 'aaaa'.count('a', 1, 3) }}"
+    },
+    "result": 2
+  },
+  {
+    "case": {
+      "template": "{{ 'aaaa'.count('a', -2) }}"
+    },
+    "result": 2
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.count('z') }}"
+    },
+    "result": 0
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.count(1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: count() argument 1 must be str, not int"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.count() }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: count expected at least 1 argument, got 0"
+  },
+  {
+    "case": {
+      "template": "{{ ','.join(['a', 'b']) }}"
+    },
+    "result": "a,b"
+  },
+  {
+    "case": {
+      "template": "{{ ','.join('abc') }}"
+    },
+    "result": "a,b,c"
+  },
+  {
+    "case": {
+      "template": "{{ ','.join([]) }}"
+    },
+    "result": ""
+  },
+  {
+    "case": {
+      "template": "{{ ','.join(['a']) }}"
+    },
+    "result": "a"
+  },
+  {
+    "case": {
+      "template": "{{ ','.join(('a', 'b')) }}"
+    },
+    "result": "a,b"
+  },
+  {
+    "case": {
+      "template": "{{ ','.join({'a': 1, 'b': 2}) }}"
+    },
+    "result": "a,b"
+  },
+  {
+    "case": {
+      "template": "{{ ','.join([1, 2]) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: sequence item 0: expected str instance, int found"
+  },
+  {
+    "case": {
+      "template": "{{ ','.join(['a', 2]) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: sequence item 1: expected str instance, int found"
+  },
+  {
+    "case": {
+      "template": "{{ ','.join(1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: can only join an iterable"
+  },
+  {
+    "case": {
+      "template": "{{ ','.join() }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: str.join() takes exactly one argument (0 given)"
+  },
+  {
+    "case": {
+      "template": "{{ ','.join(['a'], ['b']) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: str.join() takes exactly one argument (2 given)"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.upper() }}"
+    },
+    "result": "ABC"
+  },
+  {
+    "case": {
+      "template": "{{ 'ß'.upper() }}"
+    },
+    "result": "SS"
+  },
+  {
+    "case": {
+      "template": "{{ 'ABC'.lower() }}"
+    },
+    "result": "abc"
+  },
+  {
+    "case": {
+      "template": "{{ 'İ'.lower() }}"
+    },
+    "result": "i̇"
+  },
+  {
+    "case": {
+      "template": "{{ 'ΑΣ'.lower() }}"
+    },
+    "result": "ας"
+  },
+  {
+    "case": {
+      "template": "{{ 'hello world'.title() }}"
+    },
+    "result": "Hello World"
+  },
+  {
+    "case": {
+      "template": "{{ \"they're bill's friends\".title() }}"
+    },
+    "result": "They'Re Bill'S Friends"
+  },
+  {
+    "case": {
+      "template": "{{ 'ab1cd'.title() }}"
+    },
+    "result": "Ab1Cd"
+  },
+  {
+    "case": {
+      "template": "{{ 'HELLO'.title() }}"
+    },
+    "result": "Hello"
+  },
+  {
+    "case": {
+      "template": "{{ ''.title() }}"
+    },
+    "result": ""
+  },
+  {
+    "case": {
+      "template": "{{ 'hello world'.capitalize() }}"
+    },
+    "result": "Hello world"
+  },
+  {
+    "case": {
+      "template": "{{ 'hELLO'.capitalize() }}"
+    },
+    "result": "Hello"
+  },
+  {
+    "case": {
+      "template": "{{ 'ßa'.capitalize() }}"
+    },
+    "result": "Ssa"
+  },
+  {
+    "case": {
+      "template": "{{ ''.capitalize() }}"
+    },
+    "result": ""
+  },
+  {
+    "case": {
+      "template": "{{ 'Hello World'.swapcase() }}"
+    },
+    "result": "hELLO wORLD"
+  },
+  {
+    "case": {
+      "template": "{{ 'ß'.swapcase() }}"
+    },
+    "result": "SS"
+  },
+  {
+    "case": {
+      "template": "{{ 'ABC'.casefold() }}"
+    },
+    "result": "abc"
+  },
+  {
+    "case": {
+      "template": "{{ 'Straße'.casefold() }}"
+    },
+    "result": "strasse"
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.center(6) }}"
+    },
+    "result": "  ab  "
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.center(7) }}"
+    },
+    "result": "   ab  "
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.center(6) }}"
+    },
+    "result": " abc  "
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.center(7, '*') }}"
+    },
+    "result": "***ab**"
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.center(1) }}"
+    },
+    "result": "ab"
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.center(-3) }}"
+    },
+    "result": "ab"
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.center(6, '**') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: The fill character must be exactly one character long"
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.center(6, 1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: The fill character must be a unicode character, not int"
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.center('x') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: 'str' object cannot be interpreted as an integer"
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.center() }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: center expected at least 1 argument, got 0"
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.center(6.0) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: 'float' object cannot be interpreted as an integer"
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.center(True) }}"
+    },
+    "result": "ab"
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.ljust(5) }}"
+    },
+    "result": "ab   "
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.ljust(5, '.') }}"
+    },
+    "result": "ab..."
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.ljust(1) }}"
+    },
+    "result": "ab"
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.ljust(5, '..') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: The fill character must be exactly one character long"
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.rjust(5) }}"
+    },
+    "result": "   ab"
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.rjust(5, '0') }}"
+    },
+    "result": "000ab"
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.rjust(1) }}"
+    },
+    "result": "ab"
+  },
+  {
+    "case": {
+      "template": "{{ 'ab'.rjust(5, '') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: The fill character must be exactly one character long"
+  },
+  {
+    "case": {
+      "template": "{{ '42'.zfill(5) }}"
+    },
+    "result": "00042"
+  },
+  {
+    "case": {
+      "template": "{{ '-42'.zfill(5) }}"
+    },
+    "result": "-0042"
+  },
+  {
+    "case": {
+      "template": "{{ '+42'.zfill(5) }}"
+    },
+    "result": "+0042"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.zfill(2) }}"
+    },
+    "result": "abc"
+  },
+  {
+    "case": {
+      "template": "{{ ''.zfill(3) }}"
+    },
+    "result": "000"
+  },
+  {
+    "case": {
+      "template": "{{ '-'.zfill(3) }}"
+    },
+    "result": "-00"
+  },
+  {
+    "case": {
+      "template": "{{ '42'.zfill('x') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: 'str' object cannot be interpreted as an integer"
+  },
+  {
+    "case": {
+      "template": "{{ 'a=b=c'.partition('=') }}"
+    },
+    "result": [
+      "a",
+      "=",
+      "b=c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'a=b=c'.rpartition('=') }}"
+    },
+    "result": [
+      "a=b",
+      "=",
+      "c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.partition('=') }}"
+    },
+    "result": [
+      "abc",
+      "",
+      ""
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.rpartition('=') }}"
+    },
+    "result": [
+      "",
+      "",
+      "abc"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.partition('') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: empty separator"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.partition(1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: must be str, not int"
+  },
+  {
+    "case": {
+      "template": "{{ 'a=b'.partition('=', 'x') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: str.partition() takes exactly one argument (2 given)"
+  },
+  {
+    "case": {
+      "template": "{{ 'a==b'.partition('==') }}"
+    },
+    "result": [
+      "a",
+      "==",
+      "b"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ '123'.isdigit() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ '12a'.isdigit() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ ''.isdigit() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ '²'.isdigit() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.isalpha() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'ab1'.isalpha() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ ''.isalpha() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ 'é'.isalpha() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'ab1'.isalnum() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'ab_'.isalnum() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ ''.isalnum() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ s.isspace() }}",
+      "vars": {
+        "s": " \t\n"
+      }
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ ' a'.isspace() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ ''.isspace() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.islower() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'aBc'.islower() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ 'a1'.islower() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ '123'.islower() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ ''.islower() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ 'ABC'.isupper() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'AbC'.isupper() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ 'A1'.isupper() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ '123'.isupper() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.isdigit(1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: str.isdigit() takes no arguments (1 given)"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.upper(1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: str.upper() takes no arguments (1 given)"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.isalpha(x=1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: str.isalpha() takes no keyword arguments"
+  },
+  {
+    "case": {
+      "template": "{{ s.splitlines() }}",
+      "vars": {
+        "s": "a\nb\r\nc"
+      }
+    },
+    "result": [
+      "a",
+      "b",
+      "c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ s.splitlines() }}",
+      "vars": {
+        "s": "a\nb\r\nc\n"
+      }
+    },
+    "result": [
+      "a",
+      "b",
+      "c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ s.splitlines(True) }}",
+      "vars": {
+        "s": "a\nb\r\nc\n"
+      }
+    },
+    "result": [
+      "a\n",
+      "b\r\n",
+      "c\n"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ s.splitlines(keepends=True) }}",
+      "vars": {
+        "s": "a\nb\r\nc\n"
+      }
+    },
+    "result": [
+      "a\n",
+      "b\r\n",
+      "c\n"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ s.splitlines() }}",
+      "vars": {
+        "s": "a\rb\u000bc\fd\u001ce\u001df\u001egh i j"
+      }
+    },
+    "result": [
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+      "f",
+      "g",
+      "h",
+      "i",
+      "j"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ ''.splitlines() }}"
+    },
+    "result": []
+  },
+  {
+    "case": {
+      "template": "{{ s.splitlines() }}",
+      "vars": {
+        "s": "\n"
+      }
+    },
+    "result": [
+      ""
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ s.splitlines() }}",
+      "vars": {
+        "s": "a\n\nb"
+      }
+    },
+    "result": [
+      "a",
+      "",
+      "b"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.splitlines(1, 2) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: splitlines() takes at most 1 argument (2 given)"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.splitlines(foo=1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: splitlines() got an unexpected keyword argument 'foo'"
+  },
+  {
+    "case": {
+      "template": "{{ s.expandtabs() }}",
+      "vars": {
+        "s": "a\tb"
+      }
+    },
+    "result": "a       b"
+  },
+  {
+    "case": {
+      "template": "{{ s.expandtabs(4) }}",
+      "vars": {
+        "s": "a\tb"
+      }
+    },
+    "result": "a   b"
+  },
+  {
+    "case": {
+      "template": "{{ s.expandtabs(tabsize=2) }}",
+      "vars": {
+        "s": "ab\tc\td"
+      }
+    },
+    "result": "ab  c d"
+  },
+  {
+    "case": {
+      "template": "{{ s.expandtabs(4) }}",
+      "vars": {
+        "s": "a\nb\tc"
+      }
+    },
+    "result": "a\nb   c"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.removeprefix('a') }}"
+    },
+    "result": "bc"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.removeprefix('b') }}"
+    },
+    "result": "abc"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.removesuffix('c') }}"
+    },
+    "result": "ab"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.removesuffix('') }}"
+    },
+    "result": "abc"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.removeprefix(1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: removeprefix() argument must be str, not int"
+  },
+  {
+    "case": {
+      "template": "{{ '123'.isdecimal() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.isdecimal() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ '123'.isnumeric() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ '½'.isnumeric() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.isascii() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'é'.isascii() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ ''.isascii() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'Hello World'.istitle() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'Hello world'.istitle() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ ''.istitle() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.isidentifier() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ '1abc'.isidentifier() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ 'a b'.isidentifier() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ ''.isidentifier() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.isprintable() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ s.isprintable() }}",
+      "vars": {
+        "s": "a\nb"
+      }
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ ''.isprintable() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ '{} and {}'.format('a', 'b') }}"
+    },
+    "result": "a and b"
+  },
+  {
+    "case": {
+      "template": "{{ '{0} {1} {0}'.format('a', 'b') }}"
+    },
+    "result": "a b a"
+  },
+  {
+    "case": {
+      "template": "{{ '{b} {a}'.format(a=1, b=2) }}"
+    },
+    "result": "2 1"
+  },
+  {
+    "case": {
+      "template": "{{ '{:>5}'.format('a') }}"
+    },
+    "result": "    a"
+  },
+  {
+    "case": {
+      "template": "{{ '{:<5}|'.format('a') }}"
+    },
+    "result": "a    |"
+  },
+  {
+    "case": {
+      "template": "{{ '{:^5}|'.format('a') }}"
+    },
+    "result": "  a  |"
+  },
+  {
+    "case": {
+      "template": "{{ '{:*^7}'.format('ab') }}"
+    },
+    "result": "**ab***"
+  },
+  {
+    "case": {
+      "template": "{{ '{:05d}'.format(42) }}"
+    },
+    "result": "00042"
+  },
+  {
+    "case": {
+      "template": "{{ '{:+d}'.format(42) }}"
+    },
+    "result": "+42"
+  },
+  {
+    "case": {
+      "template": "{{ '{:,}'.format(1234567) }}"
+    },
+    "result": "1,234,567"
+  },
+  {
+    "case": {
+      "template": "{{ '{:_}'.format(1234567) }}"
+    },
+    "result": "1_234_567"
+  },
+  {
+    "case": {
+      "template": "{{ '{:.2f}'.format(3.14159) }}"
+    },
+    "result": "3.14"
+  },
+  {
+    "case": {
+      "template": "{{ '{:10.3f}|'.format(3.14159) }}"
+    },
+    "result": "     3.142|"
+  },
+  {
+    "case": {
+      "template": "{{ '{:e}'.format(12345.678) }}"
+    },
+    "result": "1.234568e+04"
+  },
+  {
+    "case": {
+      "template": "{{ '{:.3g}'.format(12345.678) }}"
+    },
+    "result": "1.23e+04"
+  },
+  {
+    "case": {
+      "template": "{{ '{:g}'.format(0.00001234) }}"
+    },
+    "result": "1.234e-05"
+  },
+  {
+    "case": {
+      "template": "{{ '{:%}'.format(0.25) }}"
+    },
+    "result": "25.000000%"
+  },
+  {
+    "case": {
+      "template": "{{ '{:.1%}'.format(0.256) }}"
+    },
+    "result": "25.6%"
+  },
+  {
+    "case": {
+      "template": "{{ '{:x}'.format(255) }}"
+    },
+    "result": "ff"
+  },
+  {
+    "case": {
+      "template": "{{ '{:#x}'.format(255) }}"
+    },
+    "result": "0xff"
+  },
+  {
+    "case": {
+      "template": "{{ '{:X}'.format(255) }}"
+    },
+    "result": "FF"
+  },
+  {
+    "case": {
+      "template": "{{ '{:o}'.format(8) }}"
+    },
+    "result": "10"
+  },
+  {
+    "case": {
+      "template": "{{ '{:#o}'.format(8) }}"
+    },
+    "result": "0o10"
+  },
+  {
+    "case": {
+      "template": "{{ '{:b}'.format(5) }}"
+    },
+    "result": "101"
+  },
+  {
+    "case": {
+      "template": "{{ '{:#010b}'.format(5) }}"
+    },
+    "result": "0b00000101"
+  },
+  {
+    "case": {
+      "template": "{{ '{:c}'.format(65) }}"
+    },
+    "result": "A"
+  },
+  {
+    "case": {
+      "template": "{{ '{:d}'.format(True) }}"
+    },
+    "result": "1"
+  },
+  {
+    "case": {
+      "template": "{{ '{!r}'.format('a') }}"
+    },
+    "result": "'a'"
+  },
+  {
+    "case": {
+      "template": "{{ '{!s}'.format('a') }}"
+    },
+    "result": "a"
+  },
+  {
+    "case": {
+      "template": "{{ '{!r:>6}'.format('a') }}"
+    },
+    "result": "   'a'"
+  },
+  {
+    "case": {
+      "template": "{{ '{}'.format(None) }}"
+    },
+    "result": "None"
+  },
+  {
+    "case": {
+      "template": "{{ '{}'.format(True) }}"
+    },
+    "result": "True"
+  },
+  {
+    "case": {
+      "template": "{{ '{}'.format(1.5) }}"
+    },
+    "result": "1.5"
+  },
+  {
+    "case": {
+      "template": "{{ '{}'.format(1.0) }}"
+    },
+    "result": "1.0"
+  },
+  {
+    "case": {
+      "template": "{{ '{}'.format([1, 'a']) }}"
+    },
+    "result": "[1, 'a']"
+  },
+  {
+    "case": {
+      "template": "{{ '{}'.format({'a': 1}) }}"
+    },
+    "result": "{'a': 1}"
+  },
+  {
+    "case": {
+      "template": "{{ '{0[0]}'.format([1, 2]) }}"
+    },
+    "result": "1"
+  },
+  {
+    "case": {
+      "template": "{{ '{0[a]}'.format({'a': 1}) }}"
+    },
+    "result": "1"
+  },
+  {
+    "case": {
+      "template": "{{ '{a[b]}'.format(a={'b': 2}) }}"
+    },
+    "result": "2"
+  },
+  {
+    "case": {
+      "template": "{{ '{a.b}'.format(a={'b': 2}) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: '_AnsibleLazyTemplateDict' object has no attribute 'b'"
+  },
+  {
+    "case": {
+      "template": "{{ '{{}}'.format() }}"
+    },
+    "result": "{}"
+  },
+  {
+    "case": {
+      "template": "{{ '{{{}}}'.format(1) }}"
+    },
+    "result": "{1}"
+  },
+  {
+    "case": {
+      "template": "{{ '{:{}}'.format('a', 5) }}"
+    },
+    "result": "a    "
+  },
+  {
+    "case": {
+      "template": "{{ '{:{w}}|'.format('a', w=3) }}"
+    },
+    "result": "a  |"
+  },
+  {
+    "case": {
+      "template": "{{ '{:{w}.{p}f}'.format(3.14159, w=8, p=2) }}"
+    },
+    "result": "    3.14"
+  },
+  {
+    "case": {
+      "template": "{{ '{}'.format() }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Replacement index 0 out of range for positional args tuple"
+  },
+  {
+    "case": {
+      "template": "{{ '{} {}'.format(1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Replacement index 1 out of range for positional args tuple"
+  },
+  {
+    "case": {
+      "template": "{{ '{a}'.format(b=1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: 'a'"
+  },
+  {
+    "case": {
+      "template": "{{ '{0}'.format() }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Replacement index 0 out of range for positional args tuple"
+  },
+  {
+    "case": {
+      "template": "{{ '{'.format() }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Single '{' encountered in format string"
+  },
+  {
+    "case": {
+      "template": "{{ '}'.format() }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Single '}' encountered in format string"
+  },
+  {
+    "case": {
+      "template": "{{ '{:d}'.format('a') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Unknown format code 'd' for object of type 'str'"
+  },
+  {
+    "case": {
+      "template": "{{ '{:s}'.format(1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Unknown format code 's' for object of type 'int'"
+  },
+  {
+    "case": {
+      "template": "{{ '{:.2f}'.format('a') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Unknown format code 'f' for object of type 'str'"
+  },
+  {
+    "case": {
+      "template": "{{ '{:>5}'.format(12) }}"
+    },
+    "result": "   12"
+  },
+  {
+    "case": {
+      "template": "{{ '{:5}'.format('ab') }}"
+    },
+    "result": "ab   "
+  },
+  {
+    "case": {
+      "template": "{{ '{:5}|'.format(12) }}"
+    },
+    "result": "   12|"
+  },
+  {
+    "case": {
+      "template": "{{ '{:<5}|'.format(1.5) }}"
+    },
+    "result": "1.5  |"
+  },
+  {
+    "case": {
+      "template": "{{ '{:=+6d}'.format(5) }}"
+    },
+    "result": "+    5"
+  },
+  {
+    "case": {
+      "template": "{{ '{: d}'.format(5) }}"
+    },
+    "result": " 5"
+  },
+  {
+    "case": {
+      "template": "{{ '{:.3}'.format('abcdef') }}"
+    },
+    "result": "abc"
+  },
+  {
+    "case": {
+      "template": "{{ '{:.0f}'.format(2.5) }}"
+    },
+    "result": "2"
+  },
+  {
+    "case": {
+      "template": "{{ '{:.0f}'.format(3.5) }}"
+    },
+    "result": "4"
+  },
+  {
+    "case": {
+      "template": "{{ '{:f}'.format(1) }}"
+    },
+    "result": "1.000000"
+  },
+  {
+    "case": {
+      "template": "{{ '{}'.format(1e16) }}"
+    },
+    "result": "1e+16"
+  },
+  {
+    "case": {
+      "template": "{{ '{}'.format(1e-5) }}"
+    },
+    "result": "1e-05"
+  },
+  {
+    "case": {
+      "template": "{{ '{}'.format(123456789.123456789) }}"
+    },
+    "result": "123456789.12345679"
+  },
+  {
+    "case": {
+      "template": "{{ '{!x}'.format(1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Unknown conversion specifier x"
+  },
+  {
+    "case": {
+      "template": "{{ '{:{}{}}'.format('a', '>', 3) }}"
+    },
+    "result": "  a"
+  },
+  {
+    "case": {
+      "template": "{{ 'x{0}y{0}z'.format('-') }}"
+    },
+    "result": "x-y-z"
+  },
+  {
+    "case": {
+      "template": "{{ '{:08.3f}'.format(-3.14159) }}"
+    },
+    "result": "-003.142"
+  },
+  {
+    "case": {
+      "template": "{{ '{:+.1e}'.format(1234.5) }}"
+    },
+    "result": "+1.2e+03"
+  },
+  {
+    "case": {
+      "template": "{{ '{:#.0f}'.format(3) }}"
+    },
+    "result": "3."
+  },
+  {
+    "case": {
+      "template": "{{ '{:,.2f}'.format(1234567.891) }}"
+    },
+    "result": "1,234,567.89"
+  },
+  {
+    "case": {
+      "template": "{{ '{:10,}|'.format(1234567) }}"
+    },
+    "result": " 1,234,567|"
+  },
+  {
+    "case": {
+      "template": "{{ '{:^+9,d}|'.format(1234567) }}"
+    },
+    "result": "+1,234,567|"
+  },
+  {
+    "case": {
+      "template": "{{ '{:s}'.format('a') }}"
+    },
+    "result": "a"
+  },
+  {
+    "case": {
+      "template": "{{ '{:>{}}'.format('ab', 4) }}"
+    },
+    "result": "  ab"
+  },
+  {
+    "case": {
+      "template": "{{ '{}'.format('é') }}"
+    },
+    "result": "é"
+  },
+  {
+    "case": {
+      "template": "{{ '{!a}'.format('é') }}"
+    },
+    "result": "'\\xe9'"
+  },
+  {
+    "case": {
+      "template": "{{ '{:>3}'.format('éé') }}"
+    },
+    "result": " éé"
+  },
+  {
+    "case": {
+      "template": "{{ '{:5.1}'.format('abc') }}"
+    },
+    "result": "a    "
+  },
+  {
+    "case": {
+      "template": "{{ '{:b}'.format(-5) }}"
+    },
+    "result": "-101"
+  },
+  {
+    "case": {
+      "template": "{{ '{:x}'.format(-255) }}"
+    },
+    "result": "-ff"
+  },
+  {
+    "case": {
+      "template": "{{ '{:010}'.format(-42) }}"
+    },
+    "result": "-000000042"
+  },
+  {
+    "case": {
+      "template": "{{ '{:<05}'.format(42) }}"
+    },
+    "result": "42000"
+  },
+  {
+    "case": {
+      "template": "{{ '{:>05}'.format(42) }}"
+    },
+    "result": "00042"
+  },
+  {
+    "case": {
+      "template": "{{ '{:^05}'.format(42) }}"
+    },
+    "result": "04200"
+  },
+  {
+    "case": {
+      "template": "{{ '{:z}'.format(1.5) }}"
+    },
+    "result": "1.5"
+  },
+  {
+    "case": {
+      "template": "{{ '{:,d}'.format(12) }}"
+    },
+    "result": "12"
+  },
+  {
+    "case": {
+      "template": "{{ '{:08}'.format('ab') }}"
+    },
+    "result": "ab000000"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.format_map({'a': 1}) }}"
+    },
+    "result": "abc"
+  },
+  {
+    "case": {
+      "template": "{{ '{a}-{b}'.format_map({'a': 1, 'b': 2}) }}"
+    },
+    "result": "1-2"
+  },
+  {
+    "case": {
+      "template": "{{ '{c}'.format_map({'a': 1}) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: 'c'"
+  },
+  {
+    "case": {
+      "template": "{{ 'a'.nope() }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': object of type 'str' has no attribute 'nope'"
+  },
+  {
+    "case": {
+      "template": "{{ 'a'.nope }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': object of type 'str' has no attribute 'nope'"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.translate({97: 'x'}) }}"
+    },
+    "result": "xbc"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.translate('abc'.maketrans('ab', 'xy')) }}"
+    },
+    "result": "xyc"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.translate('abc'.maketrans('ab', 'xy', 'c')) }}"
+    },
+    "result": "xy"
+  },
+  {
+    "case": {
+      "template": "{{ 'x'.maketrans('a') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: if you give only one argument to maketrans it must be a dict"
+  },
+  {
+    "case": {
+      "template": "{{ 'x'.maketrans('ab', 'x') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: the first two maketrans arguments must have equal length"
+  },
+  {
+    "case": {
+      "template": "{{ name.upper() }}",
+      "vars": {
+        "name": "web-01"
+      }
+    },
+    "result": "WEB-01"
+  },
+  {
+    "case": {
+      "template": "{{ name.split('-')[0] }}",
+      "vars": {
+        "name": "web-01"
+      }
+    },
+    "result": "web"
+  },
+  {
+    "case": {
+      "template": "{{ name.rsplit('-', 1)[-1] }}",
+      "vars": {
+        "name": "a-b-c"
+      }
+    },
+    "result": "c"
+  },
+  {
+    "case": {
+      "template": "{{ (name.split('-') | last).zfill(4) }}",
+      "vars": {
+        "name": "web-1"
+      }
+    },
+    "result": "0001"
+  },
+  {
+    "case": {
+      "template": "{{ ' a, b '.split(',') | map('trim') | list }}"
+    },
+    "result": [
+      "a",
+      "b"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ nope.split(',') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': 'nope' is undefined"
+  },
+  {
+    "case": {
+      "template": "{{ 'a'.split(nope) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': 'nope' is undefined"
+  },
+  {
+    "case": {
+      "template": "{{ 'a,b'.split(',')[1].upper() }}"
+    },
+    "result": "B"
+  },
+  {
+    "case": {
+      "template": "{{ \"{} is {}\".format(name, 3) }}",
+      "vars": {
+        "name": "x"
+      }
+    },
+    "result": "x is 3"
+  },
+  {
+    "case": {
+      "template": "{{ \"%s\".join(['a', 'b']) }}"
+    },
+    "result": "a%sb"
+  },
+  {
+    "case": {
+      "template": "{{ items | map('upper') | join(',') }}",
+      "vars": {
+        "items": [
+          "a",
+          "b"
+        ]
+      }
+    },
+    "result": "A,B"
+  },
+  {
+    "case": {
+      "template": "{{ path.rpartition('/')[2] }}",
+      "vars": {
+        "path": "/etc/ssh/sshd_config"
+      }
+    },
+    "result": "sshd_config"
+  },
+  {
+    "case": {
+      "template": "{{ path.rpartition('/')[0] }}",
+      "vars": {
+        "path": "/etc/ssh/sshd_config"
+      }
+    },
+    "result": "/etc/ssh"
+  },
+  {
+    "case": {
+      "template": "{{ line.partition('=')[2].strip() }}",
+      "vars": {
+        "line": "key = value "
+      }
+    },
+    "result": "value"
+  },
+  {
+    "case": {
+      "template": "{{ host.startswith(('web', 'db')) }}",
+      "vars": {
+        "host": "db-2"
+      }
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ host.endswith('.example.com') }}",
+      "vars": {
+        "host": "a.example.com"
+      }
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ '{:>{w}}'.format(name, w=width) }}",
+      "vars": {
+        "name": "ab",
+        "width": 5
+      }
+    },
+    "result": "   ab"
+  },
+  {
+    "case": {
+      "template": "{{ '{:{}.{}f}'.format(3.14159, 8, 2) }}"
+    },
+    "result": "    3.14"
+  },
+  {
+    "case": {
+      "template": "{{ '{0:>{1}}'.format('a', 4) }}"
+    },
+    "result": "   a"
+  },
+  {
+    "case": {
+      "template": "{{ '{:s}'.format(name) }}",
+      "vars": {
+        "name": "ab"
+      }
+    },
+    "result": "ab"
+  },
+  {
+    "case": {
+      "template": "{{ '{} {}'.format(*pair) }}",
+      "vars": {
+        "pair": [
+          "a",
+          "b"
+        ]
+      }
+    },
+    "result": "a b"
+  },
+  {
+    "case": {
+      "template": "{{ '{x}'.format(**kv) }}",
+      "vars": {
+        "kv": {
+          "x": 1
+        }
+      }
+    },
+    "result": "1"
   }
 ]
