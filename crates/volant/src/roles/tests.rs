@@ -394,3 +394,29 @@ fn a_missing_directory_is_not_looked_into() {
     let role = load(&tmp.path().join("roles/bare"), "bare", &selector).unwrap();
     assert!(role.defaults.is_empty() && role.handlers.is_empty());
 }
+
+/// `meta/argument_specs` with no extension is read only beside a `.yml`, `.yaml` or `.json`
+/// one, and then wins over it, as `_load_argument_specs` of ansible-core 2.19.12 does.
+#[rstest]
+#[case(&["argument_specs"], None)]
+#[case(&["argument_specs.yml"], Some("from-yml"))]
+#[case(&["argument_specs", "argument_specs.yml"], Some("from-bare"))]
+fn argument_specs_are_read_the_way_the_reference_reads_them(
+    #[case] present: &[&str],
+    #[case] want: Option<&str>,
+) {
+    let tmp = scratch();
+    let role = tmp.path().join("rr");
+    std::fs::create_dir_all(role.join("meta")).unwrap();
+    for name in present {
+        let from = if name.contains('.') {
+            "from-yml"
+        } else {
+            "from-bare"
+        };
+        let text = format!("argument_specs:\n  main:\n    short_description: {from}\n");
+        std::fs::write(role.join("meta").join(name), text).unwrap();
+    }
+    let (_, description) = argument_spec(&role, "main").unwrap();
+    assert_eq!(description.as_deref(), want);
+}

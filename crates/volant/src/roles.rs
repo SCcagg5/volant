@@ -354,13 +354,14 @@ fn variables(role: &Path, name: &str, sub: &str, from: &str) -> anyhow::Result<M
     Ok(out)
 }
 
-/// The files of `meta/<from>`, which no entry names and so no entry can steer.
-fn meta_files(role: &Path, from: &str) -> anyhow::Result<Option<Vec<PathBuf>>> {
+/// The files of `meta/<from>`, which no entry names and so no entry can steer. `required` puts
+/// the name with no extension first, as the reference does when it passes `main`.
+fn meta_files(role: &Path, from: &str, required: bool) -> anyhow::Result<Option<Vec<PathBuf>>> {
     let name = role
         .file_name()
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     files(&Lookup {
-        required: false,
+        required,
         ..Lookup::named(role, &name, "meta", from, false)
     })
 }
@@ -368,7 +369,7 @@ fn meta_files(role: &Path, from: &str) -> anyhow::Result<Option<Vec<PathBuf>>> {
 /// `meta/main.yml`: the roles this one depends on, whether two identical entries run twice, and
 /// the collections its tasks search.
 pub(crate) fn meta(role: &Path) -> anyhow::Result<(Vec<RoleEntry>, bool, Vec<String>)> {
-    let Some(files) = meta_files(role, "main")? else {
+    let Some(files) = meta_files(role, "main", false)? else {
         return Ok((Vec::new(), false, Vec::new()));
     };
     let mut dependencies = Vec::new();
@@ -415,7 +416,17 @@ pub(crate) fn meta(role: &Path) -> anyhow::Result<(Vec<RoleEntry>, bool, Vec<Str
 type ArgumentSpec = (Option<Map<String, Value>>, Option<String>);
 
 fn argument_spec(role: &Path, entry: &str) -> anyhow::Result<ArgumentSpec> {
-    let Some(files) = meta_files(role, "argument_specs")? else {
+    // `_load_argument_specs` of ansible-core 2.19.12 reads the file only when one of
+    // `argument_specs.yml`, `.yaml` or `.json` exists, then looks it up by name, so a bare
+    // `argument_specs` wins beside one of them and is never read alone.
+    let base = role.join("meta");
+    if ![".yml", ".yaml", ".json"]
+        .iter()
+        .any(|ext| base.join(format!("argument_specs{ext}")).exists())
+    {
+        return Ok((None, None));
+    }
+    let Some(files) = meta_files(role, "argument_specs", true)? else {
         return Ok((None, None));
     };
     for file in files {
