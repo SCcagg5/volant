@@ -177,7 +177,7 @@ fn int(value: Cow<'_, str>) -> Result<Yaml<'_>, String> {
     }
     let text = match (signed, wide) {
         (Some(v), _) => Some(v.to_string()),
-        (None, Some((base, digits))) => to_decimal(base, digits, negative),
+        (None, Some((base, digits))) => to_decimal(base, digits, negative)?,
         (None, None) => None,
     };
     Ok(text.map_or_else(
@@ -205,13 +205,44 @@ pub(super) fn wide_digits<'a>(tag: &Tag, inner: &'a Yaml<'_>) -> Option<&'a str>
     }
 }
 
-/// The decimal text of `digits` written in `base`, for a number too wide for `i128`. Schoolbook
-/// multiplication on limbs of nine decimal digits: the cost is the square of the length.
-fn to_decimal(base: u32, digits: &str, negative: bool) -> Option<String> {
+/// Python 3.11 and later refuse to turn an integer of more than this many decimal digits into
+/// text, or text of that many digits into an integer.
+const MAX_DIGITS: usize = 4300;
+
+fn too_many_digits(count: usize) -> String {
+    format!(
+        "Exceeds the limit ({MAX_DIGITS} digits) for integer string conversion: value has {count} digits; use sys.set_int_max_str_digits() to increase the limit"
+    )
+}
+
+/// The decimal text of `digits` written in `base`, for a number too wide for `i128`; `None` when
+/// a character is not a digit of `base`. A decimal number is already text. For the other bases
+/// the work is schoolbook multiplication on limbs of nine decimal digits, the square of the
+/// length, so a number past Python's limit is refused before any work is done.
+fn to_decimal(base: u32, digits: &str, negative: bool) -> Result<Option<String>, String> {
     const LIMB: u64 = 1_000_000_000;
+    let digits = digits.trim();
+    let sign = if negative { "-" } else { "" };
+    if base == 10 {
+        if !digits.bytes().all(|b| b.is_ascii_digit()) {
+            return Ok(None);
+        }
+        let digits = digits.trim_start_matches('0');
+        if digits.len() > MAX_DIGITS {
+            return Err(too_many_digits(digits.len()));
+        }
+        return Ok(Some(format!("{sign}{digits}")));
+    }
+    // Each digit of `base` is at most four bits; four bits are at most 1.21 decimal digits.
+    if digits.len() * 5 / 4 > MAX_DIGITS + 1000 {
+        return Err(too_many_digits(digits.len() * 5 / 4));
+    }
     let mut limbs: Vec<u64> = vec![0];
-    for c in digits.trim().chars() {
-        let mut carry = u64::from(c.to_digit(base)?);
+    for c in digits.chars() {
+        let Some(digit) = c.to_digit(base) else {
+            return Ok(None);
+        };
+        let mut carry = u64::from(digit);
         for limb in &mut limbs {
             let next = *limb * u64::from(base) + carry;
             *limb = next % LIMB;
@@ -221,16 +252,18 @@ fn to_decimal(base: u32, digits: &str, negative: bool) -> Option<String> {
             limbs.push(carry);
         }
     }
-    let mut text = String::new();
-    if negative {
-        text.push('-');
-    }
+    let mut text = String::from(sign);
     let mut rest = limbs.iter().rev();
-    text.push_str(&rest.next()?.to_string());
-    for limb in rest {
-        write!(text, "{limb:09}").ok()?;
+    if let Some(first) = rest.next() {
+        write!(text, "{first}").ok();
     }
-    Some(text)
+    for limb in rest {
+        write!(text, "{limb:09}").ok();
+    }
+    if text.len() - sign.len() > MAX_DIGITS {
+        return Err(too_many_digits(text.len() - sign.len()));
+    }
+    Ok(Some(text))
 }
 
 /// Python's `int(text, base)` for the digits the resolver lets through: the number, or `None`

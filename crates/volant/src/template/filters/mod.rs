@@ -369,7 +369,16 @@ fn to_int(value: Value, default_value: Option<i64>) -> Result<Value, Error> {
         serde_json::Value::Bool(b) => Value::from(i64::from(b)),
         serde_json::Value::String(s) => {
             let text = s.trim();
-            integer(text).unwrap_or_else(|| text.parse().map_or(Value::from(fallback), truncated))
+            // Python's int() of text refuses more than 4300 digits; the filter then answers
+            // its default, as it does for any text int() refuses.
+            let parsed = integer(text).map(|n| {
+                if text.trim_start_matches(['-', '+']).len() > 4300 {
+                    Value::from(fallback)
+                } else {
+                    n
+                }
+            });
+            parsed.unwrap_or_else(|| text.parse().map_or(Value::from(fallback), truncated))
         }
         _ => Value::from(fallback),
     })

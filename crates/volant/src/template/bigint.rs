@@ -26,6 +26,32 @@ struct BigInt {
 }
 
 impl BigInt {
+    /// The size of the number, ignoring its sign, against the digits of another.
+    fn magnitude_cmp(&self, digits: &str) -> Ordering {
+        self.digits
+            .len()
+            .cmp(&digits.len())
+            .then_with(|| self.digits.as_str().cmp(digits))
+    }
+
+    fn order(&self, other: &Self) -> Ordering {
+        let by_size = self.magnitude_cmp(&other.digits);
+        match (self.negative, other.negative) {
+            (false, true) => Ordering::Greater,
+            (true, false) => Ordering::Less,
+            (false, false) => by_size,
+            (true, true) => by_size.reverse(),
+        }
+    }
+
+    fn sign(&self) -> Ordering {
+        if self.negative {
+            Ordering::Less
+        } else {
+            Ordering::Greater
+        }
+    }
+
     fn number(&self) -> serde_json::Number {
         self.to_string()
             .parse()
@@ -52,18 +78,7 @@ impl Object for BigInt {
     }
 
     fn custom_cmp(self: &Arc<Self>, other: &DynObject) -> Option<Ordering> {
-        let other = other.downcast_ref::<Self>()?;
-        let by_size = self
-            .digits
-            .len()
-            .cmp(&other.digits.len())
-            .then_with(|| self.digits.cmp(&other.digits));
-        Some(match (self.negative, other.negative) {
-            (false, true) => Ordering::Greater,
-            (true, false) => Ordering::Less,
-            (false, false) => by_size,
-            (true, true) => by_size.reverse(),
-        })
+        Some(self.order(other.downcast_ref::<Self>()?))
     }
 }
 
@@ -85,6 +100,46 @@ pub(crate) fn integer(text: &str) -> Option<Value> {
     }
     let digits = body.trim_start_matches('0').to_string();
     Some(Value::from_object(BigInt { negative, digits }))
+}
+
+/// `<` between a wide integer and another number, as Python orders them, exactly: `None` when
+/// neither side is a wide integer or the other side is no number, `Some(None)` against `nan`.
+pub(crate) fn order(a: &Value, b: &Value) -> Option<Option<Ordering>> {
+    match (
+        a.downcast_object_ref::<BigInt>(),
+        b.downcast_object_ref::<BigInt>(),
+    ) {
+        (Some(x), Some(y)) => Some(Some(x.order(y))),
+        (Some(x), None) => against(x, b),
+        (None, Some(y)) => against(y, a).map(|order| order.map(Ordering::reverse)),
+        (None, None) => None,
+    }
+}
+
+/// A wide integer against a value that is no wide integer. Every native integer and every float
+/// below 2^127 in size is smaller in size than it, so its sign decides; a float past that holds
+/// no fraction, and `{:.0}` prints its digits exactly.
+fn against(big: &BigInt, other: &Value) -> Option<Option<Ordering>> {
+    match other.kind() {
+        ValueKind::Bool => Some(Some(big.sign())),
+        ValueKind::Number if other.is_integer() => Some(Some(big.sign())),
+        ValueKind::Number => {
+            let f = f64::try_from(other.clone()).ok()?;
+            if f.is_nan() {
+                return Some(None);
+            }
+            let same_sign = f.is_sign_negative() == big.negative;
+            if !same_sign || f.abs() < 2f64.powi(127) {
+                return Some(Some(big.sign()));
+            }
+            if f.is_infinite() {
+                return Some(Some(big.sign().reverse()));
+            }
+            let size = big.magnitude_cmp(&format!("{:.0}", f.abs()));
+            Some(Some(if big.negative { size.reverse() } else { size }))
+        }
+        _ => None,
+    }
 }
 
 /// Whether `value` is an integer too wide for a native template number.

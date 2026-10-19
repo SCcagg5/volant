@@ -331,6 +331,60 @@ fn an_integer_wider_than_a_word_keeps_every_digit() {
     assert_loads_as(&borrowed);
 }
 
+/// Python 3.11 and later refuse an integer of more than 4300 decimal digits, and PyYAML's
+/// conversion stops there. A hexadecimal number of any size would cost the square of its length
+/// to turn into digits, so it is refused at the same limit without the work.
+#[test]
+fn an_integer_past_pythons_digit_limit_is_refused() {
+    for text in [
+        format!(
+            "a: {}
+",
+            "9".repeat(4301)
+        ),
+        format!(
+            "a: 0x{}
+",
+            "f".repeat(3700)
+        ),
+        format!(
+            "a: 0x{}
+",
+            "f".repeat(2_000_000)
+        ),
+        format!(
+            "a: 0b{}
+",
+            "1".repeat(20_000)
+        ),
+    ] {
+        let err = format!("{:#}", load(&text, "t.yml").unwrap_err());
+        assert!(err.contains("Exceeds the limit (4300 digits)"), "{err}");
+    }
+    assert!(
+        load(
+            &format!(
+                "a: {}
+",
+                "9".repeat(4300)
+            ),
+            "t.yml"
+        )
+        .is_ok()
+    );
+    assert!(
+        load(
+            &format!(
+                "a: 0x{}
+",
+                "f".repeat(3500)
+            ),
+            "t.yml"
+        )
+        .is_ok()
+    );
+}
+
 /// A date and a datetime have no counterpart in the value model: they load as the string that
 /// ansible-core prints for them.
 #[test]
