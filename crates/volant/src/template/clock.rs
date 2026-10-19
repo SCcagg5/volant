@@ -183,7 +183,8 @@ fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
 /// The local calendar fields of an instant, microseconds left at 0.
 #[cfg(unix)]
 fn local_fields(secs: i64) -> Option<DateTime> {
-    let seconds = libc::time_t::try_from(secs).ok()?;
+    // `time_t` is not named: `libc` deprecates the alias on musl.
+    let seconds = secs as _;
     // SAFETY: `tm` is plain data that `localtime_r` fills, and `seconds` is only read.
     let tm = unsafe {
         let mut tm: libc::tm = std::mem::zeroed();
