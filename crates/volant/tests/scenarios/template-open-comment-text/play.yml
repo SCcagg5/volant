@@ -1,0 +1,35 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    from_vars: "{{ 'x{#' }}"
+    plus: "{{ 'a{#+' }}"
+  tasks:
+    - name: play variables
+      debug:
+        msg: "{{ [from_vars, plus] | to_json }}"
+    - name: set_fact
+      set_fact:
+        f1: "{{ 'x{#' }}"
+        f2: "{{ '{#' }}"
+        f3: "{{ 'y{#-' }}"
+        f4: "{{ ['p{#', {'k': 'q{#'}] }}"
+    - name: read facts
+      debug:
+        msg: "{{ [f1, f2, f3, f4] | to_json }} {{ f1 }}|{{ f2 }}|{{ f3 }}"
+    - name: registered results
+      command: cat "{{ playbook_dir }}/{{ item }}"
+      register: out
+      loop: [p1.txt, p2.txt, p3.txt]
+    - name: read results
+      debug:
+        msg: "{{ out.results | map(attribute='stdout') | list | to_json }}"
+    - name: copy of a result
+      set_fact:
+        kept: "{{ out.results[0].stdout }}"
+    - name: read the copy
+      debug:
+        msg: "{{ kept | to_json }}"
+    - name: loop items
+      debug:
+        msg: "{{ item | to_json }}"
+      loop: "{{ ['x{#', '{#', 'z{#-'] }}"

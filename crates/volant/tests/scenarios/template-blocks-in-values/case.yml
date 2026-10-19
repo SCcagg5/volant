@@ -1,0 +1,4 @@
+# Statement blocks and comments in variables, facts, arguments, loops and extra variables, and the
+# lines a block scalar of them renders to: trim_blocks decides how many.
+args: [-i, inv.ini, -e, '{"xv_text": "{% for i in [1, 2] %}{{ i }},{% endfor %}", "xv_list": "{% set a = [1, 2] %}{{ a }}"}', play.yml]
+needs: ["ansible-core"]
