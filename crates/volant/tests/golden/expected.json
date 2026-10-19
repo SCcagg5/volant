@@ -9665,5 +9665,251 @@
       "template": "{{ '%5.1f' | format(2.25) }}"
     },
     "result": "  2.2"
+  },
+  {
+    "case": {
+      "template": "{{ '%d' | format(12345678901234567890) }}"
+    },
+    "result": "12345678901234567890"
+  },
+  {
+    "case": {
+      "template": "{{ '%x' | format(18446744073709551615) }}"
+    },
+    "result": "ffffffffffffffff"
+  },
+  {
+    "case": {
+      "template": "{{ '%o' | format(18446744073709551615) }}"
+    },
+    "result": "1777777777777777777777"
+  },
+  {
+    "case": {
+      "template": "{{ '%e' | format(18446744073709551615) }}"
+    },
+    "result": "1.844674e+19"
+  },
+  {
+    "case": {
+      "template": "{{ '%f' | format(18446744073709551615) }}"
+    },
+    "result": "18446744073709551616.000000"
+  },
+  {
+    "case": {
+      "template": "{{ '%g' | format(18446744073709551615) }}"
+    },
+    "result": "1.84467e+19"
+  },
+  {
+    "case": {
+      "template": "{{ '%d' % 18446744073709551615 }}"
+    },
+    "result": "18446744073709551615"
+  },
+  {
+    "case": {
+      "template": "{{ 18446744073709551615 % 10 }}"
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ 18446744073709551615 % 7 }}"
+    },
+    "result": 1
+  },
+  {
+    "case": {
+      "template": "{{ -18446744073709551615 % 10 }}"
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ 18446744073709551615 % -3 }}"
+    },
+    "result": 0
+  },
+  {
+    "case": {
+      "template": "{{ '%d' % (1099511627776 * 1099511627776) }}"
+    },
+    "result": "1208925819614629174706176"
+  },
+  {
+    "case": {
+      "template": "{{ '%x' % (1099511627776 * 1099511627776) }}"
+    },
+    "result": "100000000000000000000"
+  },
+  {
+    "case": {
+      "template": "{{ '%d' | format(1099511627776 * 1099511627776) }}"
+    },
+    "result": "1208925819614629174706176"
+  },
+  {
+    "case": {
+      "template": "{{ '%s' | format(18446744073709551615 + 1) }}"
+    },
+    "result": "18446744073709551616"
+  },
+  {
+    "case": {
+      "template": "{{ '%d' | format(0 - 18446744073709551615) }}"
+    },
+    "result": "-18446744073709551615"
+  },
+  {
+    "case": {
+      "template": "{{ '%d' % (2 ** 70) }}"
+    },
+    "result": "1180591620717411303424"
+  },
+  {
+    "case": {
+      "template": "{{ '%e' % (2 ** 70) }}"
+    },
+    "result": "1.180592e+21"
+  },
+  {
+    "case": {
+      "template": "{{ '%d' % -18446744073709551615 }}"
+    },
+    "result": "-18446744073709551615"
+  },
+  {
+    "case": {
+      "template": "{{ '%x' % 18446744073709551615 }}"
+    },
+    "result": "ffffffffffffffff"
+  },
+  {
+    "case": {
+      "template": "{{ '%#X' % 18446744073709551615 }}"
+    },
+    "result": "0XFFFFFFFFFFFFFFFF"
+  },
+  {
+    "case": {
+      "template": "{{ '%s' % 18446744073709551615 }}"
+    },
+    "result": "18446744073709551615"
+  },
+  {
+    "case": {
+      "template": "{{ '%20d|' % 18446744073709551615 }}"
+    },
+    "result": "18446744073709551615|"
+  },
+  {
+    "case": {
+      "template": "{{ '%-25d|' % 18446744073709551615 }}"
+    },
+    "result": "18446744073709551615     |"
+  },
+  {
+    "case": {
+      "template": "{{ '%+d' % 18446744073709551615 }}"
+    },
+    "result": "+18446744073709551615"
+  },
+  {
+    "case": {
+      "template": "{{ '%.30d' % 18446744073709551615 }}"
+    },
+    "result": "000000000018446744073709551615"
+  },
+  {
+    "case": {
+      "template": "{{ '%i' % (1 + 18446744073709551615) }}"
+    },
+    "result": "18446744073709551616"
+  },
+  {
+    "case": {
+      "template": "{{ '%18446744073709551615d' % 1 }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: width too big"
+  },
+  {
+    "case": {
+      "template": "{{ '%.18446744073709551615f' % 1.5 }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: precision too big"
+  },
+  {
+    "case": {
+      "template": "{{ '%100000000000000000000d' % 1 }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: width too big"
+  },
+  {
+    "case": {
+      "template": "{{ '%.100000000000000000000f' % 1.5 }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: precision too big"
+  },
+  {
+    "case": {
+      "template": "{{ '%*d' % (100000000000000000000, 1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Python int too large to convert to C ssize_t"
+  },
+  {
+    "case": {
+      "template": "{{ '%.*f' % (100000000000000000000, 1.5) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Python int too large to convert to C int"
+  },
+  {
+    "case": {
+      "template": "{{ ('%.70000f' % 1.5) | length }}"
+    },
+    "result": 70002
+  },
+  {
+    "case": {
+      "template": "{{ ('%.70000e' % 1.5) | length }}"
+    },
+    "result": 70006
+  },
+  {
+    "case": {
+      "template": "{{ ('%.70000g' % 1.5) | length }}"
+    },
+    "result": 3
+  },
+  {
+    "case": {
+      "template": "{{ ('%#.70000g' % 1.5) | length }}"
+    },
+    "result": 70001
+  },
+  {
+    "case": {
+      "template": "{{ ('%.70000s' % 'abc') | length }}"
+    },
+    "result": 3
+  },
+  {
+    "case": {
+      "template": "{{ ('%.70000d' % 5) | length }}"
+    },
+    "result": 70000
+  },
+  {
+    "case": {
+      "template": "{{ ('%.70000f' | format(1.5)) | length }}"
+    },
+    "result": 70002
+  },
+  {
+    "case": {
+      "template": "{{ ('{:.70000f}'.format(1.5)) | length }}"
+    },
+    "result": 70002
   }
 ]
