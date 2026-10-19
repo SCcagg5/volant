@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use crate::executor::DEFAULT_CONNECT_TIMEOUT;
 
+mod locate;
 mod parse;
 mod paths;
 mod settings;
@@ -186,7 +187,11 @@ impl Config {
     /// cannot open is worth a line, and a warning changes no exit code.
     #[expect(clippy::too_many_lines)]
     pub fn load() -> anyhow::Result<Config> {
-        let mut config = match locate() {
+        let located = locate::current();
+        if located.skipped {
+            locate::warn_once();
+        }
+        let mut config = match located.path {
             Some(path) => match std::fs::read_to_string(&path) {
                 Ok(text) => parse(
                     &text,
@@ -415,18 +420,10 @@ pub(crate) fn task_debugger() -> bool {
     TASK_DEBUGGER.load(Ordering::Relaxed)
 }
 
-/// `ANSIBLE_CONFIG`, then `./ansible.cfg`, `~/.ansible.cfg`, `/etc/ansible/ansible.cfg`.
+/// `ANSIBLE_CONFIG`, then `./ansible.cfg` unless the working directory is world-writable,
+/// `~/.ansible.cfg`, `/etc/ansible/ansible.cfg`.
 pub(crate) fn locate() -> Option<PathBuf> {
-    if let Ok(explicit) = std::env::var("ANSIBLE_CONFIG") {
-        let p = PathBuf::from(explicit);
-        return p.is_file().then_some(p);
-    }
-    let mut candidates = vec![PathBuf::from("ansible.cfg")];
-    if let Ok(home) = std::env::var("HOME") {
-        candidates.push(PathBuf::from(home).join(".ansible.cfg"));
-    }
-    candidates.push(PathBuf::from("/etc/ansible/ansible.cfg"));
-    candidates.into_iter().find(|p| p.is_file())
+    locate::current().path
 }
 
 #[cfg(test)]
