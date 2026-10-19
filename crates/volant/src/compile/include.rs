@@ -7,11 +7,12 @@ use std::sync::Arc;
 use anyhow::bail;
 use serde_json::{Map, Value};
 
-use crate::playbook::PlayTask;
+use crate::playbook::{Apply, PlayTask, TaskFileRefused};
 use crate::roles::{RoleEntry, RoleVars};
 
 use super::builder::{Builder, sorted};
 use super::flatten::unknown_options;
+use super::inherit::merge;
 use super::model::{BlockSpan, Compiled, IncludeParams, Step};
 /// What one host asked for at an include step, for one item of its loop.
 #[derive(Debug, Clone)]
@@ -86,12 +87,22 @@ pub(crate) fn expand_include(
     // keywords. What the statement hands down does not travel in the merge: it is a variable
     // layer of its own, laid on by `graft` at the precedence measured for it, and putting it here
     // as well would put it under the host's facts instead of over them.
-    let inherited = parent
+    let mut inherited = parent
         .origin
         .inherited
         .as_deref()
         .unwrap_or(&base.inherited)
         .clone();
+    // `apply:` is a block the reference puts between the statement and what it brings in, so its
+    // keywords are one more layer around those tasks and the statement's own are still not.
+    match &parent.task.apply {
+        Some(Apply::Keywords(keywords)) => inherited = merge(&inherited, keywords),
+        // Raised here and not at load: measured, the statement's banner shows first.
+        Some(Apply::Refused(sentence)) => {
+            return Err(anyhow::Error::new(TaskFileRefused(sentence.to_string())));
+        }
+        None => {}
+    }
     let mut builder = Builder {
         steps: Vec::new(),
         blocks: Vec::new(),
@@ -245,7 +256,9 @@ pub(crate) fn include_role_entry(args: &Map<String, Value>) -> anyhow::Result<Ro
     })
 }
 
-/// The arguments `include_role` takes, and the three it takes that this release cannot honour.
+/// The arguments `include_role` takes, and the two it takes that this release cannot honour.
+///
+/// `apply` is read with the statement and put on what it brings in by [`expand_include`].
 ///
 /// `public: true` is measured to export the role's `defaults` and `vars` to everything behind the
 /// include, where the default `public: false` keeps them to the role's own tasks - so honouring it
@@ -269,7 +282,7 @@ pub(super) fn include_role_options(args: &Map<String, Value>) -> anyhow::Result<
             "rolespec_validate",
             "apply",
         ],
-        &["allow_duplicates", "rolespec_validate", "apply"],
+        &["allow_duplicates", "rolespec_validate"],
     )?;
     refuse_public("include_role", args)
 }
@@ -293,15 +306,10 @@ pub(super) fn refuse_public(statement: &str, args: &Map<String, Value>) -> anyho
     }
 }
 
-/// `include_tasks` takes a file name and nothing else. `apply:` puts keywords on everything the
-/// statement brings in, which this release has no layer for, so it is refused by its own name.
+/// `include_tasks` takes a file name and `apply`, which [`expand_include`] puts on what the
+/// statement brings in.
 pub(super) fn include_options(statement: &str, args: &Map<String, Value>) -> anyhow::Result<()> {
-    unknown_options(
-        statement,
-        args,
-        &["file", "_raw_params", "apply"],
-        &["apply"],
-    )
+    unknown_options(statement, args, &["file", "_raw_params", "apply"], &[])
 }
 
 /// Everything an `include_vars` can be told, and the seven it can be told that this release

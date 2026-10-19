@@ -5,7 +5,7 @@ use std::sync::Arc;
 use rstest::rstest;
 use serde_json::{Map, Value, json};
 
-use super::include::include_role_options;
+use super::include::{include_options, include_role_options};
 use super::*;
 use crate::inventory::Host;
 use crate::playbook::{Debugger, PlayTask, parse};
@@ -1153,4 +1153,17 @@ fn public_is_refused_by_value_and_not_by_presence() {
     // Not knowing is not the same as being told no: an export this release cannot do is
     // refused rather than guessed at.
     assert!(asked(json!("{{ maybe }}")).is_err());
+}
+
+/// `include_tasks` takes the file, its free-form spelling and `apply`, and refuses any other key.
+#[rstest]
+#[case::file(json!({"file": "a.yml"}), true)]
+#[case::raw(json!({"_raw_params": "a.yml"}), true)]
+#[case::apply(json!({"file": "a.yml", "apply": {"tags": ["t"]}}), true)]
+#[case::typo(json!({"file": "a.yml", "typo": 1}), false)]
+fn include_tasks_takes_file_and_apply(#[case] args: Value, #[case] accepted: bool) {
+    let Value::Object(args) = args else {
+        panic!("arguments are a mapping");
+    };
+    assert_eq!(include_options("include_tasks", &args).is_ok(), accepted);
 }

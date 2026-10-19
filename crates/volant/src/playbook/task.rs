@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Parsing a block and a task.
 
+use std::sync::Arc;
+
 use anyhow::{Context, anyhow, bail};
 use saphyr::{Scalar, Yaml};
 use serde_json::{Map, Value};
@@ -16,7 +18,7 @@ use super::keywords::{
     META, action_statement, boolean, connect_keywords, delegation, escalation, flag,
 };
 use super::load::task_list;
-use super::model::{Block, PlayTask};
+use super::model::{Apply, Block, PlayTask};
 use super::origin::{key_origin, task_origin, value_origin};
 use super::play::{collections, environment, module_defaults};
 /// A block, with its three sections parsed recursively and its inherited keywords read into a
@@ -26,13 +28,28 @@ use super::play::{collections, environment, module_defaults};
 /// on a task and not on a block - `loop`, `register`, `until` - is refused in the reference's
 /// words instead of being taken for a module or quietly ignored.
 pub(super) fn parse_block(yaml: &Yaml) -> anyhow::Result<Block> {
-    let map = yaml
-        .as_mapping()
-        .ok_or_else(|| anyhow!("a block must be a mapping"))?;
+    if yaml.as_mapping().is_none() {
+        bail!("a block must be a mapping");
+    }
     let name = field(yaml, "name")
         .and_then(Yaml::as_str)
         .unwrap_or("block")
         .to_string();
+    let keywords = block_keywords(yaml, &name)?;
+    Ok(Block {
+        body: task_list(field(yaml, "block"), "block")?,
+        rescue: task_list(field(yaml, "rescue"), "rescue")?,
+        always: task_list(field(yaml, "always"), "always")?,
+        keywords,
+    })
+}
+
+/// The keywords a block's tasks inherit, read into a module-less [`PlayTask`], with every key
+/// checked against the reference's own Block attribute list.
+fn block_keywords(yaml: &Yaml, name: &str) -> anyhow::Result<PlayTask> {
+    let map = yaml
+        .as_mapping()
+        .ok_or_else(|| anyhow!("a block must be a mapping"))?;
     for (key, _) in map {
         let key = key
             .as_str()
@@ -46,37 +63,66 @@ pub(super) fn parse_block(yaml: &Yaml) -> anyhow::Result<Block> {
     let context = format!("block '{name}': ");
     let (r#become, become_user) = escalation(yaml, &context)?;
     let (delegate_facts, delegate_to) = delegation(yaml, &context)?;
-    Ok(Block {
-        body: task_list(field(yaml, "block"), "block")?,
-        rescue: task_list(field(yaml, "rescue"), "rescue")?,
-        always: task_list(field(yaml, "always"), "always")?,
-        keywords: PlayTask {
-            name,
-            tags: tags(yaml, &context)?,
-            ignore_errors: flag(yaml, "ignore_errors")?,
-            timeout: timeout(yaml, &context)?,
-            throttle: throttle(yaml)?,
-            debugger: debugger(yaml, &context)?,
-            vars: mapping(yaml, "vars", &context)?,
-            when: conditions(yaml, "when", &context)?,
-            r#become,
-            become_user,
-            connect: connect_keywords(yaml, &context)?,
-            notify: names(yaml, "notify", &context)?,
-            no_log: boolean(yaml, "no_log")?,
-            environment: environment(yaml, &context)?,
-            module_defaults: module_defaults(yaml, &context)?,
-            collections: collections(yaml, &context)?,
-            check_mode: flag(yaml, "check_mode")?,
-            diff: flag(yaml, "diff")?,
-            run_once: boolean(yaml, "run_once")?,
-            any_errors_fatal: boolean(yaml, "any_errors_fatal")?,
-            ignore_unreachable: boolean(yaml, "ignore_unreachable")?,
-            delegate_facts,
-            delegate_to,
-            ..PlayTask::empty()
-        },
+    Ok(PlayTask {
+        name: name.to_string(),
+        tags: tags(yaml, &context)?,
+        ignore_errors: flag(yaml, "ignore_errors")?,
+        timeout: timeout(yaml, &context)?,
+        throttle: throttle(yaml)?,
+        debugger: debugger(yaml, &context)?,
+        vars: mapping(yaml, "vars", &context)?,
+        when: conditions(yaml, "when", &context)?,
+        r#become,
+        become_user,
+        connect: connect_keywords(yaml, &context)?,
+        notify: names(yaml, "notify", &context)?,
+        no_log: boolean(yaml, "no_log")?,
+        environment: environment(yaml, &context)?,
+        module_defaults: module_defaults(yaml, &context)?,
+        collections: collections(yaml, &context)?,
+        check_mode: flag(yaml, "check_mode")?,
+        diff: flag(yaml, "diff")?,
+        run_once: boolean(yaml, "run_once")?,
+        any_errors_fatal: boolean(yaml, "any_errors_fatal")?,
+        ignore_unreachable: boolean(yaml, "ignore_unreachable")?,
+        delegate_facts,
+        delegate_to,
+        ..PlayTask::empty()
     })
+}
+
+/// The `apply:` of an `include_tasks` or `include_role` statement.
+///
+/// Measured on ansible-core 2.19.12: the reference loads it as a block, so it takes every block
+/// keyword and nothing else, and an empty mapping is the same as none. A value that is not a
+/// mapping stops the load at exit 4. A key that is not a block keyword stops the run at exit 4
+/// when the statement runs, which is why it is kept as a sentence in [`Apply::Refused`].
+fn apply_of(module: &str, value: &Yaml, yaml: &Yaml) -> anyhow::Result<Option<Apply>> {
+    if !matches!(short_name(module), "include_tasks" | "include_role") {
+        return Ok(None);
+    }
+    let node =
+        field(value, "apply").or_else(|| field(yaml, "args").and_then(|a| field(a, "apply")));
+    let Some(node) = node else {
+        return Ok(None);
+    };
+    let Yaml::Mapping(map) = node else {
+        let kind = match node {
+            Yaml::Sequence(_) => "a list",
+            Yaml::Value(Scalar::String(_)) => "a string",
+            Yaml::Value(Scalar::Null) => "null",
+            Yaml::Value(Scalar::Boolean(_)) => "a boolean",
+            _ => "a number",
+        };
+        bail!("Expected a dict for apply but got {kind} instead");
+    };
+    if map.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(match block_keywords(node, "apply") {
+        Ok(keywords) => Apply::Keywords(Arc::new(keywords)),
+        Err(err) => Apply::Refused(format!("{err:#}").into()),
+    }))
 }
 
 /// One task. `handler` says whether the mapping is a handler, which is the one shape that may
@@ -285,6 +331,7 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
         loop_with = None;
     }
     let (r#become, become_user) = escalation(yaml, &context)?;
+    let apply = apply_of(&module, value, yaml)?;
     let (delegate_facts, mut delegate_to) = delegation(yaml, &context)?;
     // `local_action` runs on the controller whatever `delegate_to` says: measured, the line reads
     // `h1 -> localhost` with both written.
@@ -366,6 +413,7 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
         delegate_facts,
         delegate_to,
         origin: task_origin(map),
+        apply,
         value_origins,
     })
 }

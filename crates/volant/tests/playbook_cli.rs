@@ -4993,35 +4993,30 @@ fn an_include_statement_refuses_an_argument_it_cannot_honour() {
     }
 }
 
-/// `include_tasks` takes `file`, `_raw_params` and `apply`, and `apply` itself is refused: this
-/// release has no layer to put the keywords it carries on.
+/// `include_tasks` takes `file`, `_raw_params` and `apply`, and refuses any other key.
 #[test]
-fn include_tasks_refuses_apply_and_an_unknown_key() {
+fn include_tasks_refuses_an_unknown_key() {
     let dir = probe_dir("include-tasks-options");
     std::fs::write(dir.join("sub.yml"), "- name: T\n  command: echo hi\n")
         .expect("the probe include target is written");
-    for (body, message) in [
-        (
-            "- hosts: localhost\n  gather_facts: false\n  tasks:\n    - include_tasks:\n        file: sub.yml\n        apply:\n          become: true\n",
-            "'include_tasks' option 'apply'",
-        ),
-        (
-            "- hosts: localhost\n  gather_facts: false\n  tasks:\n    - include_tasks:\n        file: sub.yml\n        nosuchkey: true\n",
-            "Invalid options for include_tasks: nosuchkey",
-        ),
-    ] {
-        std::fs::write(dir.join("site.yml"), body).expect("the probe playbook is written");
-        let path = dir.join("site.yml");
-        let out = volant(&["playbook", &path.display().to_string()]);
-        let text = format!(
-            "{}{}",
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
-        );
-        assert_eq!(out.status.code(), Some(4), "{text}");
-        assert!(text.contains(message), "{text}");
-        assert!(!text.contains("PLAY ["), "nothing runs before it: {text}");
-    }
+    std::fs::write(
+        dir.join("site.yml"),
+        "- hosts: localhost\n  gather_facts: false\n  tasks:\n    - include_tasks:\n        file: sub.yml\n        nosuchkey: true\n",
+    )
+    .expect("the probe playbook is written");
+    let path = dir.join("site.yml");
+    let out = volant(&["playbook", &path.display().to_string()]);
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.status.code(), Some(4), "{text}");
+    assert!(
+        text.contains("Invalid options for include_tasks: nosuchkey"),
+        "{text}"
+    );
+    assert!(!text.contains("PLAY ["), "nothing runs before it: {text}");
     std::fs::remove_dir_all(&dir).expect("the probe directory is removed");
 }
 
