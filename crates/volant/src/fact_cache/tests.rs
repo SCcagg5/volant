@@ -165,3 +165,52 @@ fn the_reference_s_file_is_written_back_byte_for_byte() {
         expected
     );
 }
+
+/// A `set_fact` value the YAML loader accepts comes back from the file, though the writer doubles
+/// its depth past the recursion limit of `serde_json`.
+#[test]
+fn a_deeply_nested_fact_comes_back_from_the_file() {
+    let mut value = json!("x");
+    for _ in 0..254 {
+        value = json!([value]);
+    }
+    let facts = json!({"deep": tag(&value)});
+    let dir = tempfile::tempdir().unwrap();
+    cache(dir.path(), 0)
+        .write("h", facts.as_object().unwrap())
+        .unwrap();
+    let back = cache(dir.path(), 0).read("h").unwrap().unwrap();
+    assert_eq!(back["deep"], value);
+}
+
+/// A value too deep to read back is not written, so that no file of ours fails the next run.
+#[test]
+fn a_fact_too_deep_to_read_back_is_not_written() {
+    let mut value = json!("x");
+    for _ in 0..600 {
+        value = json!([value]);
+    }
+    let facts = json!({"deep": tag(&value)});
+    let dir = tempfile::tempdir().unwrap();
+    assert!(
+        cache(dir.path(), 0)
+            .write("h", facts.as_object().unwrap())
+            .is_err()
+    );
+    assert!(!dir.path().join("pfx_s1_h").exists());
+}
+
+/// A file that was written deeper than `serde_json` reads by default still reads, and a file
+/// deeper than the loader allows, which only another program writes, is ignored, not an error.
+#[rstest]
+#[case::a_file_an_earlier_run_wrote(300, true)]
+#[case::a_file_no_loader_value_makes(1100, false)]
+fn a_deep_file_is_read_or_ignored(#[case] levels: usize, #[case] read: bool) {
+    let dir = tempfile::tempdir().unwrap();
+    let payload = format!("{{\"k\": {}1{}}}", "[".repeat(levels), "]".repeat(levels));
+    let body = dumps(&json!({ "__payload__": payload }));
+    std::fs::write(dir.path().join("pfx_s1_h"), body).unwrap();
+    let back = cache(dir.path(), 0).read("h").unwrap();
+    assert_eq!(back.is_some(), read);
+    assert!(dir.path().join("pfx_s1_h").exists());
+}

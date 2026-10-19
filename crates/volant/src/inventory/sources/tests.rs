@@ -158,3 +158,34 @@ fn a_host_list_is_shown_as_given_and_ignored_names_are_skipped() {
         assert!(!ignored.is_match(name), "{name} is read");
     }
 }
+
+/// A YAML inventory of two documents fails in ansible-core 2.19.12's words, through either plugin.
+#[test]
+fn a_two_document_inventory_is_refused_in_the_reference_words() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("inv.yml");
+    std::fs::write(
+        &path,
+        "all:\n  hosts:\n    h1:\n---\nall:\n  hosts:\n    h2:\n",
+    )
+    .unwrap();
+    let config = PluginConfig::default();
+    let source = Source::new(&path.to_string_lossy());
+    let plugins: [&dyn InventoryPlugin; 2] = [
+        &super::super::yaml::YamlInventory,
+        &super::super::auto::Auto,
+    ];
+    for plugin in plugins {
+        let cx = quiet_cx(&config);
+        let err = plugin
+            .parse(&source, &mut Inventory::default(), &cx)
+            .unwrap_err();
+        assert_eq!(
+            err.message,
+            "YAML parsing failed: Expected a single document in the stream but found another \
+             document.",
+            "{}",
+            plugin.name()
+        );
+    }
+}
