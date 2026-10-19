@@ -9,6 +9,7 @@ use volant_protocol::frame::{header, payload_len};
 use volant_protocol::{FromAgent, PROTOCOL_VERSION, ToAgent};
 
 mod blobs;
+mod decode;
 pub(crate) mod embedded;
 mod source;
 
@@ -204,7 +205,7 @@ impl AgentLink {
     /// dedicated reader task, so a dropped `recv` future never desyncs the stream.
     pub async fn recv(&mut self) -> std::io::Result<Option<FromAgent>> {
         match self.frames.recv().await {
-            Some(Ok(payload)) => Ok(Some(serde_json::from_slice(&payload)?)),
+            Some(Ok(payload)) => Ok(Some(decode::decode(&payload)?)),
             Some(Err(e)) => Err(e),
             None => Ok(None),
         }
