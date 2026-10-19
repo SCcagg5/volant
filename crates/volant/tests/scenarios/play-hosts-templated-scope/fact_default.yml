@@ -1,0 +1,5 @@
+- hosts: "{{ ansible_facts['hostname'] | default('w2') }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ ansible_play_hosts }}"

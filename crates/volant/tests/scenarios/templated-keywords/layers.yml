@@ -1,0 +1,25 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    flag_t: true
+    flag_f: false
+  no_log: "{{ flag_t }}"
+  tasks:
+    - name: Hidden by the play
+      debug: {msg: play}
+    - name: Shown by its own literal
+      debug: {msg: literal}
+      no_log: false
+    - name: Block that shows
+      block:
+        - name: Shown by the block
+          debug: {msg: block}
+        - name: Hidden by its own template
+          debug: {msg: task}
+          no_log: "{{ flag_t }}"
+      no_log: "{{ flag_f }}"
+    - name: Block that hides
+      block:
+        - name: Hidden by the block's literal
+          debug: {msg: literal block}
+      no_log: true

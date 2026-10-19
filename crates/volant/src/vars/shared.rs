@@ -30,6 +30,24 @@ impl VarStore {
             self.implicit_controller = Some(host.to_string());
             self.forget_hostvars();
         }
+        let base = self.hostvars_base();
+        if base.contains_key(host) {
+            return base;
+        }
+        if let Some(completed) = self.hostvars_with.get(host) {
+            return Arc::clone(completed);
+        }
+        let mut map = (*base).clone();
+        map.insert(host.to_string(), self.view_value(host));
+        let completed = Arc::new(map);
+        self.hostvars_with
+            .insert(host.to_string(), Arc::clone(&completed));
+        completed
+    }
+
+    /// `hostvars_shared` without a host to complete it for: the inventory's own hosts and the
+    /// three spellings of the controller.
+    pub(super) fn hostvars_base(&mut self) -> Arc<Map<String, Value>> {
         let base = if let Some(mut base) = self.hostvars.take() {
             let stale = std::mem::take(&mut self.stale);
             for name in &stale {
@@ -56,18 +74,7 @@ impl VarStore {
             Arc::new(map)
         };
         self.hostvars = Some(Arc::clone(&base));
-        if base.contains_key(host) {
-            return base;
-        }
-        if let Some(completed) = self.hostvars_with.get(host) {
-            return Arc::clone(completed);
-        }
-        let mut map = (*base).clone();
-        map.insert(host.to_string(), self.view_value(host));
-        let completed = Arc::new(map);
-        self.hostvars_with
-            .insert(host.to_string(), Arc::clone(&completed));
-        completed
+        base
     }
 
     /// Puts the three spellings of the controller that the inventory does not list into the

@@ -14,6 +14,17 @@ use crate::yaml;
 
 pub(super) struct YamlInventory;
 
+/// Why a YAML inventory file did not load, in ansible-core 2.19.12's words for a stream of two
+/// documents.
+pub(super) fn load_failure(error: &anyhow::Error) -> String {
+    if yaml::is_second_document(error) {
+        "YAML parsing failed: Expected a single document in the stream but found another document."
+            .to_string()
+    } else {
+        format!("{error:#}")
+    }
+}
+
 impl InventoryPlugin for YamlInventory {
     fn name(&self) -> &'static str {
         "yaml"
@@ -39,19 +50,10 @@ impl InventoryPlugin for YamlInventory {
         };
         let bytes = std::fs::read(source.path()).map_err(|e| failed(e.to_string()))?;
         let text = String::from_utf8(bytes).map_err(|e| failed(e.to_string()))?;
-        let docs = yaml::load(&text, source.text()).map_err(|e| failed(format!("{e:#}")))?;
+        let docs = yaml::load(&text, source.text()).map_err(|e| failed(load_failure(&e)))?;
         let null = Yaml::Value(Scalar::Null);
-        let root = match docs.as_slice() {
-            [] => &null,
-            [one] => one,
-            _ => {
-                return Err(failed(
-                    "YAML parsing failed: Expected a single document in the stream but found \
-                     another document."
-                        .to_string(),
-                ));
-            }
-        };
+        // `load` refuses a second document, so there is at most one.
+        let root = docs.first().unwrap_or(&null);
         let groups = lower(root).map_err(failed)?;
         read_groups(&groups, Dialect::Yaml, into, Some(source.path()), cx).map_err(failed)
     }

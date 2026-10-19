@@ -1,0 +1,28 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    play_v: play vars
+  vars_files: [files.yml]
+  roles: [rp]
+  tasks:
+    - name: before
+      debug:
+        msg: "{{ inv_v }} {{ play_v }} {{ file_v }} {{ role_v }} {{ defaults_v }}"
+
+    - name: a directory beats the layers below set_fact, task vars included, and loses to extra vars
+      include_vars: {dir: inc}
+
+    - name: after
+      debug:
+        msg: "{{ inv_v }} {{ play_v }} {{ file_v }} {{ role_v }} {{ defaults_v }} {{ task_v }} {{ set_v }} {{ ev }}"
+      vars:
+        task_v: task vars
+
+    - name: set_fact written after the include
+      set_fact:
+        set_v: set_fact
+        play_v: set_fact
+
+    - name: later
+      debug:
+        msg: "{{ set_v }} {{ play_v }}"

@@ -235,6 +235,6 @@ pub(super) fn banner_before_vars_refusal(
     if refused.is_some_and(|r| r.code == 4)
         && let Some(play) = playbooks.iter().flat_map(|pb| &pb.plays).next()
     {
-        out.play(&play.name);
+        out.play_of(play);
     }
 }

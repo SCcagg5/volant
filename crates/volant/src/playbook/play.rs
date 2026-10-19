@@ -11,10 +11,11 @@ use crate::keywords::{block_keyword, play_keyword};
 use crate::roles::{RoleEntry, RoleFrom};
 use crate::yaml::{field, to_json};
 
+use super::deferred::{Deferred, boolean_or_template};
 use super::fields::{
     conditions, debugger, mapping, names, parse_handlers, tags, throttle, timeout,
 };
-use super::keywords::{boolean, connect_keywords, delegation, escalation, flag, shown};
+use super::keywords::{connect_keywords, delegation, escalation, flag, shown};
 use super::load::task_list;
 use super::model::{Play, PlayTask};
 use super::origin::task_origin;
@@ -31,6 +32,7 @@ pub(super) fn parse_play(yaml: &Yaml, dir: &Path) -> anyhow::Result<Play> {
             bail!("'{key}' is not a valid attribute for a Play");
         }
     }
+    let host_list = matches!(field(yaml, "hosts"), Some(Yaml::Sequence(_)));
     let host_patterns = match field(yaml, "hosts") {
         Some(Yaml::Value(Scalar::String(s))) => vec![s.to_string()],
         // Every entry, or none: `filter_map` here dropped a non-string entry and ran the play
@@ -53,8 +55,12 @@ pub(super) fn parse_play(yaml: &Yaml, dir: &Path) -> anyhow::Result<Play> {
         .and_then(Yaml::as_str)
         .unwrap_or(&hosts)
         .to_string();
-    let gather_written = boolean(yaml, "gather_facts")?;
+    let mut deferred = Deferred::default();
+    // A template is rendered when the play starts. Until then the play gathers, so the step that
+    // does it is in the list for the start to leave out.
+    let gather_written = boolean_or_template(yaml, "gather_facts", &mut deferred.gather_facts)?;
     let gather_facts = gather_written.unwrap_or(true);
+    let gather_written = gather_written.is_some() || deferred.gather_facts.is_some();
     let vars = match field(yaml, "vars") {
         None | Some(Yaml::Value(Scalar::Null)) => Map::new(),
         Some(v) => match to_json(v).context("'vars'")? {
@@ -99,15 +105,25 @@ pub(super) fn parse_play(yaml: &Yaml, dir: &Path) -> anyhow::Result<Play> {
         None | Some(Yaml::Value(Scalar::Null)) => None,
         Some(v) => Some(to_json(v).context("'serial'")?),
     };
-    let (r#become, become_user) = escalation(yaml, "")?;
+    let (r#become, become_user) = escalation(yaml, "", &mut deferred)?;
+    let force_handlers = boolean_or_template(yaml, "force_handlers", &mut deferred.force_handlers)?;
+    let timeout = timeout(yaml, "", &mut deferred)?;
+    let no_log = boolean_or_template(yaml, "no_log", &mut deferred.no_log)?;
+    let run_once = boolean_or_template(yaml, "run_once", &mut deferred.run_once)?;
+    let any_errors_fatal =
+        boolean_or_template(yaml, "any_errors_fatal", &mut deferred.any_errors_fatal)?;
+    let ignore_unreachable =
+        boolean_or_template(yaml, "ignore_unreachable", &mut deferred.ignore_unreachable)?;
     Ok(Play {
         origin: task_origin(map),
         name,
         hosts,
         host_patterns,
+        host_list,
+        nameless: false,
         tags: tags(yaml, "")?,
         gather_facts,
-        gather_written: gather_written.is_some(),
+        gather_written,
         vars,
         vars_files,
         import_when: Vec::new(),
@@ -117,27 +133,28 @@ pub(super) fn parse_play(yaml: &Yaml, dir: &Path) -> anyhow::Result<Play> {
         post_tasks,
         roles,
         handlers: parse_handlers(field(yaml, "handlers"))?,
-        force_handlers: boolean(yaml, "force_handlers")?,
+        force_handlers,
         dir: dir.to_path_buf(),
         r#become,
         become_user,
         connect: connect_keywords(yaml, "")?,
         strategy,
         order,
-        timeout: timeout(yaml, "")?,
+        timeout,
         throttle: throttle(yaml)?,
         debugger: debugger(yaml, "")?,
         serial,
-        no_log: boolean(yaml, "no_log")?,
+        no_log,
         environment: environment(yaml, "")?,
         module_defaults: module_defaults(yaml, "")?,
         collections: collections(yaml, "")?,
         check_mode: flag(yaml, "check_mode")?,
         diff: flag(yaml, "diff")?,
-        run_once: boolean(yaml, "run_once")?,
-        any_errors_fatal: boolean(yaml, "any_errors_fatal")?,
+        run_once,
+        any_errors_fatal,
         ignore_errors: flag(yaml, "ignore_errors")?,
-        ignore_unreachable: boolean(yaml, "ignore_unreachable")?,
+        ignore_unreachable,
+        deferred,
         max_fail_percentage: match field(yaml, "max_fail_percentage") {
             None | Some(Yaml::Value(Scalar::Null)) => None,
             Some(v) => Some(to_json(v).context("'max_fail_percentage'")?),
@@ -306,8 +323,16 @@ fn parse_role_entry(yaml: &Yaml) -> anyhow::Result<RoleEntry> {
         }
     }
     let context = format!("role '{name}': ");
-    let (r#become, become_user) = escalation(yaml, &context)?;
-    let (delegate_facts, delegate_to) = delegation(yaml, &context)?;
+    let mut deferred = Deferred::default();
+    let (r#become, become_user) = escalation(yaml, &context, &mut deferred)?;
+    let (delegate_facts, delegate_to) = delegation(yaml, &context, &mut deferred)?;
+    let timeout = timeout(yaml, &context, &mut deferred)?;
+    let no_log = boolean_or_template(yaml, "no_log", &mut deferred.no_log)?;
+    let run_once = boolean_or_template(yaml, "run_once", &mut deferred.run_once)?;
+    let any_errors_fatal =
+        boolean_or_template(yaml, "any_errors_fatal", &mut deferred.any_errors_fatal)?;
+    let ignore_unreachable =
+        boolean_or_template(yaml, "ignore_unreachable", &mut deferred.ignore_unreachable)?;
     Ok(RoleEntry {
         name,
         from,
@@ -316,7 +341,7 @@ fn parse_role_entry(yaml: &Yaml) -> anyhow::Result<RoleEntry> {
             name: String::new(),
             tags: tags(yaml, &context)?,
             ignore_errors: flag(yaml, "ignore_errors")?,
-            timeout: timeout(yaml, &context)?,
+            timeout,
             throttle: throttle(yaml)?,
             debugger: debugger(yaml, &context)?,
             vars: mapping(yaml, "vars", &context)?,
@@ -325,17 +350,18 @@ fn parse_role_entry(yaml: &Yaml) -> anyhow::Result<RoleEntry> {
             become_user,
             connect: connect_keywords(yaml, &context)?,
             notify: names(yaml, "notify", &context)?,
-            no_log: boolean(yaml, "no_log")?,
+            no_log,
             environment: environment(yaml, &context)?,
             module_defaults: module_defaults(yaml, &context)?,
             collections: collections(yaml, &context)?,
             check_mode: flag(yaml, "check_mode")?,
             diff: flag(yaml, "diff")?,
-            run_once: boolean(yaml, "run_once")?,
-            any_errors_fatal: boolean(yaml, "any_errors_fatal")?,
-            ignore_unreachable: boolean(yaml, "ignore_unreachable")?,
+            run_once,
+            any_errors_fatal,
+            ignore_unreachable,
             delegate_facts,
             delegate_to,
+            deferred,
             ..PlayTask::empty()
         },
     })

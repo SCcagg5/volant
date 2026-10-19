@@ -222,7 +222,11 @@ pub(in crate::executor) fn record_local_facts(
         let Some(facts) = result.0.get("ansible_facts").and_then(Value::as_object) else {
             continue;
         };
-        let data = set_fact_data(task, item, templar);
+        let data = if set_fact {
+            set_fact_data(task, item, templar)
+        } else {
+            included_data(result)
+        };
         let cacheable = set_fact
             && item.args.get("cacheable").is_some_and(|v| match v {
                 Value::Bool(on) => *on,
@@ -235,7 +239,7 @@ pub(in crate::executor) fn record_local_facts(
                     vars.cache_fact(host, key, value);
                     written.insert(host.clone());
                 }
-                if set_fact && data.contains(key) {
+                if data.contains(key) {
                     vars.set_untrusted_fact(host, key, value.clone());
                 } else {
                     vars.set_fact(host, key, value.clone());
@@ -247,6 +251,19 @@ pub(in crate::executor) fn record_local_facts(
     for host in written {
         vars.write_cache(&host);
     }
+}
+
+/// The names an `include_vars` result sets that hold what a managed host returned: see
+/// [`super::include_vars`].
+fn included_data(result: &TaskResult) -> BTreeSet<String> {
+    result
+        .0
+        .get(super::include_vars::DATA_KEY)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|name| name.as_str().map(str::to_string))
+        .collect()
 }
 
 pub(in crate::executor) fn fact_targets(
