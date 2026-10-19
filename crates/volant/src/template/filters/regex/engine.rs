@@ -9,7 +9,7 @@ use minijinja::Error;
 use regex::{Captures, Regex, RegexBuilder};
 
 use super::invalid;
-use super::pattern::{Failure, Translated, translate};
+use super::pattern::{Failure, translate};
 
 pub(super) struct Compiled {
     strict: Regex,
@@ -62,18 +62,12 @@ pub(super) fn compile(
 }
 
 fn build(pattern: &str, ignorecase: bool, multiline: bool) -> Result<Compiled, String> {
-    let translated = match translate(pattern, multiline) {
-        Ok(translated) => translated,
-        Err(Failure::Invalid(why)) => {
-            return Err(format!("invalid regular expression '{pattern}': {why}"));
-        }
-        // Python syntax with no rewrite goes to the `regex` crate as written.
-        Err(Failure::Unsupported(_)) => Translated {
-            strict: pattern.to_string(),
-            loose: None,
-            prefers_empty: false,
-        },
-    };
+    let translated = translate(pattern, multiline).map_err(|failure| match failure {
+        Failure::Invalid(why) => format!("invalid regular expression '{pattern}': {why}"),
+        Failure::Unsupported(what) => format!(
+            "unsupported regular expression '{pattern}': {what} is not supported by the regex engine of Volant"
+        ),
+    })?;
     let make = |source: &str| {
         RegexBuilder::new(source)
             .case_insensitive(ignorecase)

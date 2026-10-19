@@ -520,3 +520,78 @@ fn the_regex_filters_return_what_python_re_returned() {
         );
     }
 }
+
+/// Python syntax the `regex` crate has no counterpart for: ansible-core runs each pattern, and
+/// Volant refuses it with the construct's name instead of a wrong answer. The recorded rows in
+/// `cases.yml` cover what both run.
+#[test]
+fn a_pattern_without_a_rust_counterpart_is_refused_by_name() {
+    let rows = [
+        ("{{ 'ab' | regex_findall('a(?=b)') }}", "look-ahead"),
+        ("{{ 'ab' | regex_search('a(?!c)') }}", "look-ahead"),
+        ("{{ 'ab' | regex_replace('(?<=a)b', 'x') }}", "look-behind"),
+        ("{{ 'ab' is regex('(?<!x)b') }}", "look-behind"),
+        ("{{ 'aa' | regex_findall('(a)\\1') }}", "back reference"),
+        (
+            "{{ 'aa' | regex_replace('(?P<n>a)(?P=n)', 'x') }}",
+            "'(?P=name)'",
+        ),
+        (
+            "{{ 'ab' | regex_replace('a++', 'x') }}",
+            "possessive quantifier",
+        ),
+        (
+            "{{ 'ab' | regex_replace('a{1,2}+', 'x') }}",
+            "possessive quantifier",
+        ),
+        ("{{ 'ab' | regex_replace('(?>a)', 'x') }}", "atomic group"),
+        (
+            "{{ 'ab' | regex_findall('(a)?(?(1)b|c)') }}",
+            "conditional group",
+        ),
+        (
+            "{{ 'ab' | regex_replace('\\N{LATIN SMALL LETTER A}', 'x') }}",
+            "'\\N{name}'",
+        ),
+        ("{{ 'ab' | regex_replace('(?a)\\w', 'x') }}", "'(?a)'"),
+        ("{{ 'ab' | regex_replace('(?x:a b)', 'x') }}", "'(?x:'"),
+        ("{{ 'aaa' | regex_findall('a*?') }}", "lazy repeat"),
+        ("{{ 'ab' | regex_findall('|ab') }}", "empty alternative"),
+        (
+            "{{ t | regex_search('b=2$') }}",
+            "'$' before the final newline",
+        ),
+    ];
+    for (template, construct) in rows {
+        let vars = serde_json::json!({"t": "a=1\nb=2\n"});
+        let err = render(template, vars).unwrap_err();
+        assert!(
+            err.contains("unsupported regular expression") && err.contains(construct),
+            "{template}: {err}"
+        );
+    }
+    // Python refuses these too, and says where.
+    for (template, reason) in [
+        (
+            "{{ 'ab' | regex_findall('(') }}",
+            "missing ), unterminated subpattern",
+        ),
+        ("{{ 'ab' | regex_findall('a**') }}", "multiple repeat"),
+        ("{{ 'ab' | regex_findall('*a') }}", "nothing to repeat"),
+        ("{{ 'ab' | regex_findall('[b-a]') }}", "bad character range"),
+        ("{{ 'ab' | regex_findall('\\e') }}", "bad escape \\e"),
+        (
+            "{{ 'ab' | regex_findall('(?<n>a)') }}",
+            "unknown extension ?<",
+        ),
+        (
+            "{{ 'ab' | regex_findall('a(?i)b') }}",
+            "global flags not at the start",
+        ),
+        ("{{ 'ab' | regex_findall('b\\z') }}", "bad escape \\z"),
+        ("{{ 'ab' is regex('(') }}", "unterminated subpattern"),
+    ] {
+        let err = render(template, serde_json::json!({})).unwrap_err();
+        assert!(err.contains(reason), "{template}: {err}");
+    }
+}
