@@ -13,7 +13,7 @@ use serde_json::{Map, Value};
 use crate::bridge::{Bridge, PluginKind};
 
 use super::bridged;
-use super::context::{Vars, begin, context_of, is_literal, reads};
+use super::context::{Context, Vars, begin, context_of, is_literal, reads};
 use super::env::{environment, holds_undefined, truthy, type_name};
 use super::filters;
 use super::vm::{
@@ -160,6 +160,9 @@ impl Templar {
         // context, and a tainted field must not make the next field data too.
         tainted.store(false, Ordering::Relaxed);
         let before = begin(ctx);
+        if let Some(root) = ctx.downcast_object_ref::<Context>() {
+            root.forget_changes();
+        }
         let mut value = self.render_once(text, ctx)?;
         keep_literal(text, &value, ctx, true, reads(ctx) == before);
         // A variable can hold a template of its own, so Ansible renders a result again while it

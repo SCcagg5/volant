@@ -4,14 +4,16 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use minijinja::value::{Enumerator, Object};
 use serde_json::{Map, Value};
 
-use super::env::chained_attr;
+use super::env::{chained_attr, fresh_const, mutable_attr, mutable_var};
+use super::pymethods::mutable::{identity, mutable};
 use super::{
-    ATTR_KEY, CONCAT_KEY, CONTEXT_KEY, HOSTVARS_KEYS, ITEM_KEY, QUERY_KEY, TAINT_KEY, Tainted,
+    ATTR_KEY, CONCAT_KEY, CONST_KEY, CONTEXT_KEY, HOSTVARS_KEYS, ITEM_KEY, MATTR_KEY, MITEM_KEY,
+    QUERY_KEY, TAINT_KEY, Tainted, VAR_KEY,
 };
 
 /// The name, in the variables an extended loop shares between its items, under which the list of
@@ -168,6 +170,43 @@ pub(super) struct Context {
     /// How many names the render has read, to tell a pass that read none.
     reads: AtomicUsize,
     memo: Memo,
+    /// The mutable form of each plain list or mapping read while one string renders, by the
+    /// address of the plain one, which it keeps alive. Emptied before the next string.
+    mutables: Mutex<HashMap<usize, (minijinja::Value, minijinja::Value)>>,
+    /// Whether `mutables` holds anything, so that a render that changes no list never locks it.
+    mutated: AtomicBool,
+}
+
+impl Context {
+    /// The mutable form of `value` when it is a plain list or mapping: the same object for each
+    /// read of the same value, so that two names for one list name one list.
+    pub(super) fn mutable_read(&self, value: minijinja::Value) -> minijinja::Value {
+        let Some(id) = identity(&value) else {
+            return value;
+        };
+        self.mutated.store(true, Ordering::Relaxed);
+        let mut seen = self.mutables.lock().unwrap_or_else(PoisonError::into_inner);
+        seen.entry(id)
+            .or_insert_with(|| {
+                (
+                    value.clone(),
+                    mutable(&value).unwrap_or_else(|| value.clone()),
+                )
+            })
+            .1
+            .clone()
+    }
+
+    /// Forgets what one string changed, so that the next one reads the variables as they were.
+    pub(super) fn forget_changes(&self) {
+        if !self.mutated.swap(false, Ordering::Relaxed) {
+            return;
+        }
+        self.mutables
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
+    }
 }
 
 /// Starts a render over `ctx`: clears the mark of the last one and returns the reads so far.
@@ -222,11 +261,24 @@ impl Object for Context {
         let key = key.as_str()?;
         // Not a variable: the VM looks the root up before the globals, so a variable of that
         // name (`-e '{"volant::concat": 1}'`) would otherwise replace every `~`.
-        if key == CONCAT_KEY || key == QUERY_KEY || key == ITEM_KEY || key == ALLITEMS_KEY {
+        if key == CONCAT_KEY
+            || key == QUERY_KEY
+            || key == ITEM_KEY
+            || key == MITEM_KEY
+            || key == ALLITEMS_KEY
             return None;
         }
         if let Some(attr) = key.strip_prefix(ATTR_KEY) {
             return Some(chained_attr(attr.to_string()));
+        }
+        if let Some(attr) = key.strip_prefix(MATTR_KEY) {
+            return Some(mutable_attr(attr.to_string()));
+        }
+        if let Some(json) = key.strip_prefix(CONST_KEY) {
+            return fresh_const(json);
+        }
+        if let Some(name) = key.strip_prefix(VAR_KEY) {
+            return Some(mutable_var(name.to_string()));
         }
         if key == TAINT_KEY {
             return Some(minijinja::Value::from_object(TaintSink(Arc::clone(
@@ -381,6 +433,8 @@ pub(super) fn context_of(vars: Vars<'_>) -> (minijinja::Value, Tainted) {
         literal: AtomicBool::new(false),
         reads: AtomicUsize::new(0),
         memo: Memo::default(),
+        mutables: Mutex::default(),
+        mutated: AtomicBool::new(false),
     });
     (ctx, tainted)
 }

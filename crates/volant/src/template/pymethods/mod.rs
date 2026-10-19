@@ -7,13 +7,17 @@ use minijinja::value::ValueKind;
 use minijinja::{Environment, Error, ErrorKind, State, Value};
 
 mod args;
+mod dicts;
 mod format;
 pub(crate) mod limits;
+mod lists;
+pub(super) mod mutable;
 mod search;
 mod text;
 mod translate;
 
-use args::{Call, raise};
+use args::{Call, raise, type_of};
+use mutable::{Dict, MutDict, MutList, is_dict, is_list, plain_list, plain_map};
 
 /// Installs the hook on `env`.
 pub(super) fn register(env: &mut Environment<'static>) {
@@ -49,7 +53,44 @@ fn call(state: &State, value: &Value, method: &str, args: &[Value]) -> Result<Va
             )));
         }
     }
+    if matches!(value.kind(), ValueKind::Seq | ValueKind::Iterable)
+        && !is_list(value)
+        && mutable::MUTATORS.contains(&method)
+        && method != "update"
+    {
+        return Err(raise(
+            "a list built with + or a slice cannot be changed in place: use `| list` first",
+        ));
+    }
+    if is_list(value) || is_dict(value) {
+        if super::any_undefined(args) {
+            return Err(Error::from(ErrorKind::UndefinedError));
+        }
+        if let Some(answer) = container(value, method, args) {
+            return answer;
+        }
+        return Err(raise(format!(
+            "object of type '{}' has no attribute '{method}'",
+            type_of(value)
+        )));
+    }
     minijinja_contrib::pycompat::unknown_method_callback(state, value, method, args)
+}
+
+/// A method of `list` or `dict` called on a value that is not one of the mutable objects, which
+/// a template reaches by a path that does not go through a variable (`(x | list).append(1)`,
+/// `hostvars[h].items.append(1)`). The method runs on a copy, so what it returns is right and
+/// what it changes is lost.
+fn container(value: &Value, method: &str, args: &[Value]) -> Option<Result<Value, Error>> {
+    if let Some(items) = plain_list(value) {
+        return lists::call(&MutList::temp(items.clone()), method, args);
+    }
+    if let Some(entries) = plain_map(value) {
+        let entries: Dict = entries.clone();
+        return dicts::call(&MutDict::temp(entries), method, args);
+    }
+    // A mutable list or mapping reaches here for a name that no method has.
+    None
 }
 
 /// Every method `str` has in CPython 3.13. A name outside this list is no method at all; one in
@@ -163,3 +204,6 @@ fn string(s: &str, name: &str, args: &[Value]) -> Option<Result<Value, Error>> {
         _ => return None,
     })
 }
+
+#[cfg(test)]
+mod tests;

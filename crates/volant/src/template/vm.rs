@@ -15,9 +15,10 @@ use serde_json::Value;
 
 use super::bridged;
 use super::context::set_literal;
-use super::env::{attr_call, container_repr, holds_undefined};
+use super::env::{attr_call, const_call, container_repr, holds_undefined, var_call};
+use super::pymethods::mutable::MUTATORS;
 use super::templar::Templar;
-use super::{CONCAT_KEY, ITEM_KEY, QUERY_KEY, TemplateError, UNDEFINED, VAULT_NAME};
+use super::{CONCAT_KEY, ITEM_KEY, MITEM_KEY, QUERY_KEY, TemplateError, UNDEFINED, VAULT_NAME};
 
 /// Replaces every `!unsafe` wrapper inside `value` by its text, and every `!vault` wrapper that
 /// decrypts by what it holds; whether there was one. A vault wrapper that does not decrypt stays
@@ -106,7 +107,11 @@ pub(super) fn concat(
 /// cannot be rewritten in place, so the swap happens on the bytecode: the concatenation
 /// instruction and a two-argument call take the same two operands off the stack in the same
 /// order, and a call keeps its own, so every jump target stays where it was.
-pub(super) fn route_calls(instructions: &mut Instructions<'_>) {
+///
+/// `mutating` is true when the template calls a method that changes a list or mapping in place
+/// (see [`mutates`]). Each variable, attribute and item it reads then goes through a function that
+/// hands back the mutable form of a plain list or mapping.
+pub(super) fn route_calls(instructions: &mut Instructions<'_>, mutating: bool) {
     // A macro or a `set` that takes the name `q` or `query` shadows the lookup shorthand.
     let mut shadowed = Vec::new();
     let mut at = 0;
@@ -134,9 +139,20 @@ pub(super) fn route_calls(instructions: &mut Instructions<'_>) {
         }
         match op {
             Instruction::StringConcat => *op = Instruction::CallFunction(CONCAT_KEY, Some(2)),
-            Instruction::GetItem => *op = Instruction::CallFunction(ITEM_KEY, Some(2)),
+            Instruction::GetItem => {
+                let key = if mutating { MITEM_KEY } else { ITEM_KEY };
+                *op = Instruction::CallFunction(key, Some(2));
+            }
             Instruction::GetAttr(name) => {
-                *op = Instruction::CallFunction(attr_call(name), Some(1));
+                *op = Instruction::CallFunction(attr_call(name, mutating), Some(1));
+            }
+            Instruction::LoadConst(value) if mutating => {
+                if let Some(name) = const_call(value) {
+                    *op = Instruction::CallFunction(name, Some(0));
+                }
+            }
+            Instruction::Lookup(name) if mutating => {
+                *op = Instruction::CallFunction(var_call(name), Some(0));
             }
             Instruction::CallFunction(name, args)
                 if matches!(*name, "query" | "q") && !shadowed.iter().any(|n| n == name) =>
@@ -147,6 +163,20 @@ pub(super) fn route_calls(instructions: &mut Instructions<'_>) {
         }
         idx += 1;
     }
+}
+
+/// Whether compiled code calls a method that changes a list or mapping in place.
+pub(super) fn mutates(instructions: &Instructions<'_>) -> bool {
+    let mut at = 0;
+    while let Some(op) = instructions.get(at) {
+        if let Instruction::CallMethod(name, _) = op
+            && MUTATORS.contains(name)
+        {
+            return true;
+        }
+        at += 1;
+    }
+    false
 }
 
 /// `env.render_named_str`, with `~` routed through [`concat()`]. Compiled once per call, as
@@ -168,8 +198,12 @@ pub(super) fn render_str(
         default_auto_escape: Arc::new(|_| AutoEscape::None),
     };
     let mut compiled = CompiledTemplate::new(name, source, &config)?;
-    route_calls(&mut compiled.instructions);
-    compiled.blocks.values_mut().for_each(route_calls);
+    let mutating = mutates(&compiled.instructions) || compiled.blocks.values().any(mutates);
+    route_calls(&mut compiled.instructions, mutating);
+    compiled
+        .blocks
+        .values_mut()
+        .for_each(|block| route_calls(block, mutating));
     let env =
         templar.env_for(std::iter::once(&compiled.instructions).chain(compiled.blocks.values()));
     let mut out = String::with_capacity(compiled.buffer_size_hint);
@@ -193,7 +227,8 @@ pub(super) fn eval_expr(
     let mut codegen = CodeGenerator::new("<expression>", expr);
     codegen.compile_expr(&ast);
     let (mut instructions, _) = codegen.finish();
-    route_calls(&mut instructions);
+    let mutating = mutates(&instructions);
+    route_calls(&mut instructions, mutating);
     let env = templar.env_for([&instructions]);
     let mut out = String::new();
     let (value, _) = Vm::new(&env).eval(

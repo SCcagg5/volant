@@ -13,9 +13,13 @@ use serde_json::Value;
 
 use crate::bridge::Bridge;
 
+use super::context::Context;
 use super::filters;
+use super::pymethods::mutable::{is_literal, mutable};
 use super::vm::concat;
-use super::{ATTR_KEY, CONCAT_KEY, ITEM_KEY};
+use super::{
+    ATTR_KEY, CONCAT_KEY, CONST_KEY, CONTEXT_KEY, ITEM_KEY, MATTR_KEY, MITEM_KEY, VAR_KEY,
+};
 
 /// The engine's environment: minijinja's, strict about undefined values, with every filter,
 /// test and lookup of the engine; the lookups the engine lacks go to `bridge`.
@@ -46,6 +50,7 @@ pub(super) fn environment(base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) -> En
     env.add_function(CONCAT_KEY, concat);
     env.add_function("range", range);
     env.add_function(ITEM_KEY, chained_item);
+    env.add_function(MITEM_KEY, mutable_item);
     env
 }
 
@@ -89,10 +94,41 @@ fn chained_item(
 }
 
 /// The function name an attribute lookup is routed through: `ATTR_KEY` then the attribute.
-/// Leaked once per distinct name, because compiled code holds names for as long as it lives.
-pub(super) fn attr_call(name: &str) -> &'static str {
+pub(super) fn attr_call(name: &str, mutable: bool) -> &'static str {
+    routed(if mutable { MATTR_KEY } else { ATTR_KEY }, name)
+}
+
+/// The function name a variable read is routed through in a template that changes values in
+/// place: `VAR_KEY` then the name.
+pub(super) fn var_call(name: &str) -> &'static str {
+    routed(VAR_KEY, name)
+}
+
+/// The function name a list or mapping constant is routed through, or `None` when the constant is
+/// not one that JSON carries back unchanged (a mapping with a key that is not a string).
+pub(super) fn const_call(value: &minijinja::Value) -> Option<&'static str> {
+    if !is_literal(value) {
+        return None;
+    }
+    Some(routed(CONST_KEY, &serde_json::to_string(value).ok()?))
+}
+
+/// What a constant routed by [`const_call`] answers: a new mutable list or mapping.
+pub(super) fn fresh_const(json: &str) -> Option<minijinja::Value> {
+    let parsed: Value = serde_json::from_str(json).ok()?;
+    Some(minijinja::Value::from_function(
+        move || -> minijinja::Value {
+            let plain = minijinja::Value::from_serialize(&parsed);
+            mutable(&plain).unwrap_or(plain)
+        },
+    ))
+}
+
+/// `prefix` and `name` as one name. Leaked once per distinct name, because compiled code holds
+/// names for as long as it lives.
+fn routed(prefix: &str, name: &str) -> &'static str {
     static NAMES: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
-    let full = format!("{ATTR_KEY}{name}");
+    let full = format!("{prefix}{name}");
     let mut names = NAMES.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(known) = names.get(full.as_str()) {
         return known;
@@ -100,6 +136,57 @@ pub(super) fn attr_call(name: &str) -> &'static str {
     let leaked: &'static str = Box::leak(full.into_boxed_str());
     names.insert(leaked);
     leaked
+}
+
+/// The render's root context, which keeps the mutable form of each plain value it handed out.
+fn root(state: &State) -> Option<minijinja::Value> {
+    state.lookup(CONTEXT_KEY)
+}
+
+/// The mutable form of a value a template read from a name, an attribute or an item.
+pub(super) fn made_mutable(state: &State, value: minijinja::Value) -> minijinja::Value {
+    root(state)
+        .and_then(|ctx| {
+            ctx.downcast_object_ref::<Context>()
+                .map(|ctx| ctx.mutable_read(value.clone()))
+        })
+        .unwrap_or(value)
+}
+
+/// `chained_attr`, for a template that changes values in place.
+pub(super) fn mutable_attr(name: String) -> minijinja::Value {
+    minijinja::Value::from_function(
+        move |state: &State,
+              parent: minijinja::Value|
+              -> Result<minijinja::Value, minijinja::Error> {
+            if parent.is_undefined() {
+                return Ok(minijinja::Value::UNDEFINED);
+            }
+            Ok(made_mutable(state, parent.get_attr(&name)?))
+        },
+    )
+}
+
+/// A variable read, for a template that changes values in place.
+pub(super) fn mutable_var(name: String) -> minijinja::Value {
+    minijinja::Value::from_function(move |state: &State| -> minijinja::Value {
+        made_mutable(
+            state,
+            state.lookup(&name).unwrap_or(minijinja::Value::UNDEFINED),
+        )
+    })
+}
+
+/// `chained_item`, for a template that changes values in place.
+fn mutable_item(
+    state: &State,
+    parent: minijinja::Value,
+    key: minijinja::Value,
+) -> Result<minijinja::Value, minijinja::Error> {
+    if parent.is_undefined() {
+        return Ok(minijinja::Value::UNDEFINED);
+    }
+    Ok(made_mutable(state, parent.get_item(&key)?))
 }
 
 pub(super) fn type_name(v: &Value) -> &'static str {

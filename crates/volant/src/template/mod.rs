@@ -91,6 +91,17 @@ const ITEM_KEY: &str = "volant::item";
 /// Prefix of the name an attribute lookup is routed through; the context answers it with a
 /// function that reads that attribute.
 const ATTR_KEY: &str = "volant::attr:";
+/// `ATTR_KEY` for a template that changes a list or mapping in place: what it reads is the
+/// mutable form of the value, see [`pymethods::mutable`].
+const MATTR_KEY: &str = "volant::mattr:";
+/// Prefix of the name a list or mapping literal is routed through in such a template, then the
+/// literal as JSON: minijinja folds a literal of constants into one shared value, and a template
+/// that changes a list needs a new one each time the literal runs.
+const CONST_KEY: &str = "volant::const:";
+/// Prefix of the name a variable read is routed through in such a template.
+const VAR_KEY: &str = "volant::var:";
+/// `ITEM_KEY` for such a template.
+const MITEM_KEY: &str = "volant::mitem";
 
 /// The global a call to `query` or `q` is compiled to call, see [`vm::route_calls`]. Not a global of
 /// either name: measured on ansible-core 2.19.12, `q is defined` is false on a host with no

@@ -34,10 +34,16 @@ pub(super) fn type_of(value: &Value) -> &'static str {
 pub(super) struct Call<'a> {
     pub(super) pos: &'a [Value],
     pub(super) kw: Vec<(String, Value)>,
+    /// The type the method belongs to, as Python words it in an error: `str`, `list`, `dict`.
+    owner: &'static str,
 }
 
 impl<'a> Call<'a> {
     pub(super) fn new(args: &'a [Value]) -> Self {
+        Self::of("str", args)
+    }
+
+    pub(super) fn of(owner: &'static str, args: &'a [Value]) -> Self {
         let (pos, kw) = match args.split_last() {
             Some((last, rest)) if last.is_kwargs() => {
                 let pairs = last
@@ -54,7 +60,7 @@ impl<'a> Call<'a> {
             }
             _ => (args, Vec::new()),
         };
-        Self { pos, kw }
+        Self { pos, kw, owner }
     }
 
     /// Methods that take no argument: `str.upper() takes no arguments (1 given)`.
@@ -74,7 +80,8 @@ impl<'a> Call<'a> {
         match self.pos {
             [one] => Ok(one),
             other => Err(raise(format!(
-                "str.{name}() takes exactly one argument ({} given)",
+                "{}.{name}() takes exactly one argument ({} given)",
+                self.owner,
                 other.len()
             ))),
         }
@@ -85,6 +92,12 @@ impl<'a> Call<'a> {
         self.no_keywords(name)?;
         let given = self.pos.len();
         let plural = |n: usize| if n == 1 { "argument" } else { "arguments" };
+        if min == max && given != min {
+            return Err(raise(format!(
+                "{name} expected {min} {}, got {given}",
+                plural(min)
+            )));
+        }
         if given < min {
             return Err(raise(format!(
                 "{name} expected at least {min} {}, got {given}",
@@ -140,7 +153,10 @@ impl<'a> Call<'a> {
         if self.kw.is_empty() {
             Ok(())
         } else {
-            Err(raise(format!("str.{name}() takes no keyword arguments")))
+            Err(raise(format!(
+                "{}.{name}() takes no keyword arguments",
+                self.owner
+            )))
         }
     }
 }
@@ -200,4 +216,18 @@ pub(super) fn clamp(len: usize, start: Option<i64>, end: Option<i64>) -> (usize,
         usize::try_from(start).unwrap_or(usize::MAX),
         usize::try_from(end).unwrap_or(0),
     )
+}
+
+/// Every item of an iterable argument, as `list(x)` reads it: a list, the characters of a text,
+/// the keys of a mapping.
+pub(super) fn iterate(value: &Value) -> Result<Vec<Value>, Error> {
+    match value.kind() {
+        ValueKind::Seq | ValueKind::Map | ValueKind::Iterable | ValueKind::String => {
+            Ok(value.try_iter()?.collect())
+        }
+        _ => Err(raise(format!(
+            "'{}' object is not iterable",
+            type_of(value)
+        ))),
+    }
 }
