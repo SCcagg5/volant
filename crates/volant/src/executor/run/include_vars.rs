@@ -31,6 +31,11 @@ use crate::vars::{
 use super::output::python_falsy;
 use super::retry::raised;
 
+/// The key a result names the variables it set that are data under, for
+/// [`super::record::record_local_facts`]. Like every `_volant_` key it is taken off before anything
+/// shows or registers the result.
+pub(super) const DATA_KEY: &str = "_volant_data";
+
 /// The options that only mean something for a directory, and so cannot be given with a file.
 const DIR_OPTIONS: [&str; 6] = [
     "dir",
@@ -154,10 +159,10 @@ pub(super) fn run_include_vars(item: &Item, step: &Step, store: &Mutex<VarStore>
         Ok(facts) => facts,
         Err(result) => return result,
     };
-    let facts = if args.get("hash_behaviour").and_then(Value::as_str) == Some("merge") {
+    let (facts, data) = if args.get("hash_behaviour").and_then(Value::as_str) == Some("merge") {
         merged_over(&item.vars, facts)
     } else {
-        facts
+        (facts, Vec::new())
     };
     let mut r = Map::new();
     r.insert("ansible_facts".into(), Value::Object(facts));
@@ -166,6 +171,9 @@ pub(super) fn run_include_vars(item: &Item, step: &Step, store: &Mutex<VarStore>
     r.insert("failed".into(), json!(false));
     if encrypted {
         r.insert("_ansible_no_log".into(), json!(true));
+    }
+    if !data.is_empty() {
+        r.insert(DATA_KEY.into(), json!(data));
     }
     TaskResult(r)
 }
@@ -201,19 +209,28 @@ fn wrap(name: Option<&Value>, facts: Map<String, Value>) -> Result<Map<String, V
 /// `hash_behaviour: merge`: each name the result sets, merged over the variable of that name the
 /// task already sees when both are mappings. Any other `hash_behaviour` replaces, which is what
 /// the result already does.
-fn merged_over(vars: &HostVars, facts: Map<String, Value>) -> Map<String, Value> {
-    facts
+///
+/// The second answer names the merged variables that hold what a managed host returned, whichever
+/// of their leaves it is: they are data, as a `set_fact` value built from such text is. A value
+/// that replaces another takes the status of the new value, which is the file's own text.
+fn merged_over(vars: &HostVars, facts: Map<String, Value>) -> (Map<String, Value>, Vec<String>) {
+    let mut data = Vec::new();
+    let merged = facts
         .into_iter()
         .map(|(key, value)| {
             let merged = match (vars.get(&key), &value) {
                 (Some(Value::Object(old)), Value::Object(fresh)) => {
+                    if vars.untrusted.contains(&key) {
+                        data.push(key.clone());
+                    }
                     Value::Object(merge_hash(old, fresh))
                 }
                 _ => value,
             };
             (key, merged)
         })
-        .collect()
+        .collect();
+    (merged, data)
 }
 
 fn failed(failure: Returned) -> TaskResult {
