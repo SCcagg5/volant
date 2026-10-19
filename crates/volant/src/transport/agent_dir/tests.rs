@@ -457,3 +457,28 @@ fn the_start_command_checks_the_directory_again() {
     );
     assert!(!remote.marker().exists(), "the program did not start");
 }
+
+/// A default ACL on `remote_tmp` replaces the umask, so a directory made with `mkdir` alone comes
+/// out open to the group however tight the umask is. The upload asks for mode 0700 itself.
+#[test]
+fn a_default_acl_on_remote_tmp_does_not_open_the_directory() {
+    let remote = Remote::new();
+    let set = Command::new("setfacl")
+        .args(["-d", "-m", "g::rwx,o::rx"])
+        .arg(remote.shared())
+        .stderr(Stdio::null())
+        .status();
+    if !set.is_ok_and(|status| status.success()) {
+        eprintln!("skipped: `setfacl` is missing, or the file system has no ACLs");
+        return;
+    }
+    let upload = remote.upload(&good_agent("abc"));
+    assert_eq!(upload.status.code(), Some(0), "{:?}", captured(&upload));
+    assert_eq!(mode(&remote.dir()) & 0o077, 0, "the directory is private");
+    let probe = remote.probe();
+    assert!(
+        is_this_agent(&captured(&probe), "abc"),
+        "{:?}",
+        captured(&probe)
+    );
+}
