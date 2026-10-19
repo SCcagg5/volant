@@ -1592,6 +1592,8 @@ fn integers_of_any_width_keep_their_digits_through_templates() {
     for (text, want) in [
         ("{{ a }}", number(u64_end)),
         ("{{ c }}", number(past)),
+        ("{# a note #}{{ c }}", number(past)),
+        ("{% if true %}{{ c }}{% endif %}", number(past)),
         ("{{ d }}", number(&format!("-{wide}"))),
         ("{{ list }}", number(&format!("[{past}, 1.5, 7]"))),
         ("{{ [c, d] | last }}", number(&format!("-{wide}"))),
