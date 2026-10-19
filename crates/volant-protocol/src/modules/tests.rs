@@ -12,6 +12,50 @@ fn builtin_prefixes_are_stripped_and_collections_kept() {
     assert_eq!(short_name("community.general.ufw"), "community.general.ufw");
 }
 
+/// Measured on ansible-core 2.19.12: every module `ansible.builtin` ships resolves under
+/// `ansible.legacy` as well, and to the same module.
+#[test]
+fn every_builtin_module_resolves_under_both_prefixes() {
+    for m in BUILTIN_MODULES {
+        for spelling in [
+            format!("ansible.builtin.{m}"),
+            format!("ansible.legacy.{m}"),
+        ] {
+            assert!(is_builtin(&spelling), "{spelling}");
+            assert_eq!(builtin_route(&spelling), builtin_route(m), "{spelling}");
+        }
+    }
+    assert!(!is_builtin("ansible.legacy.nosuchmodule"));
+}
+
+/// `yum` is ansible-core's redirect to `dnf`: one builtin in every spelling, with no module of
+/// its own, and `yum_repository` and a collection's `yum` are not it.
+#[test]
+fn yum_is_a_builtin_that_runs_the_dnf_action() {
+    for spelling in ["yum", "ansible.builtin.yum", "ansible.legacy.yum"] {
+        assert!(is_builtin(spelling), "{spelling}");
+        assert!(!is_known(spelling), "{spelling}");
+        assert_eq!(resolved_name(spelling), "dnf", "{spelling}");
+        assert_eq!(builtin_route(spelling), Some(Route::ActionPlugin));
+        assert_eq!(short_name(spelling), "yum");
+    }
+    assert!(
+        !BUILTIN_MODULES.contains(&"yum"),
+        "ansible-doc lists no yum"
+    );
+    for (name, target) in BUILTIN_REDIRECTS {
+        assert!(BUILTIN_MODULES.contains(target), "{name} -> {target}");
+        assert!(!BUILTIN_MODULES.contains(name), "{name}");
+    }
+    assert_eq!(resolved_name("yum_repository"), "yum_repository");
+    assert_eq!(resolved_name("ansible.builtin.copy"), "copy");
+    assert_eq!(
+        resolved_name("community.general.yum"),
+        "community.general.yum"
+    );
+    assert!(!is_builtin("community.general.yum"));
+}
+
 #[test]
 fn native_lookup_uses_the_short_name() {
     assert_eq!(native("ansible.builtin.raw").map(|m| m.name), Some("raw"));

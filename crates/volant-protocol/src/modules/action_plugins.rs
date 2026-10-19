@@ -23,7 +23,7 @@ pub const ACTION_PLUGINS: &[(&str, &str)] = &[
     ),
     (
         "dnf",
-        "Install or remove packages with `dnf` or `dnf5`, whichever the host runs.",
+        "Install or remove packages with `dnf` or `dnf5`, whichever the host runs. `yum` is a redirect to it.",
     ),
     (
         "fetch",
