@@ -242,7 +242,7 @@ async fn controller_side(
 /// conditions, the facts written after the task - sees the same names with the same trust: a key
 /// built from `random` or a `lookup('pipe', ...)` renders differently each time, and matching a
 /// second render against the first would lose which name holds a managed host's value.
-pub(super) fn set_fact_names<'a>(
+pub(in crate::executor) fn set_fact_names<'a>(
     item: &'a Item,
     templar: &Templar,
 ) -> Result<Vec<(String, &'a Value, bool)>, TaskResult> {
