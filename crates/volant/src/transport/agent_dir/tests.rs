@@ -141,6 +141,32 @@ impl Remote {
     fn probe(&self) -> Output {
         Self::sh(&self.target.probe_command(), b"", None)
     }
+
+    /// `script` run with an `ls` that says `remote_tmp` has `mode`, as a file system with ACLs
+    /// does: a named-user ACL shows in the mode column as a group mask and a trailing `+`.
+    fn sh_with_remote_tmp_mode(&self, script: &str, stdin: &[u8], mode: &str) -> Output {
+        let bin = self.root.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let fake = bin.join("ls");
+        std::fs::write(
+            &fake,
+            format!("#!/bin/sh\n/bin/ls \"$@\" | sed '/\\/shared\\/$/ s/^[^ ]*/{mode}/'\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg(script)
+            .env("PATH", path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let _ = child.stdin.take().unwrap().write_all(stdin);
+        child.wait_with_output().unwrap()
+    }
 }
 
 impl Drop for Remote {
@@ -481,4 +507,63 @@ fn a_default_acl_on_remote_tmp_does_not_open_the_directory() {
         "{:?}",
         captured(&probe)
     );
+}
+
+/// An ACL that names another user or group shows as a group mask and a trailing `+`, so a
+/// `remote_tmp` with group write and a `+` can be written by someone else. Without the `+`, or
+/// with the sticky bit, the same mode is accepted.
+#[rstest]
+#[case::a_named_acl_with_write("drwxrwx---+", false)]
+#[case::the_same_without_an_acl("drwxrwx---", true)]
+#[case::a_named_acl_and_the_sticky_bit("drwxrwx--t+", true)]
+fn a_remote_tmp_open_to_a_named_acl_is_refused(#[case] mode: &str, #[case] accepted: bool) {
+    let remote = Remote::new();
+    let upload = remote.upload(&good_agent("abc"));
+    assert_eq!(upload.status.code(), Some(0), "{:?}", captured(&upload));
+    let probe = remote.sh_with_remote_tmp_mode(&remote.target.probe_command(), b"", mode);
+    let upload = remote.sh_with_remote_tmp_mode(&remote.target.upload_command(3), b"abc", mode);
+    if accepted {
+        assert!(
+            is_this_agent(&captured(&probe), "abc"),
+            "{:?}",
+            captured(&probe)
+        );
+        assert_ne!(
+            upload.status.code(),
+            Some(EXIT_UNSAFE),
+            "{:?}",
+            captured(&upload)
+        );
+    } else {
+        assert_eq!(
+            probe.status.code(),
+            Some(EXIT_UNSAFE),
+            "{:?}",
+            captured(&probe)
+        );
+        assert_eq!(
+            upload.status.code(),
+            Some(EXIT_UNSAFE),
+            "{:?}",
+            captured(&upload)
+        );
+        let said = String::from_utf8_lossy(&probe.stderr).into_owned();
+        assert!(said.contains(remote.shared().to_str().unwrap()), "{said}");
+    }
+}
+
+/// The clean-up keeps an older version's directory that another user could write to.
+#[test]
+fn an_open_older_directory_is_kept() {
+    let remote = Remote::new();
+    let open = remote.shared().join("volant-agent-0.0.1");
+    std::fs::create_dir(&open).unwrap();
+    std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
+    let closed = remote.shared().join("volant-agent-0.0.2");
+    std::fs::create_dir(&closed).unwrap();
+    std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let upload = remote.upload(&good_agent("abc"));
+    assert_eq!(upload.status.code(), Some(0), "{:?}", captured(&upload));
+    assert!(open.exists(), "a directory others can write is not removed");
+    assert!(!closed.exists(), "a closed one of this user is");
 }
