@@ -53,7 +53,7 @@ This holds in play, block and task `vars`, `group_vars`, role defaults, `vars_fi
 
 A variable that reads a name with no value has none either: `default` and `is defined` see it as undefined. A variable that reads itself, directly or through others, fails with `Recursive loop detected in template: maximum recursion depth exceeded`, also behind `default`, as in ansible-core.
 
-A variable from a managed host is not rendered, and neither is a variable built from one. Reading it through a filter gives its text. See [Trusted and untrusted values](/variables/trust/).
+A variable from a managed host is not rendered, and neither is a variable built from one. The same holds for a value read from `groups`, `inventory_hostname` or `group_names` that holds a template of its own, since a name added to the inventory during the run can come from a host. Reading it through a filter gives its text. See [Trusted and untrusted values](/variables/trust/).
 
 `hostvars['other']['name']` still gives the raw text of a variable that holds a template. Read the name directly when it is the same on the host that runs the task.
 
