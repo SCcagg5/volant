@@ -907,3 +907,58 @@ fn text_prints_containers_none_and_chained_undefined_as_the_reference_does() {
     assert!(t.render("{{ nope.a }}", &v).is_err());
     assert!(t.render("x {{ d.no.sub }}", &v).is_err());
 }
+
+/// What `dict` says when it refuses, in CPython's words. The golden rows only record that
+/// ansible-core 2.19.12 failed; the texts here are the ones it printed after "Error rendering
+/// template:".
+#[rstest::rstest]
+#[case::too_long(
+    "{{ dict([['a', 1, 2]]) }}",
+    "dictionary update sequence element #0 has length 3; 2 is required"
+)]
+#[case::too_short(
+    "{{ dict([['a']]) }}",
+    "dictionary update sequence element #0 has length 1; 2 is required"
+)]
+#[case::second_element(
+    "{{ dict([['a', 1], ['b']]) }}",
+    "dictionary update sequence element #1 has length 1; 2 is required"
+)]
+#[case::text(
+    "{{ dict('abcd') }}",
+    "dictionary update sequence element #0 has length 1; 2 is required"
+)]
+#[case::mapping_of_one_key(
+    "{{ dict([{'a': 1}]) }}",
+    "dictionary update sequence element #0 has length 1; 2 is required"
+)]
+#[case::element_not_a_sequence(
+    "{{ dict([1]) }}",
+    "cannot convert dictionary update sequence element #0 to a sequence"
+)]
+#[case::unhashable_list("{{ dict([[[1], 2]]) }}", "unhashable type: 'list'")]
+#[case::unhashable_mapping("{{ dict([[{'a': 1}, 2]]) }}", "unhashable type: 'dict'")]
+#[case::number("{{ dict(5) }}", "'int' object is not iterable")]
+#[case::float("{{ dict(1.5) }}", "'float' object is not iterable")]
+#[case::boolean("{{ dict(true) }}", "'bool' object is not iterable")]
+#[case::none("{{ dict(none) }}", "'NoneType' object is not iterable")]
+#[case::two_arguments("{{ dict([], []) }}", "dict expected at most 1 argument, got 2")]
+fn dict_refuses_in_the_words_of_python(#[case] text: &str, #[case] want: &str) {
+    let err = templar().render(text, &Map::new()).unwrap_err();
+    assert!(err.0.contains(want), "{text}: {err}");
+}
+
+#[test]
+fn dict_of_an_undefined_value_is_an_undefined_read() {
+    let t = templar();
+    assert!(
+        t.render("{{ dict(nope) }}", &Map::new())
+            .unwrap_err()
+            .is_undefined()
+    );
+    assert!(
+        t.render("{{ dict([nope]) }}", &Map::new())
+            .unwrap_err()
+            .is_undefined()
+    );
+}

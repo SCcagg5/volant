@@ -493,3 +493,77 @@
 - template: "{% macro q(a) %}m{{ a }}{% endmacro %}{{ q(1) }}"
 - template: "{% macro query(a) %}m{{ a }}{% endmacro %}{{ query(2) }}"
 - template: "{{ lookup('varnames', '[', wantlist=True) }}"
+# `dict()` in every form Python's constructor takes. The errors are the reference's own.
+- template: "{{ dict() }}"
+- template: "{{ dict(M) }}"
+  vars: {M: {a: 1, b: 2}}
+- template: "{{ dict(a=1, b=2) }}"
+- template: "{{ dict(M, c=3) }}"
+  vars: {M: {a: 1, b: 2}}
+- template: "{{ dict(M, a=3) }}"
+  vars: {M: {a: 1, b: 2}}
+- template: "{{ dict(P) }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P) }}"
+  vars: {P: []}
+- template: "{{ dict(P | list) }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P, a=3) }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[a, 1], [a, 2]]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[a, [1, 2]], [b, {c: d}]]}
+- template: "{{ dict(K | zip(V)) }}"
+  vars: {K: [a, b], V: [1, 2]}
+- template: "{{ dict(K | zip(V)) }}"
+  vars: {K: [a, b, c], V: [1, 2]}
+- template: "{{ dict(K | zip(V) | list) }}"
+  vars: {K: [a, b], V: [1, 2]}
+- template: "{{ dict(M.items()) }}"
+  vars: {M: {a: 1, b: 2}}
+- template: "{{ dict(M | dict2items | map(attribute='key') | zip(M | dict2items | map(attribute='value'))) }}"
+  vars: {M: {a: 1, b: 2}}
+- template: "{{ dict(P | map('reverse')) }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P | batch(2)) }}"
+  vars: {P: [a, 1, b, 2]}
+- template: "{{ dict([['a', 1], ['b', 2]]) }}"
+- template: "{{ dict(['ab', 'cd']) }}"
+- template: "{{ dict(P) }}"
+  vars: {P: [{a: 1, b: 2}]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[1, 2], [true, 4]]}
+- template: "{{ dict(P) | dict2items }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P) | combine({'z': 1}) }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P)['b'] }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P) is mapping }}"
+  vars: {P: [[a, 1]]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[a, 1, 2]]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[a]]}
+- template: "{{ dict(P) }}"
+  vars: {P: [a]}
+- template: "{{ dict(P) }}"
+  vars: {P: [1]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[[1, 2], 3]]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[{a: 1}, 3]]}
+- template: "{{ dict(P) }}"
+  vars: {P: abcd}
+- template: "{{ dict(P) }}"
+  vars: {P: 5}
+- template: "{{ dict(P) }}"
+  vars: {P: null}
+- template: "{{ dict(P) }}"
+  vars: {P: true}
+- template: "{{ dict(P, P) }}"
+  vars: {P: []}
+- template: "{{ dict(1, 2) }}"
+- template: "{{ dict(nope) }}"
+- template: "{{ dict(a=nope) }}"
