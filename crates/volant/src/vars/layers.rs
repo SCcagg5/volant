@@ -96,7 +96,8 @@ impl VarStore {
     /// Hosts holding at least one untrusted name, for the `hostvars[other]` path. Read once per
     /// host and per task, under the store's lock, so it is kept rather than rebuilt: the set is
     /// the size of the inventory and every rebuild allocated a string per host inside the
-    /// critical section. A spelling of the controller is in the set when any spelling is. Dropped by `forget_hostvars`, which every write to the facts calls.
+    /// critical section. A spelling of the controller is in the set when any spelling is. Dropped
+    /// by `forget_hostvars`, which every write to the facts calls.
     pub fn untrusted_hosts(&mut self) -> Arc<BTreeSet<String>> {
         if let Some(hosts) = &self.untrusted_hosts {
             return Arc::clone(hosts);
