@@ -12,7 +12,8 @@
 //! as, and has no group or other write bit. `remote_tmp` itself is accepted only when other
 //! users cannot rename an entry in it: it belongs to that user, to root, or to the user whom
 //! `sudo` reports in `SUDO_UID` (the login user, who can already act as root), and it is closed
-//! to group and other writes or has the sticky bit.
+//! to other writes, or has the sticky bit. A directory that the user owns may be open to its
+//! group, as a umask of 002 makes the home directory and what is under it.
 //!
 //! The checks use `ls -ldn`, which POSIX specifies and GNU, BusyBox and BSD `ls` all print the
 //! same way, so no `stat` option that a host may lack is needed.
@@ -26,16 +27,19 @@ use super::shell::shell_word;
 /// `st` reads the mode and the owner of a path into `m` and `o`, with the path not followed when
 /// it is a link, because `ls -l` shows the link itself. `fit TYPE PATH` succeeds when the path
 /// has the type (`d` or `-`), belongs to `$u` and has no group or other write bit. `shared DIR`
-/// is the same test for `remote_tmp`, which may instead be sticky. `say` names a refused path.
+/// is the test for `remote_tmp`, which may also be sticky, or open to the group of its owner.
+/// `say` names a refused path.
 /// `verify` checks `remote_tmp`, the directory and the program, the way every start does.
 /// `prepare` makes the directory for an upload. `sweep` removes the other versions' directories
 /// that belong to this user.
 const CHECKS: &str = concat!(
     r#"st() { set -f; set -- $(ls -ldn -- "$1" 2>/dev/null); set +f; m=$1; o=$3; }; "#,
     r#"fit() { st "$2"; case "$m" in "$1"????[!w]??[!w]*) [ "$o" = "$u" ]; return;; esac; return 1; }; "#,
-    r#"shared() { st "$1/"; case "$m" in d????[!w]??[!w]*|d????????[tT]*) [ "$o" = "$u" ] || [ "$o" = 0 ] || [ "$o" = "${SUDO_UID:-x}" ]; return;; esac; return 1; }; "#,
+    r#"shared() { st "$1/"; case "$m" in d*) ;; *) return 1;; esac; "#,
+    r#"[ "$o" = "$u" ] || [ "$o" = 0 ] || [ "$o" = "${SUDO_UID:-x}" ] || return 1; "#,
+    r#"case "$m" in d????????[tT]*) return 0;; d???????w*) return 1;; d????w*) [ "$o" = "$u" ]; return;; esac; return 0; }; "#,
     r#"say() { printf '%s\n' "$1: permissions ${m:-unknown}, owner uid ${o:-unknown}: $2" >&2; }; "#,
-    r#"bad_tmp() { say "$rt" "other users could replace the agent directory in it; it must belong to uid $u, to root or to the user who ran sudo, and be closed to group and other writes or have the sticky bit"; }; "#,
+    r#"bad_tmp() { say "$rt" "other users could replace the agent directory in it; it must belong to uid $u, to root or to the user who ran sudo, and other users must not be able to write to it unless it has the sticky bit"; }; "#,
     r#"bad_dir() { say "$d" "it must be a real directory of uid $u with no group or other write bit"; }; "#,
     r#"bad_file() { say "$a" "it must be a regular file of uid $u with no group or other write bit"; }; "#,
     r#"verify() { shared "$rt" || { bad_tmp; return 1; }; fit d "$d" || { bad_dir; return 1; }; fit - "$a" || { bad_file; return 1; }; }; "#,

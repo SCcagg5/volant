@@ -75,7 +75,7 @@ The agent travels through `ssh -C`, so OpenSSH compresses it on the wire and not
 Volant runs the cached agent only from a directory that no other account can change. It checks this on the probe, after an upload and again just before the start:
 
 - The directory and the program are not symbolic links. The account that runs the agent owns both, and neither has a group or other write bit.
-- `remote_tmp` belongs to that account, to root or, under `sudo`, to the account that ran `sudo`. Group and other cannot write to it, or it has the sticky bit, as `/tmp` has.
+- `remote_tmp` belongs to that account, to root or, under `sudo`, to the account that ran `sudo`. Other accounts cannot write to it, or it has the sticky bit, as `/tmp` has. A directory that the account owns may be open to its group, as a umask of 002 makes it.
 
 Any other state stops the host with an `UNREACHABLE` error that names the path, its permissions and its owner. An upload made by Volant is created with `umask 077`. If the directory is yours but too open, the upload empties it of Volant's files and makes it again. If another account owns it, Volant leaves it alone and reports it. Only the directories of other versions that the same account owns are removed.
 

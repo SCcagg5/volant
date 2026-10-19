@@ -343,6 +343,19 @@ fn an_ordinary_run_still_caches_and_reuses_the_agent() {
         "a probe changes nothing"
     );
 
+    // `remote_tmp` may be this user's own and open to its group (a umask of 002 makes it so), or
+    // sticky and open to everybody, as `/tmp` is.
+    for parent in [0o775, 0o1777, 0o755] {
+        std::fs::set_permissions(remote.shared(), std::fs::Permissions::from_mode(parent)).unwrap();
+        let probe = remote.probe();
+        assert!(
+            is_this_agent(&captured(&probe), "abc"),
+            "{parent:o}: {:?}",
+            captured(&probe)
+        );
+    }
+    std::fs::set_permissions(remote.shared(), std::fs::Permissions::from_mode(0o700)).unwrap();
+
     // A directory an earlier run made with the usual umask is still good.
     std::fs::set_permissions(remote.dir(), std::fs::Permissions::from_mode(0o755)).unwrap();
     let probe = remote.probe();
