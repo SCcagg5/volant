@@ -1146,6 +1146,64 @@ fn the_connection_password_is_in_neither_the_debug_output_nor_the_command_line()
     }
 }
 
+/// The scan that checks a managed host cannot set a connection variable reads the names from
+/// `names::all()`. A name written in `names.rs` and left out of it would escape the scan, so
+/// every `ansible_` name in the file has to be in the list.
+#[test]
+fn every_connection_name_in_names_rs_is_in_the_list_the_scan_reads() {
+    let written: std::collections::BTreeSet<&str> = include_str!("names.rs")
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .filter(|text| text.starts_with("ansible_"))
+        .collect();
+    let listed: std::collections::BTreeSet<&str> = names::all().collect();
+    assert!(!listed.is_empty());
+    assert_eq!(
+        written, listed,
+        "a name in names.rs is missing from names::all(), or the other way round"
+    );
+}
+
+/// Every type that can hold a connection password prints a placeholder, in the one-line and the
+/// pretty form of `Debug`, so a `{:?}` added to a log line later cannot show it.
+#[test]
+fn no_type_that_holds_a_connection_password_shows_it_in_debug_output() {
+    let password = "s3cret-pw";
+    let vars = json!({"ansible_password": password, "ansible_become_password": password});
+    let transport = Transport::for_host(&host(vars), &defaults()).unwrap();
+    let Transport::Ssh(target) = transport.clone() else {
+        panic!("expected ssh")
+    };
+    let mut with_defaults = defaults();
+    with_defaults.become_password = Some(password.into());
+    let mut escalating = escalation(Some(password));
+    escalating.password = Some(password.into());
+    let secret = Secret::new(password);
+    let source = crate::askpass::Source::Variable(password);
+    let shown = [
+        format!("{secret:?}"),
+        format!("{secret:#?}"),
+        format!("{:?}", Some(secret.clone())),
+        format!("{source:?}"),
+        format!("{source:#?}"),
+        format!("{:?}", target.own),
+        format!("{:#?}", target.own),
+        format!("{target:?}"),
+        format!("{target:#?}"),
+        format!("{transport:?}"),
+        format!("{transport:#?}"),
+        format!("{with_defaults:?}"),
+        format!("{with_defaults:#?}"),
+        format!("{escalating:?}"),
+        format!("{escalating:#?}"),
+    ];
+    for text in &shown {
+        assert!(!text.contains(password), "{text}");
+    }
+    assert!(shown[0].contains("<redacted>") && shown[3].contains("<redacted>"));
+}
+
 /// Without a password variable, and with the empty one, `ssh` never prompts.
 #[rstest]
 #[case::none(json!({}))]
