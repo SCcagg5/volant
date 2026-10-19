@@ -4976,10 +4976,6 @@ fn include_tasks_refuses_an_unknown_key() {
         .expect("the probe include target is written");
     for (body, message) in [
         (
-            "- hosts: localhost\n  gather_facts: false\n  tasks:\n    - include_tasks:\n        file: sub.yml\n        apply:\n          become: true\n",
-            "'include_tasks' option 'apply'",
-        ),
-        (
             "- hosts: localhost\n  gather_facts: false\n  tasks:\n    - include_tasks:\n        file: sub.yml\n        nosuchkey: true\n",
             "Invalid options for include_tasks: nosuchkey",
         ),

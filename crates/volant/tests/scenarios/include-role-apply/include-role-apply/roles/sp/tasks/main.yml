@@ -1,3 +1,0 @@
-- name: sp ran
-  debug:
-    msg: "sp ran must={{ must }}"

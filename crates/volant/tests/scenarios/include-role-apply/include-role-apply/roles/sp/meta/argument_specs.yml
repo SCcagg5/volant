@@ -1,7 +1,0 @@
-argument_specs:
-  main:
-    short_description: Needs must
-    options:
-      must:
-        type: str
-        required: true

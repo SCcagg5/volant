@@ -1,8 +1,0 @@
-- hosts: h1
-  gather_facts: false
-  tasks:
-    - name: include a role with a bad key
-      include_role:
-        name: r
-        apply:
-          nosuchkeyword: 1

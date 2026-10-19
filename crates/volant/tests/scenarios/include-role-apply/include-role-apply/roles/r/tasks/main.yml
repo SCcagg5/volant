@@ -1,8 +1,0 @@
-- name: show r
-  debug:
-    msg: "in r rdef={{ rdef }} rvar={{ rvar }}"
-- name: change something
-  debug:
-    msg: changing
-  changed_when: true
-  notify: r handler

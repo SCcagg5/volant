@@ -1,5 +1,0 @@
-- name: in outer
-  debug:
-    msg: "w={{ w }}"
-- name: inner include
-  include_tasks: inc.yml

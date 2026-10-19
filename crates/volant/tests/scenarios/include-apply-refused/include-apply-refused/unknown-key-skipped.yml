@@ -1,9 +1,0 @@
-- hosts: h1
-  gather_facts: false
-  tasks:
-    - name: skipped, so the key is never read
-      include_tasks:
-        file: inc.yml
-        apply:
-          nosuchkeyword: 1
-      when: false
