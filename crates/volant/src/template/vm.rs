@@ -431,7 +431,7 @@ pub(super) fn convert_error(err: minijinja::Error) -> TemplateError {
     if let Some(said) = bridged::said(&err) {
         return TemplateError(said.to_string());
     }
-    let text = err.to_string();
+    let text = err.to_string() + super::bigint::refusal_note(&err);
     if err.kind() == ErrorKind::UndefinedError {
         return TemplateError(format!("{UNDEFINED} The error was: {text}"));
     }
