@@ -30,6 +30,11 @@ fn the_builtin_prefixes_name_the_same_modules() {
     assert_eq!(kind("community.general.package"), None);
     assert_eq!(kind("ansible.builtin.copy"), Some(Kind::Copy));
     assert_eq!(kind("ansible.legacy.dnf"), Some(Kind::Dnf));
+    assert_eq!(kind("yum"), Some(Kind::Dnf));
+    assert_eq!(kind("ansible.builtin.yum"), Some(Kind::Dnf));
+    assert_eq!(kind("ansible.legacy.yum"), Some(Kind::Dnf));
+    assert_eq!(kind("yum_repository"), None);
+    assert_eq!(kind("community.general.yum"), None);
     assert_eq!(kind("community.general.dnf"), None);
     assert_eq!(kind("ansible.builtin.template"), Some(Kind::Template));
     assert_eq!(kind("ansible.builtin.unarchive"), Some(Kind::Unarchive));

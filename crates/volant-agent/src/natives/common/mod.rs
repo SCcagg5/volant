@@ -75,9 +75,7 @@ pub fn native_run(
 /// The clock of a task: its `timeout` from now, and the controller's cancel.
 pub fn clock<'a>(context: &crate::modules::Context, cancelled: &'a dyn Fn() -> bool) -> Clock<'a> {
     Clock {
-        deadline: context
-            .timeout
-            .map(|timeout| std::time::Instant::now() + timeout),
+        deadline: context.deadline(),
         cancelled,
     }
 }

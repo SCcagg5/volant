@@ -227,6 +227,7 @@ fn hostvars_answers_alike_from_a_map_a_view_or_a_bare_map() {
                 facts: None,
                 untrusted: None,
                 untrusted_hosts: None,
+                base: None,
             };
             assert_eq!(t.render(text, vars).unwrap(), want, "{text}");
         }
@@ -254,6 +255,7 @@ fn the_context_hands_out_the_shared_view_and_ranks_inventory_wide_names() {
             facts: None,
             untrusted: None,
             untrusted_hosts: None,
+            base: None,
         });
         let first = ctx
             .get_attr("hostvars")
@@ -287,6 +289,7 @@ fn the_context_hands_out_the_shared_view_and_ranks_inventory_wide_names() {
             facts: None,
             untrusted: None,
             untrusted_hosts: None,
+            base: None,
         };
         assert_eq!(
             t.render("{{ groups['web'] }}", vars).unwrap(),
@@ -296,16 +299,34 @@ fn the_context_hands_out_the_shared_view_and_ranks_inventory_wide_names() {
         // and for nothing else.
         assert_eq!(t.render("{{ own }}", vars).unwrap(), json!(1));
     }
-    {
+    // The host's own names whole in its map, or split with the base a loop's items share: a
+    // name either layer holds is listed once.
+    for (own, base) in [
+        (
+            json!({"groups": "a set_fact wrote this", "own": 1}),
+            json!({}),
+        ),
+        (
+            json!({"own": 1}),
+            json!({"groups": "a set_fact wrote this"}),
+        ),
+        (
+            json!({}),
+            json!({"groups": "a set_fact wrote this", "own": 1}),
+        ),
+    ] {
         let shared = Arc::new(vars(json!({"groups": {"web": ["h1"]}})));
-        let fact = vars(json!({"groups": "a set_fact wrote this", "own": 1}));
+        let facts = Arc::new(vars(json!({"own": 2})));
+        let own = vars(own);
+        let base = Arc::new(vars(base));
         let (ctx, _) = context_of(Vars {
-            map: &fact,
+            map: &own,
             hostvars: None,
             shared: Some(&shared),
-            facts: None,
+            facts: Some(&facts),
             untrusted: None,
             untrusted_hosts: None,
+            base: Some(&base),
         });
         let mut names: Vec<String> = ctx
             .try_iter()
@@ -313,7 +334,7 @@ fn the_context_hands_out_the_shared_view_and_ranks_inventory_wide_names() {
             .map(|name| name.to_string())
             .collect();
         names.sort();
-        assert_eq!(names, ["groups", "own"]);
+        assert_eq!(names, ["groups", "own"], "{own:?} over {base:?}");
     }
 }
 
@@ -353,6 +374,7 @@ fn extract_reads_hostvars_by_host_name_and_taints_like_a_bare_read() {
                 facts: None,
                 untrusted: None,
                 untrusted_hosts: None,
+                base: None,
             };
             assert_eq!(t.render(loop_text, v).unwrap(), want, "{server_group}");
         }
@@ -371,6 +393,7 @@ fn extract_reads_hostvars_by_host_name_and_taints_like_a_bare_read() {
                 facts: None,
                 untrusted: None,
                 untrusted_hosts,
+                base: None,
             };
             for text in [
                 "{{ hostvars['h2'].x }}",
@@ -430,6 +453,7 @@ fn conditions_need_a_boolean_and_never_evaluate_a_host_string() {
             facts: None,
             untrusted: Some(&registered),
             untrusted_hosts: Some(&hosts),
+            base: None,
         };
         for text in [
             "{{ s.stdout }}",

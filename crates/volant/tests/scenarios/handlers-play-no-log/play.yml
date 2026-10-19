@@ -1,0 +1,28 @@
+- hosts: all
+  gather_facts: false
+  no_log: true
+  roles: [rr]
+  tasks:
+    - command: "true"
+      notify: [play_handler, listened, own_false]
+    - block:
+        - command: "true"
+          notify: from_block
+    - meta: flush_handlers
+    - debug:
+        msg: "task {{ sec }}"
+  handlers:
+    - name: play_handler
+      debug:
+        msg: "play handler {{ sec }}"
+    - name: listening handler
+      listen: listened
+      debug:
+        msg: "listening handler {{ sec }}"
+    - name: own_false
+      no_log: false
+      debug:
+        msg: "own false {{ sec }}"
+    - name: from_block
+      debug:
+        msg: "from block {{ sec }}"
