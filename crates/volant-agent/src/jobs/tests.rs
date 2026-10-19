@@ -64,7 +64,7 @@ fn the_kill_moment_is_the_first_step_past_the_limit_for_every_small_limit() {
 #[case::i64_max(i64::MAX as u64)]
 #[case::u64_max(u64::MAX)]
 fn a_huge_limit_is_worked_out_at_once_and_never_expires(#[case] limit: u64) {
-    let (tx, rx) = std::sync::mpsc::channel();
+    let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let _ = tx.send((kill_after(limit), deadline(limit)));
     });

@@ -72,3 +72,23 @@ fn a_refused_argument_whose_value_arrives_late_fails_the_task() {
         "raw has no registry entry for it, and the reference takes it without looking"
     );
 }
+
+/// A `timeout` the clock can count to ends from now; one it cannot never ends.
+#[test]
+fn a_timeout_past_the_clock_is_no_deadline() {
+    let with = |timeout: Option<Duration>| Context {
+        timeout,
+        ..Context::default()
+    };
+    assert!(with(None).deadline().is_none());
+    let soon = with(Some(Duration::from_secs(60)))
+        .deadline()
+        .expect("a minute is a deadline");
+    assert!(soon > std::time::Instant::now());
+    assert!(
+        with(Some(Duration::from_secs(u64::MAX)))
+            .deadline()
+            .is_none()
+    );
+    assert!(with(Some(Duration::MAX)).deadline().is_none());
+}
