@@ -6,7 +6,7 @@ use serde_json::{Map, Value};
 use tokio::sync::watch;
 
 use super::Abort;
-use super::play_checks::max_fail_percentage;
+use super::play_checks::{max_fail_percentage, play_flags};
 
 use crate::template::Templar;
 
@@ -47,6 +47,79 @@ fn max_fail_percentage_reads_a_number(
             assert!(format!("{err:#}").contains(needle), "{err:#}");
         }
     }
+}
+
+/// `gather_facts` and `force_handlers` templates are rendered once, when the play starts; a value
+/// that is no boolean stops the run in the reference's words, at exit 4.
+#[rstest]
+#[case::gather_true("gather_facts", "{{ on }}", Ok(Some(true)))]
+#[case::gather_false("gather_facts", "{{ off }}", Ok(Some(false)))]
+#[case::gather_word("gather_facts", "{{ 'no' }}", Ok(Some(false)))]
+#[case::force_true("force_handlers", "{{ on }}", Ok(Some(true)))]
+#[case::force_false("force_handlers", "{{ off }}", Ok(Some(false)))]
+#[case::gather_invalid(
+    "gather_facts",
+    "{{ 'maybe' }}",
+    Err(
+        "Error processing keyword 'gather_facts': The value 'maybe' could not be converted to 'bool'."
+    )
+)]
+#[case::force_invalid(
+    "force_handlers",
+    "{{ 'maybe' }}",
+    Err(
+        "Error processing keyword 'force_handlers': The value 'maybe' could not be converted to 'bool'."
+    )
+)]
+#[case::gather_number(
+    "gather_facts",
+    "{{ 2 }}",
+    Err("Error processing keyword 'gather_facts': The value 2 could not be converted to 'bool'.")
+)]
+fn play_flags_are_rendered_when_the_play_starts(
+    #[case] key: &str,
+    #[case] template: &str,
+    #[case] want: Result<Option<bool>, &'static str>,
+) {
+    let play = crate::playbook::parse(
+        &format!("- hosts: all\n  {key}: \"{template}\"\n  tasks: []\n"),
+        "x.yml",
+    )
+    .expect("the play loads")
+    .plays
+    .remove(0);
+    let templar = Templar::new(PathBuf::from("."));
+    let vars = Map::from_iter([
+        ("on".to_string(), Value::Bool(true)),
+        ("off".to_string(), Value::Bool(false)),
+    ]);
+    let got = play_flags(&play, &templar, &vars);
+    match want {
+        Ok(flag) => {
+            let flags = got.expect("the keyword reads");
+            let value = if key == "gather_facts" {
+                flags.gather_facts
+            } else {
+                flags.force_handlers
+            };
+            assert_eq!(value, flag);
+        }
+        Err(text) => assert_eq!(format!("{:#}", got.err().expect("refused")), text),
+    }
+}
+
+/// A play that writes neither as a template renders nothing.
+#[test]
+fn a_play_without_templated_flags_renders_none() {
+    let play = crate::playbook::parse(
+        "- hosts: all\n  gather_facts: false\n  force_handlers: true\n  tasks: []\n",
+        "x.yml",
+    )
+    .expect("the play loads")
+    .plays
+    .remove(0);
+    let flags = play_flags(&play, &Templar::new(PathBuf::from(".")), &Map::new()).unwrap();
+    assert!(flags.gather_facts.is_none() && flags.force_handlers.is_none());
 }
 
 /// An interruption that arrives first keeps the run an interrupted one: a reason raised after

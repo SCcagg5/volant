@@ -40,7 +40,7 @@ use crate::transport::ConnectionDefaults;
 use coordinator::run_batch;
 pub(crate) use driver::{expressions, strings, task_strings};
 pub(crate) use play_checks::as_bool_value;
-use play_checks::{check_gather_keywords, load_play_vars_files, max_fail_percentage};
+use play_checks::{check_gather_keywords, load_play_vars_files, max_fail_percentage, play_flags};
 pub(crate) use play_hosts::{Context as HostsContext, is_templated, render_hosts};
 pub use state::{Abort, LinkKey, PlayEnd, Reboots, RunState};
 
@@ -121,6 +121,20 @@ pub async fn run_play(
         crate::compile::batches(&hosts, play.serial.as_ref(), &state.templar, &play_vars)?;
     let max_fail = max_fail_percentage(play, &state.templar, &play_vars)?;
     check_gather_keywords(play, &state.templar, &play_vars)?;
+    let flags = play_flags(play, &state.templar, &play_vars)?;
+    // `force_handlers` as a template is rendered above and read from the play below, like the
+    // literal.
+    let resolved;
+    let play = match flags.force_handlers {
+        Some(on) => {
+            resolved = Play {
+                force_handlers: Some(on),
+                ..play.clone()
+            };
+            &resolved
+        }
+        None => play,
+    };
     let all: Vec<String> = hosts.iter().map(|h| h.name.clone()).collect();
     // `gathering = smart`: the hosts the cache already answers for leave the `Gathering Facts`
     // step to the others, and a step nobody runs shows nothing at all.
@@ -131,9 +145,11 @@ pub async fn run_play(
             .filter(|h| !store.skips_gathering(h))
             .cloned()
             .collect();
-        (compiled.gathers && wanting.len() < all.len()).then(|| {
+        // A `gather_facts` template that rendered to false leaves the step to nobody.
+        let gathers = flags.gather_facts != Some(false);
+        (compiled.gathers && (wanting.len() < all.len() || !gathers)).then(|| {
             let mut copy = compiled.clone();
-            copy.steps[0].hosts = Some(wanting.into());
+            copy.steps[0].hosts = Some(if gathers { wanting } else { Vec::new() }.into());
             copy
         })
     };

@@ -841,3 +841,176 @@ fn an_import_entry_accepts_the_keywords_it_does_not_pass_on() {
     ])
     .unwrap();
 }
+
+/// The typed value and the waiting template of one keyword, on a task, a block or a role entry.
+fn kept(task: &PlayTask, key: &str) -> (serde_json::Value, Option<String>) {
+    use serde_json::json;
+    let d = &task.deferred;
+    match key {
+        "become" => (json!(task.r#become), d.r#become.clone()),
+        "no_log" => (json!(task.no_log), d.no_log.clone()),
+        "run_once" => (json!(task.run_once), d.run_once.clone()),
+        "any_errors_fatal" => (json!(task.any_errors_fatal), d.any_errors_fatal.clone()),
+        "ignore_unreachable" => (json!(task.ignore_unreachable), d.ignore_unreachable.clone()),
+        "delegate_facts" => (json!(task.delegate_facts), d.delegate_facts.clone()),
+        "timeout" => (json!(task.timeout), d.timeout.clone()),
+        "async" => (json!(task.async_val), d.async_val.clone()),
+        "poll" => (json!(task.poll), d.poll.clone()),
+        other => panic!("{other}"),
+    }
+}
+
+/// The same for a play.
+fn kept_by_play(play: &Play, key: &str) -> (serde_json::Value, Option<String>) {
+    use serde_json::json;
+    let d = &play.deferred;
+    match key {
+        "become" => (json!(play.r#become), d.r#become.clone()),
+        "no_log" => (json!(play.no_log), d.no_log.clone()),
+        "run_once" => (json!(play.run_once), d.run_once.clone()),
+        "any_errors_fatal" => (json!(play.any_errors_fatal), d.any_errors_fatal.clone()),
+        "ignore_unreachable" => (json!(play.ignore_unreachable), d.ignore_unreachable.clone()),
+        "timeout" => (json!(play.timeout), d.timeout.clone()),
+        "gather_facts" => (
+            json!(play.gather_written.then_some(play.gather_facts)),
+            d.gather_facts.clone(),
+        ),
+        "force_handlers" => (json!(play.force_handlers), d.force_handlers.clone()),
+        other => panic!("{other}"),
+    }
+}
+
+/// A template waits in `deferred` with its typed field unset, wherever it is written; a literal
+/// fills the typed field. A play has no `delegate_facts`, `async` or `poll`; a block no `async`.
+#[rstest]
+#[case::escalation("become", "true", serde_json::json!(true))]
+#[case::no_log("no_log", "true", serde_json::json!(true))]
+#[case::run_once("run_once", "true", serde_json::json!(true))]
+#[case::any_errors_fatal("any_errors_fatal", "true", serde_json::json!(true))]
+#[case::ignore_unreachable("ignore_unreachable", "true", serde_json::json!(true))]
+#[case::delegate_facts("delegate_facts", "true", serde_json::json!(true))]
+#[case::timeout("timeout", "3", serde_json::json!(3))]
+#[case::async_keyword("async", "3", serde_json::json!(3))]
+#[case::poll("poll", "3", serde_json::json!(3))]
+fn a_keyword_that_may_be_a_template_is_kept_for_the_task_that_runs(
+    #[case] key: &str,
+    #[case] literal: &str,
+    #[case] typed: serde_json::Value,
+) {
+    let layers: [(&str, &str); 4] = [
+        ("task", "tasks:\n    - command: echo\n      KEY: VALUE\n"),
+        (
+            "block",
+            "tasks:\n    - block:\n        - command: echo\n      KEY: VALUE\n",
+        ),
+        ("role", "roles:\n    - role: r\n      KEY: VALUE\n"),
+        ("play", "KEY: VALUE\n  tasks: []\n"),
+    ];
+    for (layer, body) in layers {
+        let allowed = match key {
+            "delegate_facts" => layer != "play",
+            "async" | "poll" => layer == "task",
+            _ => true,
+        };
+        if !allowed {
+            continue;
+        }
+        for (value, want_typed, want_template) in [
+            (
+                "\"{{ v }}\"",
+                serde_json::Value::Null,
+                Some("{{ v }}".to_string()),
+            ),
+            (literal, typed.clone(), None),
+        ] {
+            let text = format!(
+                "- hosts: all\n  {}",
+                body.replace("KEY", key).replace("VALUE", value)
+            );
+            let pb = parse(&text, "x.yml").unwrap_or_else(|e| panic!("{layer} {key}: {e:#}"));
+            let play = &pb.plays[0];
+            let (got_typed, got_template) = match layer {
+                "task" => kept(first(&pb), key),
+                "block" => {
+                    let TaskOrBlock::Block(b) = &play.tasks[0] else {
+                        panic!("a block");
+                    };
+                    kept(&b.keywords, key)
+                }
+                "role" => kept(&play.roles[0].keywords, key),
+                _ => kept_by_play(play, key),
+            };
+            // `poll` and `async` read as unset when absent, which `kept` shows as null or 0.
+            let got_typed = if got_typed == serde_json::json!(0) && want_typed.is_null() {
+                serde_json::Value::Null
+            } else {
+                got_typed
+            };
+            assert_eq!(
+                (got_typed, got_template),
+                (want_typed, want_template),
+                "{layer} {key}: {value}"
+            );
+        }
+    }
+}
+
+/// `gather_facts` and `force_handlers` of a play wait the same way, and a play that writes
+/// `gather_facts` as a template counts as having written it.
+#[test]
+fn a_play_keeps_a_templated_gather_facts_and_force_handlers_for_when_it_starts() {
+    let pb = parse(
+        "- hosts: all\n  gather_facts: \"{{ g }}\"\n  force_handlers: \"{{ f }}\"\n  tasks: []\n",
+        "x.yml",
+    )
+    .unwrap();
+    let play = &pb.plays[0];
+    assert_eq!(play.deferred.gather_facts.as_deref(), Some("{{ g }}"));
+    assert_eq!(play.deferred.force_handlers.as_deref(), Some("{{ f }}"));
+    assert!(play.gather_facts, "the play gathers until it renders to no");
+    assert!(play.gather_written && play.force_handlers.is_none());
+}
+
+/// A waiting `run_once` still meets the hosts in front of it, and an `any_errors_fatal` is fatal
+/// whatever it renders to: the strategy reads both as written.
+#[test]
+fn a_templated_run_once_and_any_errors_fatal_show_before_they_are_rendered() {
+    let pb = parse(
+        "- hosts: all\n  tasks:\n    - command: echo\n      run_once: \"{{ x }}\"\n    - command: echo\n      any_errors_fatal: \"{{ x }}\"\n    - command: echo\n",
+        "x.yml",
+    )
+    .unwrap();
+    let t = tasks(&pb.plays[0]);
+    assert!(
+        t[0].barrier() && !t[0].runs_once(),
+        "a barrier that does not yet run once"
+    );
+    assert!(t[1].fails_all() && t[1].barrier());
+    assert!(!t[2].barrier() && !t[2].fails_all());
+}
+
+/// A literal that is no boolean is still refused at load, in the reference's words, and so is a
+/// negative or fractional number of seconds; only a template waits.
+#[rstest]
+#[case::no_log(
+    "no_log: maybe",
+    "Error processing keyword 'no_log': The value 'maybe' could not be converted to 'bool'."
+)]
+#[case::escalation(
+    "become: maybe",
+    "Error processing keyword 'become': The value 'maybe' could not be converted to 'bool'."
+)]
+#[case::run_once(
+    "run_once: 2",
+    "Error processing keyword 'run_once': The value 2 could not be converted to 'bool'."
+)]
+#[case::timeout("timeout: -1", "'timeout' must be a non-negative integer")]
+#[case::async_keyword("async: abc", "'async' must be a non-negative integer")]
+fn a_literal_that_is_not_what_the_keyword_takes_is_still_refused_at_load(
+    #[case] line: &str,
+    #[case] says: &str,
+) {
+    let text = format!("- hosts: all\n  tasks:\n    - command: echo\n      {line}\n");
+    let err = parse(&text, "x.yml").expect_err("refused");
+    assert!(format!("{err:#}").contains(says), "{err:#}");
+}

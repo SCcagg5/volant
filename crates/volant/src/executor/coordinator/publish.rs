@@ -2,18 +2,19 @@
 //! The coordinator's published state, and the connections a batch hands back.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::sync::Mutex;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::watch;
 
 use crate::agent::AgentLink;
-use crate::compile::{IncludeKind, Step, StepKind};
+use crate::compile::{Compiled, IncludeKind, Step, StepKind};
 use crate::template::Templar;
 use crate::vars::VarStore;
 
 use super::types::Progress;
-use crate::executor::prepare::{PlayPlan, host_vars};
-use crate::executor::{LinkKey, RunState};
+use crate::executor::prepare::{PlayPlan, host_vars, strategy_reads_as_true};
+use crate::executor::{Abort, LinkKey, RunOptions, RunState};
 /// The coordinator's published state: everything a publish reads, held in one place because it
 /// is read under one serialised view and nowhere else.
 pub(super) struct Coordinator<'a> {
@@ -64,6 +65,9 @@ pub(super) struct Coordinator<'a> {
     pub(super) ending: BTreeSet<usize>,
     /// See `Progress::dismissed`.
     pub(super) dismissed: BTreeSet<String>,
+    /// What reads a `run_once` that is a template, once the hosts of the batch have met in front
+    /// of its step.
+    pub(super) rendering: Option<Rendering<'a>>,
 }
 
 impl Coordinator<'_> {
@@ -166,7 +170,36 @@ impl Coordinator<'_> {
         // first live host the step's mask includes, because one outside it runs nothing and
         // nobody would run the step. Never an overwrite; see `Progress::elected`.
         let at = completed_through.map_or(0, |c| c + 1);
-        if let Some(step) = steps.get(at)
+        // A `run_once` written as a template is read here, where the hosts have met in front of
+        // its step and the runner is elected, and published into the step list so that nobody
+        // reads the template again. The host it names is the runner.
+        let settled = match (&self.rendering, steps.get(at)) {
+            (Some(rendering), Some(step)) if step.task.deferred.run_once.is_some() => rendering
+                .settle(
+                    at,
+                    &Progress {
+                        completed_through,
+                        live_hosts: live_hosts.clone(),
+                        play_hosts_left: play_hosts_left.clone(),
+                        spliced_through: self.spliced_through,
+                        run_once: self.run_once.clone(),
+                        elected: self.elected.clone(),
+                        fatal: self.fatal.clone(),
+                        aborted: self.aborted,
+                        ending: self.ending.clone(),
+                        dismissed: self.dismissed.clone(),
+                    },
+                ),
+            _ => None,
+        };
+        if let Some((_, Some(runner))) = &settled {
+            self.elected.entry(at).or_insert_with(|| runner.clone());
+        }
+        let step = settled
+            .as_ref()
+            .map(|(step, _)| step)
+            .or_else(|| steps.get(at));
+        if let Some(step) = step
             && step.task.bypasses_host_loop()
             && !self.elected.contains_key(&at)
             && let Some(runner) = live_hosts.iter().find(|h| {
@@ -322,4 +355,112 @@ pub(in crate::executor) fn render_name(
         .ok()
         .and_then(|v| v.as_str().map(str::to_string))
         .unwrap_or_else(|| task.name.clone())
+}
+
+/// What the coordinator needs to render a template for a host: the same pieces a driver renders
+/// with, and the list of steps to publish again once the answer is known.
+pub(super) struct Rendering<'a> {
+    plan: Arc<PlayPlan>,
+    steps: &'a watch::Sender<Arc<Compiled>>,
+    templar: Arc<Templar>,
+    store: Arc<Mutex<VarStore>>,
+    playbook_dir: PathBuf,
+    abort: Arc<Abort>,
+}
+
+impl<'a> Rendering<'a> {
+    pub(super) fn new(
+        plan: &Arc<PlayPlan>,
+        steps: &'a watch::Sender<Arc<Compiled>>,
+        state: &RunState,
+        options: &RunOptions,
+    ) -> Self {
+        let playbook_dir = state
+            .vars
+            .lock()
+            .expect("vars lock")
+            .playbook_dir()
+            .to_path_buf();
+        Self {
+            plan: Arc::clone(plan),
+            steps,
+            templar: Arc::clone(&state.templar),
+            store: Arc::clone(&state.vars),
+            playbook_dir,
+            abort: Arc::clone(&options.abort),
+        }
+    }
+
+    /// Reads the `run_once` template of step `at` and publishes the step list again with the
+    /// answer written into that step, so every driver and every reader of the list sees one
+    /// settled value and the index of no step moves. Returns the step as it now stands, and the
+    /// host that runs it when the answer is yes.
+    ///
+    /// Measured on ansible-core 2.19.12: the linear strategy renders the keyword for each host in
+    /// turn and stops at the first host for which it is true, which then runs the task for the
+    /// batch. A text that is not a boolean is true there, since only Python's truthiness reads
+    /// it; the host that runs the task is the one that fails on it. A template that does not
+    /// render answers no here, and fails the task on each host that renders it again.
+    ///
+    /// The hosts in front of the one that answers yes run the task themselves in the reference,
+    /// which this release cannot do: a template that answers differently for the hosts of a batch
+    /// ends the run, rather than run the task for hosts the reference runs it for in another way.
+    pub(super) fn settle(&self, at: usize, live: &Progress) -> Option<(Step, Option<String>)> {
+        // The list as it stands now, which another publish may have settled since `step` was read.
+        let step = self.steps.borrow().steps.get(at)?.clone();
+        let template = step.task.deferred.run_once.as_deref()?;
+        if step.task.run_once.is_some() {
+            return None;
+        }
+        let answers: Vec<(&String, bool)> = live
+            .live_hosts
+            .iter()
+            .filter(|host| {
+                step.hosts
+                    .as_ref()
+                    .is_none_or(|only| only.iter().any(|m| m == *host))
+            })
+            .map(|host| {
+                let vars = host_vars(
+                    host,
+                    &self.plan,
+                    &step.task.vars,
+                    step.role,
+                    step.include_params.as_deref(),
+                    live,
+                    &self.templar,
+                    &self.store,
+                    &step.origin,
+                    &self.playbook_dir,
+                );
+                let yes = self
+                    .templar
+                    .render(template, &vars)
+                    .is_ok_and(|value| strategy_reads_as_true(&value));
+                (host, yes)
+            })
+            .collect();
+        if let Some((host, yes)) = answers
+            .iter()
+            .find(|(_, yes)| Some(*yes) != answers.first().map(|(_, first)| *first))
+        {
+            self.abort.raise_with(
+                4,
+                format!(
+                    "'run_once' renders to {} on {} and to {} on {}: a value that differs between the hosts of a batch is not supported yet",
+                    !yes, answers[0].0, yes, host
+                ),
+            );
+        }
+        let runner = answers
+            .iter()
+            .find(|(_, yes)| *yes)
+            .map(|(host, _)| (*host).clone());
+        let mut list = (**self.steps.borrow()).clone();
+        let settled = list.steps.get_mut(at)?;
+        settled.task.run_once = Some(runner.is_some());
+        let settled = settled.clone();
+        self.steps.send_replace(Arc::new(list));
+        Some((settled, runner))
+    }
 }
