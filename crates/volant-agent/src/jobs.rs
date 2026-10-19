@@ -320,17 +320,26 @@ fn deadline(limit: u64) -> Option<Instant> {
 /// The moment the reference's watcher kills a job: it looks every five seconds, or every half
 /// limit for a limit of five seconds or less, and kills at the first look past the limit. So a
 /// limit of 7 runs for 10 seconds there, and here too.
+///
+/// That is the first multiple of the step that is not below the limit, and at least one step.
+/// It is worked out in one division, because the reference takes any integer as a limit and a
+/// loop over the steps takes time in proportion to it. A result past what a `Duration` holds is
+/// `Duration::MAX`, which [`deadline`] reads as never.
 fn kill_after(limit: u64) -> Duration {
+    const NANOS: u128 = 1_000_000_000;
     let limit = Duration::from_secs(limit);
     let mut step = Duration::from_secs(5);
     if !limit.is_zero() && step >= limit {
         step = limit / 2;
     }
-    let mut at = step;
-    while at < limit {
-        at = at.saturating_add(step);
+    let step = step.as_nanos().max(1);
+    let looks = limit.as_nanos().div_ceil(step).max(1);
+    let at = looks.saturating_mul(step);
+    match u64::try_from(at / NANOS) {
+        // The remainder is below a billion, which `Duration::new` takes as nanoseconds.
+        Ok(secs) => Duration::new(secs, (at % NANOS) as u32),
+        Err(_) => Duration::MAX,
     }
-    at
 }
 
 /// Whether `extra` has gone by since `deadline`.
