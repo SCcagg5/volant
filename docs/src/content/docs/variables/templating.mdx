@@ -102,7 +102,10 @@ What differs from ansible-core:
 - ansible-core 2.19 keeps the error of a call whose result is never read. `{% set _ = [1].remove(5) %}` is no error there. It is one here.
 - A list that `a + b` or a slice `a[1:]` built cannot be changed: write `(a + b) | list`. The error says so.
 - A list that a call has just built and that no variable holds, such as `(x | list).append(1)`, is changed as a copy: the call answers as Python does, and nothing else changes.
-- A list that grows inside a `{% for %}` over itself is read up to its length at the start of the loop.
+- A list that grows inside a `{% for %}` over itself is read up to its length at the start of the loop. One that `remove` or `pop` shrinks inside such a loop fails with an undefined value, where ansible-core goes on.
+- A list that a filter answers is a copy, as in ansible-core, so `(items | first).append(1)` does not change `items`. A slice (`a[1:]`) shares the lists inside it with `a`.
+- A list or mapping that is the item or the key of its own method is read as a copy of itself, and a mapping used as a key is an error (`unhashable type: 'dict'`), as in Python.
+- `sort()` of a list that holds `nan` is an error here. ansible-core sorts it.
 - `{% do %}` is accepted here and refused by ansible-core 2.19, which does not enable `jinja2.ext.do`. Use `{% set _ = ... %}` in a template that has to run on both.
 - `items()` and `popitem()` give lists where Python gives tuples, so they print as `['a', 1]` and not `('a', 1)`.
 - `sort(key=...)` with a function is not available.
