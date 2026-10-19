@@ -1138,10 +1138,8 @@ fn the_meta_actions_are_sorted_and_free_of_duplicates() {
     assert_eq!(names, sorted);
 }
 
-/// Every option of the four role and task statements, with what a statement that writes it comes
-/// to: the reference's own list, measured on ansible-core 2.19.12. `public`, `rolespec_validate`
-/// and `allow_duplicates` are read as booleans, as the reference reads a boolean keyword, and the
-/// default of `public` is the one thing that differs between an include and an import.
+/// Every option of the four role and task statements, measured on ansible-core 2.19.12.
+/// The default of `public` is the one thing that differs between an include and an import.
 #[rstest]
 #[case::include_defaults("include_role", json!({"name": "r"}), Ok([false, true, false]))]
 #[case::include_role_alias("include_role", json!({"role": "r"}), Ok([false, true, false]))]
