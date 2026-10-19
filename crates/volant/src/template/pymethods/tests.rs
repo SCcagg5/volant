@@ -6,16 +6,10 @@ use super::mutable::{identity, is_literal, mutable, plain_list, plain_map, snaps
 
 /// The mutable objects stand in for the plain lists and mappings minijinja builds, found by
 /// their Rust type. An upgrade that changes those types fails here, not in a template.
-/// A template value of JSON, as the engine reads it: `serde_json` keeps numbers as text, so
-/// `Value::from_serialize` cannot.
-fn from_json(json: Json) -> Value {
-    crate::template::bigint::to_template(&json)
-}
-
 #[test]
 fn plain_lists_and_mappings_are_told_from_other_objects() {
-    assert!(plain_list(&from_json(json!([1, 2]))).is_some());
-    assert!(plain_map(&from_json(json!({"a": 1}))).is_some());
+    assert!(plain_list(&crate::template::bigint::to_template(&json!([1, 2]))).is_some());
+    assert!(plain_map(&crate::template::bigint::to_template(&json!({"a": 1}))).is_some());
     assert!(plain_list(&Value::from(vec![Value::from(1)])).is_some());
     let namespace = Environment::new()
         .compile_expression("namespace()")
@@ -28,16 +22,19 @@ fn plain_lists_and_mappings_are_told_from_other_objects() {
 
 #[test]
 fn one_plain_value_has_one_identity_and_a_copy_has_another() {
-    let list = from_json(json!([1, 2]));
+    let list = crate::template::bigint::to_template(&json!([1, 2]));
     let same = list.clone();
-    let other = from_json(json!([1, 2]));
+    let other = crate::template::bigint::to_template(&json!([1, 2]));
     assert_eq!(identity(&list), identity(&same));
     assert_ne!(identity(&list), identity(&other));
 }
 
 #[test]
 fn a_snapshot_holds_no_mutable_object() {
-    let made = mutable(&from_json(json!({"a": [1], "b": {"c": []}}))).unwrap();
+    let made = mutable(&crate::template::bigint::to_template(
+        &json!({"a": [1], "b": {"c": []}}),
+    ))
+    .unwrap();
     let inner = made.get_attr("a").unwrap();
     assert!(plain_list(&inner).is_none());
     let copy = snapshot(&made);
@@ -51,8 +48,8 @@ fn a_snapshot_holds_no_mutable_object() {
 
 #[test]
 fn only_a_literal_that_json_carries_back_is_routed() {
-    assert!(is_literal(&from_json(
-        json!([1, "a", null, [true], {"k": 1.5}])
+    assert!(is_literal(&crate::template::bigint::to_template(
+        &json!([1, "a", null, [true], {"k": 1.5}])
     )));
     let int_key = Value::from_iter([(Value::from(1), Value::from("a"))]);
     assert!(!is_literal(&int_key));
