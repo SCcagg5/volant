@@ -7204,3 +7204,324 @@ fn a_nested_cacheable_fact_does_not_break_the_next_run() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The terms of a `with_` loop reach the lookup as values. Host-provided text among them stays
+/// data, and nothing it holds runs on the controller.
+#[rstest::rstest]
+#[case::dict("with_dict", r#"{a: "{{ r.stdout }}"}"#, true)]
+#[case::together("with_together", r#"[["{{ r.stdout }}"], ["x"]]"#, true)]
+#[case::subelements(
+    "with_subelements",
+    r#"[[{name: x, k: ["{{ r.stdout }}"]}], "k"]"#,
+    true
+)]
+#[case::sequence("with_sequence", r#""{{ r.stdout }}""#, false)]
+#[case::template("with_template", r#"["{{ r.stdout }}"]"#, false)]
+#[case::url("with_url", r#"["{{ r.stdout }}"]"#, false)]
+#[case::varnames("with_varnames", r#"["{{ r.stdout }}"]"#, false)]
+#[case::vars("with_vars", r#"["{{ r.stdout }}"]"#, false)]
+fn host_text_in_the_terms_of_a_with_loop_stays_data(
+    #[case] keyword: &str,
+    #[case] terms: &str,
+    #[case] prints_the_text: bool,
+) {
+    let (dir, marker) = trust_dir(keyword, "h1 ansible_connection=local\n");
+    let playbook = dir.join("pb.yml");
+    std::fs::write(
+        &playbook,
+        format!(
+            "- hosts: h1\n  gather_facts: false\n  tasks:\n    - command: cat {}\n      register: r\n    - debug:\n        msg: \"{{{{ item }}}}\"\n      {keyword}: {terms}\n      ignore_errors: true\n",
+            dir.join("payload.txt").display()
+        ),
+    )
+    .expect("the playbook");
+    // The lookups that only ansible-core implements need its Python; the others run without it.
+    let python = std::env::var("VOLANT_PYTHON").ok();
+    let envs: Vec<(&str, &str)> = python
+        .iter()
+        .map(|p| ("VOLANT_PYTHON", p.as_str()))
+        .collect();
+    let out = volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            playbook.to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(60),
+        &envs,
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !marker.exists(),
+        "{keyword}: host text in a term ran on the controller:\n{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    if prints_the_text && python.is_some() {
+        assert!(stdout.contains("lookup("), "{keyword}: {stdout}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A variable that reads the group names, and a second that reads the first, keep host-provided
+/// group names as data.
+#[test]
+fn group_names_read_through_two_variables_stay_data() {
+    // `add_host` is a Python module.
+    let Ok(python) = std::env::var("VOLANT_PYTHON") else {
+        eprintln!("skipped: VOLANT_PYTHON not set. Set it to a real ansible-core python.");
+        return;
+    };
+    let (dir, marker) = trust_dir("nested-groups", "h1 ansible_connection=local\n");
+    let playbook = dir.join("pb.yml");
+    std::fs::write(
+        &playbook,
+        format!(
+            "- hosts: h1\n  gather_facts: false\n  vars:\n    gn: \"{{{{ groups }}}}\"\n    gk: \"{{{{ gn | list }}}}\"\n  tasks:\n    - command: cat {}\n      register: r\n    - add_host:\n        name: extra\n        groups: [\"{{{{ r.stdout }}}}\"]\n        ansible_connection: local\n    - debug:\n        msg: after\n",
+            dir.join("payload.txt").display()
+        ),
+    )
+    .expect("the playbook");
+    let out = volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            playbook.to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(60),
+        &[("VOLANT_PYTHON", &python)],
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !marker.exists(),
+        "a group name from a host ran on the controller:\n{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains("\"msg\": \"after\""), "{stdout}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Runs `playbook` in `dir` with the local inventory of `trust_dir`, with the ansible-core Python
+/// when `VOLANT_PYTHON` names one, and returns the output.
+fn run_trust_playbook(dir: &Path, playbook: &str) -> Output {
+    let path = dir.join("pb.yml");
+    std::fs::write(&path, playbook).expect("the playbook");
+    let python = std::env::var("VOLANT_PYTHON").ok();
+    let envs: Vec<(&str, &str)> = python
+        .iter()
+        .map(|p| ("VOLANT_PYTHON", p.as_str()))
+        .collect();
+    volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            path.to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(120),
+        &envs,
+    )
+}
+
+/// The expression of the `k`th variable of a chain: the first reads `source`, each next one the
+/// one before.
+fn chain_expr(source: &str, k: usize) -> String {
+    if k == 1 {
+        source.to_string()
+    } else {
+        format!("v{} | list", k - 1)
+    }
+}
+
+/// The five variables of a chain, each line indented by `indent`.
+fn variable_chain(source: &str, indent: &str) -> String {
+    use std::fmt::Write;
+    let mut text = String::new();
+    for k in 1..=5 {
+        let _ = writeln!(
+            text,
+            "{indent}v{k}: \"{{{{ {} }}}}\"",
+            chain_expr(source, k)
+        );
+    }
+    text
+}
+
+/// One task per depth of the chain, then one that reads nothing.
+fn chain_reads(indent: &str) -> String {
+    use std::fmt::Write;
+    let mut text = String::new();
+    for k in 1..=5 {
+        let _ = writeln!(
+            text,
+            "{indent}- debug: {{msg: \"{{{{ v{k} | length }}}}\"}}"
+        );
+    }
+    let _ = writeln!(text, "{indent}- debug: {{msg: after}}");
+    text
+}
+
+/// Host text read through chains of up to five variables, in every layer, never runs on the
+/// controller. A `set_fact` stores rendered text, so that layer checks the registered result only.
+#[rstest::rstest]
+#[case::groups("groups", "name: extra, groups: [\"{{ r.stdout }}\"]")]
+#[case::play_hosts("ansible_play_hosts_all", "name: \"{{ r.stdout }}\"")]
+#[case::hostvars("hostvars", "name: \"{{ r.stdout }}\"")]
+#[case::registered("[r.stdout]", "")]
+fn host_text_stays_data_through_chains_of_variables(#[case] source: &str, #[case] added: &str) {
+    use std::fmt::Write;
+    if !added.is_empty() && std::env::var_os("VOLANT_PYTHON").is_none() {
+        eprintln!("skipped: VOLANT_PYTHON not set. Set it to a real ansible-core python.");
+        return;
+    }
+    for layer in [
+        "play",
+        "task",
+        "block",
+        "vars_files",
+        "set_fact",
+        "include_vars",
+        "role_defaults",
+        "role_vars",
+    ] {
+        if layer == "set_fact" && !added.is_empty() {
+            continue;
+        }
+        let (dir, marker) = trust_dir(
+            &format!("chain-{layer}-{}", source.len()),
+            "h1 ansible_connection=local\n",
+        );
+        let chain_file = variable_chain(source, "");
+        std::fs::write(dir.join("chain.yml"), &chain_file).expect("a vars file");
+        for part in ["defaults", "vars"] {
+            std::fs::create_dir_all(dir.join(format!("roles/ch/{part}"))).expect("a role");
+            let wanted = part == layer.trim_start_matches("role_");
+            std::fs::write(
+                dir.join(format!("roles/ch/{part}/main.yml")),
+                if wanted {
+                    chain_file.as_str()
+                } else {
+                    "unused: 1\n"
+                },
+            )
+            .expect("a role file");
+        }
+        std::fs::create_dir_all(dir.join("roles/ch/tasks")).expect("a role");
+        std::fs::write(dir.join("roles/ch/tasks/main.yml"), chain_reads("")).expect("a role task");
+        let mut text = String::from("- hosts: h1\n  gather_facts: false\n  ignore_errors: true\n");
+        let mut tasks = format!(
+            "  tasks:\n    - command: cat {}\n      register: r\n",
+            dir.join("payload.txt").display()
+        );
+        if !added.is_empty() {
+            let _ = writeln!(
+                tasks,
+                "    - add_host: {{{added}, ansible_connection: local}}"
+            );
+        }
+        match layer {
+            "play" => {
+                let _ = write!(text, "  vars:\n{}", variable_chain(source, "    "));
+                tasks.push_str(&chain_reads("    "));
+            }
+            "task" => {
+                for k in 1..=5 {
+                    let _ = write!(
+                        tasks,
+                        "    - debug: {{msg: \"{{{{ v{k} | length }}}}\"}}\n      vars:\n{}",
+                        variable_chain(source, "        ")
+                    );
+                }
+                tasks.push_str("    - debug: {msg: after}\n");
+            }
+            "block" => {
+                let _ = write!(
+                    tasks,
+                    "    - block:\n{}      vars:\n{}",
+                    chain_reads("        "),
+                    variable_chain(source, "        ")
+                );
+            }
+            "vars_files" => {
+                text.push_str("  vars_files: [chain.yml]\n");
+                tasks.push_str(&chain_reads("    "));
+            }
+            "set_fact" => {
+                for k in 1..=5 {
+                    let _ = writeln!(
+                        tasks,
+                        "    - set_fact:\n        v{k}: \"{{{{ {} }}}}\"",
+                        chain_expr(source, k)
+                    );
+                }
+                tasks.push_str(&chain_reads("    "));
+            }
+            "include_vars" => {
+                tasks.push_str("    - include_vars: {file: chain.yml}\n");
+                tasks.push_str(&chain_reads("    "));
+            }
+            _ => tasks.push_str("    - include_role: {name: ch}\n"),
+        }
+        text.push_str(&tasks);
+        let out = run_trust_playbook(&dir, &text);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            !marker.exists(),
+            "{layer} over {source}: host text ran on the controller:\n{text}\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            stdout.contains("PLAY RECAP"),
+            "{layer} over {source}: {stdout}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// A chain of three variables over the group names, in play vars and in task vars, with the last
+/// one read and with a later task that reads nothing.
+#[rstest::rstest]
+#[case::play_not_read(
+    "  vars:\n    gn: \"{{ groups }}\"\n    gk: \"{{ gn | list }}\"\n    gl: \"{{ gk | last }}\"\n",
+    "",
+    "hi"
+)]
+#[case::play_read(
+    "  vars:\n    gn: \"{{ groups }}\"\n    gk: \"{{ gn | list }}\"\n    gl: \"{{ gk | last }}\"\n",
+    "",
+    "{{ gl }}"
+)]
+#[case::task_not_read(
+    "",
+    "      vars: {gn: \"{{ groups }}\", gk: \"{{ gn | list }}\", gl: \"{{ gk | last }}\"}\n",
+    "hi"
+)]
+#[case::task_read(
+    "",
+    "      vars: {gn: \"{{ groups }}\", gk: \"{{ gn | list }}\", gl: \"{{ gk | last }}\"}\n",
+    "{{ gl }}"
+)]
+fn group_names_read_through_three_variables_stay_data(
+    #[case] play_vars: &str,
+    #[case] task_vars: &str,
+    #[case] message: &str,
+) {
+    let Ok(python) = std::env::var("VOLANT_PYTHON") else {
+        eprintln!("skipped: VOLANT_PYTHON not set. Set it to a real ansible-core python.");
+        return;
+    };
+    let _ = python;
+    let (dir, marker) = trust_dir("three-variables", "h1 ansible_connection=local\n");
+    let text = format!(
+        "- hosts: h1\n  gather_facts: false\n  ignore_errors: true\n{play_vars}  tasks:\n    - command: cat {}\n      register: r\n    - add_host: {{name: extra, groups: [\"{{{{ r.stdout }}}}\"], ansible_connection: local}}\n    - debug: {{msg: \"{message}\"}}\n{task_vars}",
+        dir.join("payload.txt").display()
+    );
+    let out = run_trust_playbook(&dir, &text);
+    assert!(
+        !marker.exists(),
+        "a group name from a host ran on the controller:\n{text}\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

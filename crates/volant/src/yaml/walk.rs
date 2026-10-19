@@ -12,7 +12,7 @@ use anyhow::{anyhow, bail};
 use saphyr::{Mapping, MarkedYaml, Scalar, Tag, Yaml, YamlData};
 use serde_json::{Map, Value};
 
-use super::{Offsets, Starts, pyyaml_scalar, unsafe_data, vault_data};
+use super::{Starts, is_vault, read_scalar, read_tagged, scalar, unsafe_data, vault_data};
 
 /// A collection of the source tree whose children are being lowered.
 #[expect(
@@ -37,47 +37,45 @@ enum Lowering<'a> {
 
 /// Whether `node` has no children to walk.
 fn is_leaf(node: &MarkedYaml<'_>) -> bool {
-    matches!(node.data, YamlData::Value(_))
+    matches!(node.data, YamlData::Value(_) | YamlData::Representation(..))
 }
 
-/// A scalar of the source tree, with PyYAML's reading of it.
-fn lower_scalar<'a>(node: MarkedYaml<'a>, offsets: &Offsets<'a>) -> Yaml<'a> {
-    match node.data {
-        YamlData::Value(scalar) => {
-            let start = offsets.byte(node.span.start.index());
-            let end = offsets.byte(node.span.end.index());
-            let raw = offsets.text.get(start..end).unwrap_or_default();
-            Yaml::Value(pyyaml_scalar(scalar, raw))
-        }
+/// A scalar of the source tree, read as PyYAML reads it from its text, style and tag.
+fn lower_scalar(node: MarkedYaml<'_>) -> anyhow::Result<Yaml<'_>> {
+    Ok(match node.data {
+        YamlData::Representation(value, style, tag) => read_scalar(value, style, tag)?,
+        YamlData::Value(scalar) => Yaml::Value(scalar),
         _ => Yaml::BadValue,
-    }
+    })
 }
 
-/// Drops the source positions `MarkedYaml` tracks once loading is done, applying PyYAML's
-/// scalar resolution along the way where it's confirmed to diverge from saphyr's YAML 1.2 core
-/// schema (see `pyyaml_scalar`). Every other function in this module keeps working on the
-/// plain `Yaml` tree it already expected; only `load` needs to know this happened.
-pub(super) fn lower<'a>(root: MarkedYaml<'a>, offsets: &Offsets<'a>) -> Yaml<'a> {
-    let mut open: Vec<Lowering<'a>> = Vec::new();
+/// Drops the source positions `MarkedYaml` tracks once loading is done, reading each scalar as
+/// PyYAML does (see [`scalar`]). Every other function in this module keeps working on the plain
+/// `Yaml` tree it already expected. A tag with no constructor, or a `!vault` over a value that is
+/// not a string, is an error with PyYAML's own text.
+pub(super) fn lower(root: MarkedYaml<'_>) -> anyhow::Result<Yaml<'_>> {
+    let mut open: Vec<Lowering<'_>> = Vec::new();
     let mut next = Some(root);
-    let mut done: Option<Yaml<'a>> = None;
+    let mut done: Option<Yaml<'_>> = None;
     loop {
         if let Some(node) = next.take() {
             match node.data {
-                YamlData::Value(_) => done = Some(lower_scalar(node, offsets)),
+                YamlData::Value(_) | YamlData::Representation(..) => {
+                    done = Some(lower_scalar(node)?);
+                }
                 // A collection of scalars, the usual one, is lowered at once, with no frame.
                 YamlData::Sequence(items) if items.iter().all(is_leaf) => {
                     done = Some(Yaml::Sequence(
                         items
                             .into_iter()
-                            .map(|n| lower_scalar(n, offsets))
-                            .collect(),
+                            .map(lower_scalar)
+                            .collect::<anyhow::Result<_>>()?,
                     ));
                 }
                 YamlData::Mapping(map) if map.iter().all(|(k, v)| is_leaf(k) && is_leaf(v)) => {
                     let mut out = Mapping::new();
                     for (k, v) in map {
-                        out.insert(lower_scalar(k, offsets), lower_scalar(v, offsets));
+                        out.insert(lower_scalar(k)?, lower_scalar(v)?);
                     }
                     done = Some(Yaml::Mapping(out));
                 }
@@ -97,15 +95,12 @@ pub(super) fn lower<'a>(root: MarkedYaml<'a>, offsets: &Offsets<'a>) -> Yaml<'a>
                     continue;
                 }
                 YamlData::Alias(id) => done = Some(Yaml::Alias(id)),
-                YamlData::Representation(v, style, tag) => {
-                    done = Some(Yaml::Representation(v, style, tag));
-                }
                 YamlData::BadValue => done = Some(Yaml::BadValue),
             }
         }
         if let Some(child) = done.take() {
             match open.last_mut() {
-                None => return child,
+                None => return Ok(child),
                 Some(Lowering::Sequence { out, .. }) => out.push(child),
                 Some(Lowering::Mapping {
                     value, key, out, ..
@@ -118,7 +113,7 @@ pub(super) fn lower<'a>(root: MarkedYaml<'a>, offsets: &Offsets<'a>) -> Yaml<'a>
                 }
                 Some(Lowering::Tagged(_)) => {
                     if let Some(Lowering::Tagged(tag)) = open.pop() {
-                        done = Some(Yaml::Tagged(tag, Box::new(child)));
+                        done = Some(read_tagged(tag, child)?);
                     }
                     continue;
                 }
@@ -293,7 +288,7 @@ pub(super) fn to_json(root: &Yaml) -> anyhow::Result<Value> {
                     key: None,
                     out: Map::new(),
                 }),
-                Yaml::Tagged(tag, inner) if tag.handle == "!" && tag.suffix == "vault" => {
+                Yaml::Tagged(tag, inner) if tag.handle == "!" && is_vault(&tag.suffix) => {
                     match &**inner {
                         Yaml::Value(Scalar::String(s)) => {
                             done = Some(Value::String(vault_data(s)));
@@ -309,7 +304,7 @@ pub(super) fn to_json(root: &Yaml) -> anyhow::Result<Value> {
                     next = Some(&**inner);
                     continue;
                 }
-                Yaml::Tagged(tag, _) => bail!("unsupported YAML tag {}{}", tag.handle, tag.suffix),
+                Yaml::Tagged(tag, _) => bail!(scalar::no_constructor(tag)),
                 Yaml::Alias(_) => bail!("YAML aliases are not supported yet"),
                 Yaml::Representation(..) => bail!("unresolved YAML scalar"),
                 Yaml::BadValue => bail!("invalid YAML value"),

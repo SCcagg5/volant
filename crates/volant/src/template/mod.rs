@@ -14,13 +14,14 @@ mod filters;
 pub(crate) use filters::python_json;
 mod globals;
 mod lookups;
+mod resolve;
 mod templar;
 mod test_plugins;
 mod vm;
 mod yaml_dump;
 
 pub use context::{ALLITEMS_KEY, Vars, complete_loop, with_allitems};
-use context::{Context, TaintSink, context_of};
+use context::{Context, TaintSink, context_of, take_failure};
 pub(crate) use env::{
     add_filter, add_test, add_text_filter, holds_undefined, truthy, undefined_through,
 };
@@ -36,6 +37,11 @@ pub use lookups::supported as lookup_supported;
 /// Prefix of every error raised because a variable had no value, the one template failure
 /// Ansible treats as recoverable in places such as `vars_files`.
 pub(crate) const UNDEFINED: &str = "The task includes an option with an undefined variable.";
+
+/// What the reference says when a variable's value is a template that reads the variable again,
+/// directly or through others.
+pub(crate) const RECURSION: &str =
+    "Recursive loop detected in template: maximum recursion depth exceeded";
 
 /// What [`Templar::render_map_tainted`] puts before a plugin's failure, then the key in quotes.
 pub(crate) const RESOLVING: &str = "Error while resolving value for ";
