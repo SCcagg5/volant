@@ -85,9 +85,8 @@ fn failure(mut plugin: Box<dyn Plugin>) -> String {
     result.0["msg"].as_str().unwrap().to_string()
 }
 
-/// The arguments of a free-form `script`, its `cmd`, and an `assemble` source are never a
-/// controller file a managed host named under `refuse`: the item fails before the helper is
-/// asked for anything.
+/// Under `refuse`, a host-named `script` line or `cmd`, `assemble` or `uri` source fails the
+/// item before the helper is asked for anything.
 #[rstest::rstest]
 #[case::script("script", json!({"_raw_params": "/etc/passwd"}), "_raw_params")]
 #[case::script_cmd("script", json!({"cmd": "/etc/passwd"}), "cmd")]
@@ -104,9 +103,8 @@ fn a_host_named_controller_file_is_refused(
     )));
 }
 
-/// Under `allow` and `contained` the name goes on to the plugin, which here fails for want of
-/// the helper. `contained` stops a name outside the files and templates directories, reads the
-/// first word of a script's line, and leaves a source on the host alone.
+/// A name the mode lets through reaches the plugin, which here fails for want of the helper;
+/// `contained` stops a name outside the files and templates directories.
 #[rstest::rstest]
 #[case::script_allowed("allow", "script", json!({"_raw_params": "/etc/passwd --flag"}), "_raw_params", None)]
 #[case::script_inside("contained", "script", json!({"_raw_params": "tool.sh --flag ../x"}), "_raw_params", None)]
@@ -143,6 +141,11 @@ fn a_host_named_controller_file_is_refused(
 #[case::uri_body("contained", "uri", json!({"body_format": "form-multipart", "body": {"f": {"filename": "~/.ssh/id_rsa"}}}), "body", Some("'~/.ssh/id_rsa' is not inside"))]
 #[case::uri_body_content("contained", "uri", json!({"body_format": "form-multipart", "body": {"f": {"filename": "~/x", "content": "text"}}}), "body", None)]
 #[case::uri_body_inside("contained", "uri", json!({"body_format": "form-multipart", "body": {"f": {"filename": "up.bin"}}}), "body", None)]
+#[case::uri_on_the_host("contained", "uri", json!({"src": "/etc/hosts", "remote_src": true}), "src", None)]
+#[case::template_ignores_remote_src("contained", "template", json!({"src": "/etc/hosts", "remote_src": true}), "src", Some("'/etc/hosts' is not inside"))]
+#[case::template_ignores_remote_src_refuse("refuse", "template", json!({"src": "/etc/hosts", "remote_src": true}), "src", Some("a controller file a host chose is never sent"))]
+#[case::collection_ignores_remote_src("contained", "ansible.posix.synchronize", json!({"src": "/etc/hosts", "remote_src": true}), "src", Some("'/etc/hosts' is not inside"))]
+#[case::fetch_reads_the_host("refuse", "fetch", json!({"src": "/etc/hosts", "dest": "out"}), "src", None)]
 fn a_host_named_controller_file_is_read_as_the_mode_says(
     #[case] mode: &str,
     #[case] name: &'static str,

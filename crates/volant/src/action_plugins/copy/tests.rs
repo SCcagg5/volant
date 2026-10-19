@@ -89,9 +89,8 @@ fn a_source_a_host_named_is_never_read() {
     }
 }
 
-/// A `src` a managed host named is read as the mode says: `allow` reads it, `contained` reads
-/// it unless it leaves the playbook's directories, `refuse` never does. A file that is read ends
-/// in the first sub-task, the `stat` of the destination.
+/// A host-named `src` is read as the mode says; a file that is read ends in the first
+/// sub-task, the `stat` of the destination.
 #[rstest::rstest]
 #[case::allow_inside(HostNamedPaths::Allow, "hello.txt", true)]
 #[case::allow_outside(HostNamedPaths::Allow, "<outside>", true)]

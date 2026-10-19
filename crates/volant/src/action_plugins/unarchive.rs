@@ -6,8 +6,8 @@
 //! `copy:` is translated to `remote_src` (the two together refused); `src` and `dest` are
 //! required; a `creates` that already exists on the host skips the task before anything else is
 //! touched; the destination must exist and be a directory; the source is searched, refused if a
-//! host named it and `host_named_paths` says so, and read, unless `remote_src`; the module then runs with the task's arguments,
-//! `decrypt` removed, and the transferred source in `src`.
+//! host named it and `host_named_paths` says so, and read, unless `remote_src`; the module then
+//! runs with the task's arguments, `decrypt` removed, and the transferred source in `src`.
 //!
 //! `creates` and `dest` are host paths the reference expands with a leading `~` before it asks
 //! the host anything. Volant refuses one by name instead of expanding it: no measured role writes

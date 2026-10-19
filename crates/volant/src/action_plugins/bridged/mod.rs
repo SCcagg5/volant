@@ -149,11 +149,20 @@ fn check_sources(name: &str, ctx: &Context<'_>) -> Result<(), String> {
             .and_then(Value::as_str)
             .unwrap_or_default()
     };
-    // `unarchive` reads `copy: no` as `remote_src: yes` when `remote_src` is not given.
-    let remote = match (ctx.args.get("remote_src"), ctx.args.get("copy")) {
-        (Some(value), _) => ansible_bool(value),
-        (None, Some(copy)) if name == "unarchive" => !ansible_bool(copy),
-        (None, _) => name == "assemble",
+    // Only the plugins that read `remote_src` are told by it: `template`, `script` and a
+    // collection's plugin read `src` off the controller whatever it says. `unarchive` reads
+    // `copy: no` as `remote_src: yes` when `remote_src` is not given. `fetch` reads its `src`
+    // off the host.
+    let remote_src = ctx.args.get("remote_src");
+    let remote = match name {
+        "copy" | "uri" => remote_src.is_some_and(ansible_bool),
+        "unarchive" => match (remote_src, ctx.args.get("copy")) {
+            (Some(value), _) => ansible_bool(value),
+            (None, copy) => copy.is_some_and(|copy| !ansible_bool(copy)),
+        },
+        "assemble" => remote_src.is_none_or(ansible_bool),
+        "fetch" => true,
+        _ => false,
     };
     if !remote {
         check("src", text("src"))?;

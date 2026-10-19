@@ -155,9 +155,8 @@ fn a_source_a_host_named_is_never_read() {
     }
 }
 
-/// A `src` a managed host named is read as the mode says: only `refuse`, and `contained` for a
-/// name that leaves the directories, stop before the file is looked up. An archive that is read
-/// is staged for the module.
+/// A host-named `src` is read as the mode says, and an archive that is read is staged for the
+/// module.
 #[rstest::rstest]
 #[case::allow_inside(HostNamedPaths::Allow, "bundle.tar.gz", true)]
 #[case::allow_climbing(HostNamedPaths::Allow, "../bundle.tar.gz", true)]

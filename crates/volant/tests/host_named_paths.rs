@@ -431,9 +431,8 @@ fn expected(mode: &str, fx: &Fixture, plugin: Plugin, case: Case) -> Outcome {
     }
 }
 
-/// A source a managed host named is read or refused as the mode says, whatever the plugin. Under
-/// `--check` the file-sending plugins run as ansible-core's own, in the Python helper, which
-/// is a different road to the same answer: only the refusals are compared there.
+/// A host-named source is read or refused as the mode says, whatever the plugin; under
+/// `--check` ansible-core's own plugins run, so only the refusals are compared there.
 #[rstest]
 #[case::allow("allow", &[])]
 #[case::contained("contained", &[])]
@@ -491,10 +490,8 @@ fn a_source_a_host_named_follows_the_mode(#[case] mode: &str, #[case] flags: &[&
     );
 }
 
-/// The routes through ansible-core's own plugins that the table does not take: `script` with
-/// `cmd`, `assemble` and an `unarchive` whose `dest` is `~/...`. Under `contained`, a name outside
-/// the files or templates directories is refused on each of them and nothing runs; one inside
-/// them goes through.
+/// Under `contained`, `script` with `cmd`, `assemble` and `unarchive` to `~/...` refuse a name
+/// outside the files or templates directories and run nothing; one inside goes through.
 #[rstest]
 #[case::tilde("~/{n}")]
 #[case::absolute("{outside}/{n}")]
@@ -556,9 +553,8 @@ fn a_name_outside_the_directories_is_refused_on_every_other_route(#[case] shape:
     assert!(!fx.home.join("unpacked/payload").exists(), "{stdout}");
 }
 
-/// A source on the host is not a controller file: `contained` leaves it alone for `assemble`
-/// (whose `remote_src` defaults to true) and for `copy` and `unarchive` with `remote_src`, in
-/// a plain run and under `--check` and `--diff`.
+/// `contained` leaves a source on the host alone (`assemble` by default, `copy` and `unarchive`
+/// with `remote_src`), in a plain run and under `--check` and `--diff`.
 #[rstest]
 #[case::plain(&[])]
 #[case::check(&["--check"])]
