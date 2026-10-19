@@ -140,7 +140,13 @@ pub(super) fn pad(s: &str, name: &str, call: &Call<'_>) -> Result<Value, Error> 
         return Ok(Value::from(s));
     }
     let margin = width - len;
-    check(u128::try_from(width).unwrap_or(u128::MAX))?;
+    // The limit counts the bytes of the result, a fill character can take four.
+    check(
+        u128::try_from(margin)
+            .unwrap_or(u128::MAX)
+            .saturating_mul(fill.len_utf8() as u128)
+            .saturating_add(s.len() as u128),
+    )?;
     let left = match name {
         "ljust" => 0,
         "rjust" => margin,

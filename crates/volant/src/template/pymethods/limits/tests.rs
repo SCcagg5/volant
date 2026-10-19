@@ -28,6 +28,10 @@ fn a_size_past_the_limit_is_a_task_error_before_any_text_is_built() {
         "{{ '{:.10000000000f}'.format(1.5) }}",
         "{{ '{:.10000000000e}'.format(1.5) }}",
         "{{ '{:.10000000000g}'.format(1.5) }}",
+        // A fill of four bytes, and many fields that each stay within the limit.
+        "{{ 'a'.ljust(100000000, '𝄞') }}",
+        "{{ '{:>200000000}{:>200000000}'.format('a', 'a') }}",
+        "{{ 'aaaaaaaaaaaaaaaa'.translate({97: big}) }}",
     ] {
         let err = templar().render(template, &v).unwrap_err();
         assert!(err.0.contains("256 MiB"), "{template}: {err}");
@@ -76,4 +80,13 @@ fn a_float_precision_past_65535_prints_zeros() {
         t.render("{{ '{:.70000g}'.format(1.5) }}", &none).unwrap(),
         json!("1.5")
     );
+}
+
+/// A zero-padded grouped number is built in one pass, however wide the field is.
+#[test]
+fn a_wide_zero_padded_grouped_number_is_built_at_once() {
+    let out = templar()
+        .render("{{ ('{:0300000,d}'.format(1)) | length }}", &Map::new())
+        .unwrap();
+    assert_eq!(out, "300000");
 }
