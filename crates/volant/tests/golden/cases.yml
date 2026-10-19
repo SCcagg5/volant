@@ -1967,3 +1967,190 @@
 - template: "{{ '5'.isdigit() }}"
 - template: "{{ '5'.isnumeric() }}"
 - template: "{{ '一'.isnumeric() }}"
+# The % operator on a string (printf-style formatting) and on numbers.
+- template: "{{ '%s-%d' % ('a', 3) }}"
+- template: "{{ '%s' % 'x' }}"
+- template: "{{ '%s' % (1,) }}"
+- template: "{{ '%s %s' % ('a', 'b') }}"
+- template: "{{ '%s' % () }}"
+- template: "{{ '%s %s' % (1,) }}"
+- template: "{{ '%s' % (1, 2) }}"
+- template: "{{ '%d' % 'a' }}"
+- template: "{{ '%d' % none }}"
+- template: "{{ '%d' % 3.7 }}"
+- template: "{{ '%d' % -3.7 }}"
+- template: "{{ '%x' % 3.5 }}"
+- template: "{{ '%c' % 'ab' }}"
+- template: "{{ '%c' % 'a' }}"
+- template: "{{ '%c' % 65 }}"
+- template: "{{ '%c' % -1 }}"
+- template: "{{ '%c' % 1114112 }}"
+- template: "{{ '%y' % 1 }}"
+- template: "{{ '%' % () }}"
+- template: "{{ '%5' % 1 }}"
+- template: "{{ '%(a)s' % (1,) }}"
+- template: "{{ '%(a)s' % {'b': 1} }}"
+- template: "{{ '%(name)s' % {'name': 'x'} }}"
+- template: "{{ '%(a)s-%(b)d' % {'a': 'x', 'b': 3} }}"
+- template: "{{ '%(a)5.1f|' % {'a': 3.14159} }}"
+- template: "{{ '%(a)s %(a)s' % {'a': 1} }}"
+- template: "{{ '%s %(a)s' % {'a': 1} }}"
+- template: "{{ '%(a)s %s' % {'a': 1} }}"
+- template: "{{ '%(a)' % {'a': 1} }}"
+- template: "{{ '%(a' % {'a': 1} }}"
+- template: "{{ '%*d' % (5, 3) }}"
+- template: "{{ '%*d' % ('a', 3) }}"
+- template: "{{ '%*d' % (-5, 3) }}"
+- template: "{{ '%.*f' % (2, 3.14159) }}"
+- template: "{{ '%-5d|' % 3 }}"
+- template: "{{ '%05d' % -3 }}"
+- template: "{{ '%+d' % 3 }}"
+- template: "{{ '% d' % 3 }}"
+- template: "{{ '%#x' % 255 }}"
+- template: "{{ '%#o' % 8 }}"
+- template: "{{ '%#X' % 255 }}"
+- template: "{{ '%5.3d' % 5 }}"
+- template: "{{ '%.3d' % -5 }}"
+- template: "{{ '%e' % 12345.678 }}"
+- template: "{{ '%E' % 0.000123 }}"
+- template: "{{ '%g' % 0.00001234 }}"
+- template: "{{ '%G' % 1e20 }}"
+- template: "{{ '%#g' % 1.5 }}"
+- template: "{{ '%f' % 1 }}"
+- template: "{{ '%f' % 'a' }}"
+- template: "{{ '%5.1f|' % 3.14159 }}"
+- template: "{{ '%-8.2f|' % 3.14159 }}"
+- template: "{{ '%08.3f' % -3.14159 }}"
+- template: "{{ '%s' % none }}"
+- template: "{{ '%r' % 'a' }}"
+- template: "{{ '%a' % 'é' }}"
+- template: "{{ '%s' % items }}"
+  vars: {"items": [1, "a"]}
+- template: "{{ '%s' % {'a': 1} }}"
+- template: "{{ '%s %s' % {'a': 1} }}"
+- template: "{{ '%5s|' % 'ab' }}"
+- template: "{{ '%-5s|' % 'ab' }}"
+- template: "{{ '%.2s' % 'abcdef' }}"
+- template: "{{ '%05s' % 'ab' }}"
+- template: "{{ '%%' % () }}"
+- template: "{{ '100%%' % () }}"
+- template: "{{ '%d%%' % 5 }}"
+- template: "{{ '%s' % 'x' % 'y' }}"
+- template: "{{ '%i' % 3 }}"
+- template: "{{ '%u' % 3 }}"
+- template: "{{ '%ld' % 3 }}"
+- template: "{{ '%hd' % 3 }}"
+- template: "{{ '%s' % true }}"
+- template: "{{ '%d' % true }}"
+- template: "{{ '%s' % 1.0 }}"
+- template: "{{ '%s' % 1e16 }}"
+- template: "{{ '%.3s' % 12345 }}"
+- template: "{{ '%x' % -255 }}"
+- template: "{{ '%o' % -8 }}"
+- template: "{{ '%#x' % -255 }}"
+- template: "{{ '%+x' % 255 }}"
+- template: "{{ '%e' % 0 }}"
+- template: "{{ '%g' % 100000 }}"
+- template: "{{ '%g' % 1000000 }}"
+- template: "{{ '%g' % 1e-5 }}"
+- template: "{{ '%.0f' % 0.5 }}"
+- template: "{{ '%.0f' % 1.5 }}"
+- template: "{{ '%.10g' % 1.1 }}"
+- template: "{{ '%x' % true }}"
+- template: "{{ '%c' % true }}"
+- template: "{{ '%.f' % 2.5 }}"
+- template: "{{ '%.' % 1 }}"
+- template: "{{ '%5.d' % 3 }}"
+- template: "{{ '%10.4e|' % 12345.6789 }}"
+- template: "{{ '%-+8.2f|' % 3.14159 }}"
+- template: "{{ '%d items' % 3 }}"
+- template: "{{ '%s' % '%s' }}"
+- template: "{{ '%s' % ('é',) }}"
+- template: "{{ a % b }}"
+  vars: {"a": 5, "b": 3}
+- template: "{{ a % b }}"
+  vars: {"a": -7, "b": 3}
+- template: "{{ a % b }}"
+  vars: {"a": 7, "b": -3}
+- template: "{{ a % b }}"
+  vars: {"a": -7, "b": -3}
+- template: "{{ a % b }}"
+  vars: {"a": 5.5, "b": 2}
+- template: "{{ a % b }}"
+  vars: {"a": -5.5, "b": 2}
+- template: "{{ a % b }}"
+  vars: {"a": 5.5, "b": -2}
+- template: "{{ a % b }}"
+  vars: {"a": 5, "b": 0}
+- template: "{{ a % b }}"
+  vars: {"a": 5.0, "b": 0}
+- template: "{{ a % b }}"
+  vars: {"a": 5, "b": 0.0}
+- template: "{{ a % b }}"
+  vars: {"a": true, "b": 2}
+- template: "{{ a % b }}"
+  vars: {"a": 5, "b": 2.5}
+- template: "{{ a % 2 }}"
+  vars: {"a": [1]}
+- template: "{{ a % 2 }}"
+  vars: {"a": null}
+- template: "{{ 'a' % 5 }}"
+- template: "{{ a % 'a' }}"
+  vars: {"a": 1}
+- template: "{{ 7 % 3 + 1 }}"
+- template: "{{ (7 % 3) * 2 }}"
+- template: "{{ x % 4 }}"
+  vars: {"x": 10}
+- template: "{{ '%s-%d' % (name, n) }}"
+  vars: {"name": "web", "n": 3}
+- template: "{{ '%s' % items }}"
+  vars: {"items": [1, 2]}
+- template: "{{ '%s %s' % pair }}"
+  vars: {"pair": ["a", "b"]}
+- template: "{{ '%s' % (items,) }}"
+  vars: {"items": [1, 2]}
+- template: "{{ '%s-%s' % tuple_of_two }}"
+  vars: {"tuple_of_two": ["a", "b"]}
+- template: "{{ '%(name)s' % d }}"
+  vars: {"d": {"name": "x"}}
+- template: "{{ '%s' % d }}"
+  vars: {"d": {"name": "x"}}
+- template: "{{ '%d' % s }}"
+  vars: {"s": "42"}
+- template: "{{ '%d' % n }}"
+  vars: {"n": 42}
+- template: "{{ '%s' % f }}"
+  vars: {"f": 1.5}
+- template: "{{ '%f' % (big * 10) }}"
+  vars: {"big": 1e308}
+- template: "{{ '%05f' % (big * 10) }}"
+  vars: {"big": 1e308}
+- template: "{{ '%f' % (big * -10) }}"
+  vars: {"big": 1e308}
+- template: "{{ '%F' % (big * 10 - big * 10) }}"
+  vars: {"big": 1e308}
+- template: "{{ '%d' % (big * 10) }}"
+  vars: {"big": 1e308}
+- template: "{{ '%s' % (big * 10) }}"
+  vars: {"big": 1e308}
+- template: "{{ '%.2f%%' % pct }}"
+  vars: {"pct": 12.345}
+- template: "{{ '%-10s|%5d|' % (name, n) }}"
+  vars: {"name": "web", "n": 3}
+- template: "{{ '%02d:%02d' % (h, m) }}"
+  vars: {"h": 7, "m": 5}
+- template: "{{ '%s' % undefined_name }}"
+- template: "{{ '%s' % (undefined_name, ) }}"
+- template: "{{ '%s-%s' % ('a', undefined_name) }}"
+- template: "{{ undefined_name % 3 }}"
+- template: "{{ 'x%sy' % '' }}"
+- template: "{{ '' % () }}"
+- template: "{{ 'abc' % () }}"
+- template: "{{ 'abc' % {} }}"
+- template: "{{ '%s' | format('a') }}"
+- template: "{{ '%s-%s' | format('a', 'b') }}"
+- template: "{{ '%(a)s' | format(a=1) }}"
+- template: "{{ '%d' | format(3.7) }}"
+- template: "{{ '%s' | format() }}"
+- template: "{{ '%s' | format(1, 2) }}"
+- template: "{{ '%5.1f' | format(2.25) }}"
