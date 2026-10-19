@@ -24,6 +24,8 @@ When two sources define the same variable, the one further down this list wins. 
 
 A vars file that holds only `---` and comments loads as an empty mapping, as in ansible-core. A file holding a scalar such as `42` is still refused.
 
+A mapping can take the keys of another with a merge key, `<<: *base`, in every YAML file Volant reads: variable files, inventories, playbooks and task arguments. The merged keys come first, and a key written next to `<<` replaces the merged one. In `<<: [*a, *b]` the first mapping wins. A value that is not a mapping or a list of mappings stops the load, with the message of PyYAML.
+
 :::note
 A gathered fact loses to the play's own variables. A playbook that sets a variable with the same name as a fact reads its own value, as in Ansible.
 :::

@@ -1,0 +1,22 @@
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ ansible_play_hosts }} {{ groups['all'] }} {{ group_names }}"
+- hosts: all:!web
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: never
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - command: "true"
+      delegate_to: localhost
+    - debug:
+        msg: "{{ ansible_play_hosts }}"
+- hosts: web:!localhost
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }}"

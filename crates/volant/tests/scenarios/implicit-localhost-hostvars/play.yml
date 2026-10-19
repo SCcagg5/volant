@@ -1,0 +1,23 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - debug:
+        msg:
+          localhost: "{{ 'localhost' in hostvars }}"
+          loopback: "{{ '127.0.0.1' in hostvars }}"
+          v6: "{{ '::1' in hostvars }}"
+          unknown: "{{ 'nosuch' in hostvars }}"
+          listed: "{{ hostvars | list }}"
+          size: "{{ hostvars | length }}"
+          all: "{{ groups['all'] }}"
+          has_group: "{{ 'localhost' in groups }}"
+          play_hosts: "{{ ansible_play_hosts }}"
+    - debug:
+        msg:
+          localhost: "{{ hostvars['localhost'].inventory_hostname }}"
+          loopback: "{{ hostvars['127.0.0.1'].inventory_hostname }}"
+          v6: "{{ hostvars['::1'].inventory_hostname }}"
+          marker: "{{ hostvars['::1'].marker | default('none') }}"
+          connection: "{{ hostvars['localhost'].ansible_connection | default('unset') }}"
+          host: "{{ hostvars['localhost'].ansible_host | default('unset') }}"
+          facts: "{{ hostvars['localhost'].ansible_facts }}"

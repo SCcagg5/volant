@@ -1,0 +1,11 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    x: 0
+  tasks:
+    - set_fact:
+        "k{{ item }}": "{{ item }}"
+        last: "{{ item }}"
+        seen: "{{ k1 | default('n') }}{{ k2 | default('n') }}{{ k3 | default('n') }}"
+      loop: [1, 2, 3]
+    - debug: {msg: "{{ seen }}"}

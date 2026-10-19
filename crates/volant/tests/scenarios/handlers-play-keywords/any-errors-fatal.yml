@@ -1,0 +1,12 @@
+- hosts: local
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - command: "true"
+      notify: fails on h1
+    - meta: flush_handlers
+    - debug:
+        msg: not reached
+  handlers:
+    - name: fails on h1
+      command: "{{ 'false' if inventory_hostname == 'h1' else 'true' }}"

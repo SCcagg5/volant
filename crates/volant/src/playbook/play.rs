@@ -110,6 +110,8 @@ pub(super) fn parse_play(yaml: &Yaml, dir: &Path) -> anyhow::Result<Play> {
         gather_written: gather_written.is_some(),
         vars,
         vars_files,
+        import_when: Vec::new(),
+        gather_when: Vec::new(),
         tasks,
         pre_tasks,
         post_tasks,

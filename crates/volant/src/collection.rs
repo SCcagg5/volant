@@ -14,16 +14,15 @@ use std::sync::{Mutex, PoisonError};
 
 use serde_json::{Map, Value};
 
-use crate::bridge::Bridge;
+use crate::bridge::{Bridge, BridgeError, PluginKind};
 use crate::compile::{Compiled, Handler, Step};
 use crate::playbook::PlayTask;
 use crate::roles::RoleSearch;
 
 /// `x` for `x`, `ansible.builtin.x` and `ansible.legacy.x`: the three names one key answers to.
+/// `yum` answers to `dnf`, the action ansible-core redirects it to, in every spelling.
 pub(crate) fn canonical(name: &str) -> &str {
-    name.strip_prefix("ansible.builtin.")
-        .or_else(|| name.strip_prefix("ansible.legacy."))
-        .unwrap_or(name)
+    volant_protocol::modules::resolved_name(name)
 }
 
 /// A `namespace.name` or a module name made of the characters Python identifiers have: what is
@@ -189,6 +188,29 @@ pub(crate) fn actions_named<'a>(tasks: impl IntoIterator<Item = &'a PlayTask>) -
         .collect()
 }
 
+/// The lookup names the `with_<lookup>` loops of `tasks` hold that only the controller's
+/// ansible-core can place: every name but the lookups `ansible.builtin` ships, which have a row
+/// in the keyword table. A collection's lookup, one a `lookup_plugins/` directory holds and a
+/// name that is none of them look alike until it is asked.
+pub(crate) fn lookups_named<'a>(tasks: impl IntoIterator<Item = &'a PlayTask>) -> BTreeSet<String> {
+    tasks
+        .into_iter()
+        .filter_map(|task| task.loop_with.as_deref())
+        .filter(|name| {
+            crate::keywords::task_keyword(&format!("with_{}", canonical(name))).is_none()
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+/// The reference's sentence for a `with_<name>` that names no lookup plugin: the key is read as an
+/// attribute of the task, and the task has none of that name.
+pub(crate) fn unresolved_lookup(name: &str) -> String {
+    format!(
+        "'with_{name}' is not a valid attribute for a Task\nThis error can be suppressed as a warning using the \"invalid_task_attribute_failed\" configuration"
+    )
+}
+
 /// The sentence for a key that names nothing.
 pub(crate) fn unresolved_action(name: &str) -> String {
     format!("Could not resolve action {name} in module_defaults")
@@ -200,19 +222,39 @@ pub(crate) fn unresolved_action(name: &str) -> String {
 pub(crate) struct Resolved {
     groups: Mutex<BTreeMap<String, Vec<String>>>,
     actions: Mutex<BTreeSet<String>>,
+    lookups: Mutex<BTreeSet<String>>,
 }
 
 impl Resolved {
-    /// Asks `bridge` about every group and key the layers of `tasks` name that has not been
-    /// asked about yet.
+    /// Asks `bridge` about every group and key the layers of `tasks` name, and every lookup their
+    /// `with_<lookup>` loops name, that has not been asked about yet.
     ///
     /// # Errors
-    /// The reference's sentence for the first group or key nothing answers to.
+    /// The reference's sentence for the first group, key or lookup nothing answers to.
     pub(crate) fn ensure<'a>(
         &self,
         tasks: impl IntoIterator<Item = &'a PlayTask> + Clone,
         bridge: Option<&Bridge>,
     ) -> Result<(), String> {
+        let missing_lookups: Vec<String> = {
+            let known = self.lookups.lock().unwrap_or_else(PoisonError::into_inner);
+            lookups_named(tasks.clone())
+                .into_iter()
+                .filter(|name| !known.contains(name))
+                .collect()
+        };
+        for name in &missing_lookups {
+            let bridge = bridge.ok_or_else(|| unresolved_lookup(name))?;
+            match bridge.resolve(PluginKind::Lookup, name) {
+                Ok(()) => {}
+                Err(BridgeError::NotFound(_)) => return Err(unresolved_lookup(name)),
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        self.lookups
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend(missing_lookups);
         let missing_actions: Vec<String> = {
             let known = self.actions.lock().unwrap_or_else(PoisonError::into_inner);
             actions_named(tasks.clone())

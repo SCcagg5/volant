@@ -12,7 +12,7 @@ use anyhow::{anyhow, bail};
 use saphyr::{Mapping, MarkedYaml, Scalar, Tag, Yaml, YamlData};
 use serde_json::{Map, Value};
 
-use super::{Starts, char_to_byte, pyyaml_scalar, unsafe_data, vault_data};
+use super::{Offsets, Starts, pyyaml_scalar, unsafe_data, vault_data};
 
 /// A collection of the source tree whose children are being lowered.
 #[expect(
@@ -41,12 +41,12 @@ fn is_leaf(node: &MarkedYaml<'_>) -> bool {
 }
 
 /// A scalar of the source tree, with PyYAML's reading of it.
-fn lower_scalar<'a>(node: MarkedYaml<'a>, text: &'a str) -> Yaml<'a> {
+fn lower_scalar<'a>(node: MarkedYaml<'a>, offsets: &Offsets<'a>) -> Yaml<'a> {
     match node.data {
         YamlData::Value(scalar) => {
-            let start = char_to_byte(text, node.span.start.index());
-            let end = char_to_byte(text, node.span.end.index());
-            let raw = text.get(start..end).unwrap_or_default();
+            let start = offsets.byte(node.span.start.index());
+            let end = offsets.byte(node.span.end.index());
+            let raw = offsets.text.get(start..end).unwrap_or_default();
             Yaml::Value(pyyaml_scalar(scalar, raw))
         }
         _ => Yaml::BadValue,
@@ -57,24 +57,27 @@ fn lower_scalar<'a>(node: MarkedYaml<'a>, text: &'a str) -> Yaml<'a> {
 /// scalar resolution along the way where it's confirmed to diverge from saphyr's YAML 1.2 core
 /// schema (see `pyyaml_scalar`). Every other function in this module keeps working on the
 /// plain `Yaml` tree it already expected; only `load` needs to know this happened.
-pub(super) fn lower<'a>(root: MarkedYaml<'a>, text: &'a str) -> Yaml<'a> {
+pub(super) fn lower<'a>(root: MarkedYaml<'a>, offsets: &Offsets<'a>) -> Yaml<'a> {
     let mut open: Vec<Lowering<'a>> = Vec::new();
     let mut next = Some(root);
     let mut done: Option<Yaml<'a>> = None;
     loop {
         if let Some(node) = next.take() {
             match node.data {
-                YamlData::Value(_) => done = Some(lower_scalar(node, text)),
+                YamlData::Value(_) => done = Some(lower_scalar(node, offsets)),
                 // A collection of scalars, the usual one, is lowered at once, with no frame.
                 YamlData::Sequence(items) if items.iter().all(is_leaf) => {
                     done = Some(Yaml::Sequence(
-                        items.into_iter().map(|n| lower_scalar(n, text)).collect(),
+                        items
+                            .into_iter()
+                            .map(|n| lower_scalar(n, offsets))
+                            .collect(),
                     ));
                 }
                 YamlData::Mapping(map) if map.iter().all(|(k, v)| is_leaf(k) && is_leaf(v)) => {
                     let mut out = Mapping::new();
                     for (k, v) in map {
-                        out.insert(lower_scalar(k, text), lower_scalar(v, text));
+                        out.insert(lower_scalar(k, offsets), lower_scalar(v, offsets));
                     }
                     done = Some(Yaml::Mapping(out));
                 }

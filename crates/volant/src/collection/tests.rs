@@ -30,6 +30,16 @@ fn groups() -> BTreeMap<String, Vec<String>> {
     "ansible.legacy.debug",
     json!({"msg": "short"})
 )]
+#[case::dnf_defaults_reach_a_yum_task(
+    json!([{"dnf": {"use_backend": "dnf5"}}]),
+    "ansible.legacy.yum",
+    json!({"use_backend": "dnf5"})
+)]
+#[case::yum_defaults_reach_a_dnf_task(
+    json!([{"ansible.builtin.yum": {"use": "dnf"}}]),
+    "dnf",
+    json!({"use": "dnf"})
+)]
 #[case::another_module_is_left_alone(json!([{"debug": {"msg": "x"}}]), "ping", json!({}))]
 #[case::a_group_applies_under_the_module_s_own_key(
     json!([{"group/testgroup": {"data": "g", "x": 1}}, {"ping": {"data": "own"}}]),
@@ -106,5 +116,27 @@ fn a_group_nobody_defined_names_itself() {
     assert_eq!(
         defaults_for("ping", &layers, &groups(), &mut as_written),
         Err(unresolved_group("ansible.builtin.nosuch"))
+    );
+}
+
+/// A `with_<name>` is asked about unless `ansible.builtin` ships the lookup, under either of its
+/// two prefixes.
+#[test]
+fn only_the_names_the_keyword_table_lacks_are_asked_about() {
+    let task = |name: &str| PlayTask {
+        loop_with: Some(name.to_string()),
+        ..PlayTask::empty()
+    };
+    let tasks = [
+        task("dict"),
+        task("ansible.builtin.nested"),
+        task("ansible.legacy.together"),
+        task("flattened"),
+        task("community.general.dependent"),
+        task("xyz"),
+    ];
+    assert_eq!(
+        lookups_named(&tasks).into_iter().collect::<Vec<_>>(),
+        ["community.general.dependent", "flattened", "xyz"]
     );
 }

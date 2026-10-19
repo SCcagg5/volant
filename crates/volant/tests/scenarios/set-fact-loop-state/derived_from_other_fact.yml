@@ -1,0 +1,12 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    y: 0
+    z: "{{ y }}!"
+    w: "{{ z }}?"
+  tasks:
+    - set_fact:
+        y: "{{ item }}"
+        seen: "{{ (seen | default([])) + [w] }}"
+      loop: [1, 2, 3]
+    - debug: {msg: "{{ seen }} {{ w }}"}

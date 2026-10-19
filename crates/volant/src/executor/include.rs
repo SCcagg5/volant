@@ -80,7 +80,7 @@ pub(super) fn resolve_include(
                 vec![Shown {
                     element: None,
                     label: None,
-                    result: TaskResult::failed_with(super::prepare::failure_text(&err)),
+                    result: super::prepare::failed_result(&err),
                     failed: true,
                     ignored: None,
                 }],
@@ -126,6 +126,15 @@ pub(super) fn resolve_include(
             Ok(request) => match crate::compile::expand_include(compiled, step, &request).and_then(
                 |mut expanded| {
                     crate::preflight::check_built(&expanded, plan.python.as_deref())?;
+                    // The lookups of its `with_` loops, which the reference resolves when it
+                    // loads the file: a name that is none fails the include, not a task of it.
+                    plan.steps()
+                        .resolved
+                        .ensure(
+                            crate::collection::tasks_of(&expanded).collect::<Vec<_>>(),
+                            templar.bridge().map(|bridge| &**bridge),
+                        )
+                        .map_err(|e| anyhow::anyhow!(e))?;
                     if plan.strategy.free() {
                         warnings.extend(super::free::loosen(&mut expanded));
                     }
@@ -272,11 +281,11 @@ fn include_request(
             .map(String::as_str)
             .chain(["ansible_loop"]);
         for name in bound {
-            if let Some(value) = item.vars.get(name) {
+            if let Some(value) = item.vars.get_whole(name) {
                 if item.vars.untrusted.contains(name) {
                     vars.untrusted.insert(name.to_string());
                 }
-                vars.values.insert(name.to_string(), value.clone());
+                vars.values.insert(name.to_string(), value);
             }
         }
         vars.values.insert(
