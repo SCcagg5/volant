@@ -404,7 +404,16 @@ pub(super) fn convert_error(err: minijinja::Error) -> TemplateError {
     if let Some(said) = bridged::said(&err) {
         return TemplateError(said.to_string());
     }
-    let text = err.to_string();
+    let mut text = err.to_string();
+    // The value of an integer wider than 128 bits is an object to minijinja, which names no
+    // limit when an operator refuses it.
+    if err.kind() == ErrorKind::InvalidOperation
+        && err
+            .detail()
+            .is_some_and(|d| d.starts_with("tried to use ") && d.contains("types plain object"))
+    {
+        text.push_str(" (an integer wider than 128 bits takes part in no arithmetic)");
+    }
     if err.kind() == ErrorKind::UndefinedError {
         return TemplateError(format!("{UNDEFINED} The error was: {text}"));
     }

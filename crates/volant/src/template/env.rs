@@ -66,7 +66,7 @@ pub(super) fn container_repr(value: &minijinja::Value) -> Option<String> {
     ) {
         return None;
     }
-    let json = serde_json::to_value(value).ok()?;
+    let json = super::bigint::to_json(value).ok()?;
     Some(crate::playbook::python_repr(&json))
 }
 

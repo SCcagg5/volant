@@ -977,6 +977,7 @@ dependencies = [
  "rstest",
  "saphyr",
  "saphyr-parser",
+ "serde",
  "serde_json",
  "sha2",
  "shlex",
