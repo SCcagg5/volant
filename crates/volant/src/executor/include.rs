@@ -80,7 +80,7 @@ pub(super) fn resolve_include(
                 vec![Shown {
                     element: None,
                     label: None,
-                    result: TaskResult::failed_with(super::prepare::failure_text(&err)),
+                    result: super::prepare::failed_result(&err),
                     failed: true,
                     ignored: None,
                 }],

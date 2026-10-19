@@ -92,11 +92,35 @@ pub(in crate::executor) fn failure_text(err: &TemplateError) -> String {
     if err.0.starts_with(KEYWORD_ERROR)
         || err.0.starts_with(NOTIFY_FAILED)
         || err.0.starts_with("Task failed: ")
+        || is_loop_lookup_failure(err)
     {
         err.0.clone()
     } else {
         format!("Task failed: {}", err.0)
     }
+}
+
+/// A `with_` loop whose lookup raised. Measured on ansible-core 2.19.12: the message is the
+/// plugin's own sentence with no `Task failed: ` in front, and the error block shows
+/// `Origin: <unknown>` and the expression `invoke_lookup()` where a task's place would be.
+pub(in crate::executor) fn is_loop_lookup_failure(err: &TemplateError) -> bool {
+    err.0.starts_with("The lookup plugin '") && err.0.contains("' failed: ")
+}
+
+/// The result of a task that dies before it runs, worded as [`failure_text`] words it.
+pub(in crate::executor) fn failed_result(err: &TemplateError) -> TaskResult {
+    let mut result = TaskResult::failed_with(failure_text(err));
+    if is_loop_lookup_failure(err) {
+        result.0.insert(
+            crate::render::ERROR_KEY.into(),
+            Value::String(err.0.clone()),
+        );
+        result.0.insert(
+            crate::render::UNKNOWN_KEY.into(),
+            Value::String("invoke_lookup()".into()),
+        );
+    }
+    result
 }
 
 /// The pause the loop `items` belong to waits between two of them, if it has one.

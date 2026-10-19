@@ -2112,8 +2112,9 @@ fn an_undefined_loop_under_a_true_when_fails_the_task() {
     let out = volant_within(&["playbook", &path.display().to_string()], PROBE_DEADLINE);
     let text = String::from_utf8(out.stdout).unwrap();
     assert_eq!(out.status.code(), Some(2), "{text}");
+    let copy = section(&text, "Copy");
     assert!(
-        section(&text, "Copy").contains("The task includes an option with an undefined variable."),
+        copy.contains("Task failed: 'nope' is undefined") && copy.contains("<<< caused by >>>"),
         "{text}"
     );
     std::fs::remove_dir_all(&dir).unwrap();

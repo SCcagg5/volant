@@ -248,11 +248,13 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
     // is asked of the controller's ansible-core before the first connection, because collections
     // and a `lookup_plugins/` directory add names no table here can hold.
     let mut loop_items = None;
+    let mut loop_node = None;
     let mut loop_with: Option<String> = None;
     for (key, value) in map {
         let Some(key) = key.as_str() else { continue };
         if key == "loop" {
             loop_items = Some(to_json(value).with_context(|| format!("task '{label}': {key}"))?);
+            loop_node = Some(value);
         } else if let Some(lookup) = key.strip_prefix("with_") {
             if loop_items.is_some() || loop_with.is_some() {
                 return Err(crate::stats::Refusal::at(
@@ -267,6 +269,7 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
                 ));
             }
             loop_items = Some(to_json(value).with_context(|| format!("task '{label}': {key}"))?);
+            loop_node = Some(value);
             loop_with = Some(lookup.to_string());
         }
     }
@@ -291,6 +294,7 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
         ("retries", field(yaml, "retries")),
         ("delay", field(yaml, "delay")),
         ("notify", field(yaml, "notify")),
+        ("loop", loop_node),
         ("var", var),
     ] {
         if let Some(origin) = node.and_then(value_origin) {

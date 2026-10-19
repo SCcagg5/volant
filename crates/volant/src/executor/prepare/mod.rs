@@ -24,7 +24,8 @@ mod vars;
 
 pub(in crate::executor) use escalation::retry_name;
 pub(in crate::executor) use item::{
-    FINALIZING, Item, NOTIFY_FAILED, Prepared, failure_text, pause_of, undefined_name,
+    FINALIZING, Item, NOTIFY_FAILED, Prepared, failed_result, failure_text, pause_of,
+    undefined_name,
 };
 pub(in crate::executor) use plan::{Gate, PlayPlan, Strategy};
 pub(in crate::executor) use vars::host_vars;
@@ -32,7 +33,8 @@ pub(in crate::executor) use vars::host_vars;
 use connect::{connect_for, delegate_for};
 use escalation::{become_for, remove_omit};
 use item::{check_gather_subset, environment_for, flag_for, ignore_errors_for, notify_for};
-use loops::{LoopOptions, loop_list, loop_options, with_lookup_items};
+pub(in crate::executor) use loops::undefined_causes;
+use loops::{LoopOptions, loop_list, loop_options, named_undefined, with_lookup_items};
 
 #[expect(
     clippy::too_many_arguments,
@@ -99,7 +101,10 @@ pub(super) fn prepare(
             list.into_iter().map(Some).collect()
         }
         Some(Err(e)) if e.is_undefined() => {
-            loop_error = Some(e);
+            loop_error = Some(match &task.loop_items {
+                Some(raw) => named_undefined(raw, e),
+                None => e,
+            });
             vec![None]
         }
         Some(Err(e)) => return Err(e),
