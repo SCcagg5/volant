@@ -492,6 +492,40 @@ fn the_implicit_hosts_interpreter_is_looked_up_when_its_entry_is_read(
     assert_eq!(entry.get("ansible_python_interpreter"), want.as_ref());
 }
 
+/// What a managed host returned stays data, whichever spelling of the controller a template reads
+/// it through: the hosts that hold such text include every spelling once one of them does.
+#[rstest::rstest]
+#[case::listed("localhost\n", "localhost", true)]
+#[case::listed_loopback("127.0.0.1\n", "127.0.0.1", true)]
+#[case::implicit("", "localhost", true)]
+#[case::implicit_under_another_spelling("", "::1", true)]
+#[case::another_host("", "web1", false)]
+fn the_controller_s_text_is_data_under_every_spelling(
+    #[case] listed: &str,
+    #[case] ran_as: &str,
+    #[case] all_spellings: bool,
+) {
+    let tmp = scratch();
+    let dir = tmp.path();
+    write(
+        dir,
+        "inventory/hosts.ini",
+        &format!("[web]\nweb1\n{listed}"),
+    );
+    let inv = Inventory::load(&dir.join("inventory/hosts.ini")).unwrap();
+    let mut store = VarStore::new(&inv, None, &dir.join("play"), Map::new()).unwrap();
+    store.set_untrusted_fact(ran_as, "r", json!({"stdout": "text"}));
+    let held = store.untrusted_hosts();
+    for spelling in crate::inventory::LOCALHOST_NAMES {
+        assert_eq!(
+            held.contains(spelling),
+            all_spellings,
+            "{spelling} after a register under {ran_as}: {held:?}"
+        );
+    }
+    assert!(held.contains(ran_as));
+}
+
 /// A fact the controller gathers shows in every spelling that stands for it.
 #[test]
 fn a_spelling_of_the_controller_follows_its_host() {

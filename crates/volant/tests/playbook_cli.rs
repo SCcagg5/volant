@@ -5632,6 +5632,74 @@ fn an_inventory_with_no_host_warns_that_only_localhost_is_left(
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The register of the controller host is data when it is read through any of the three
+/// spellings, from any inventory shape: the text comes back as it was, never rendered.
+#[rstest::rstest]
+fn the_controller_s_register_stays_data_through_every_spelling(
+    #[values("localhost", "127.0.0.1", "::1")] ran_as: &str,
+    #[values("localhost", "127.0.0.1", "::1")] read_as: &str,
+    #[values(
+        "",
+        "localhost ansible_connection=local\n",
+        "localhost ansible_host=192.0.2.9 ansible_connection=local\n"
+    )]
+    listed: &str,
+) {
+    let dir = probe_dir(&format!(
+        "controller-data-{}-{}-{}",
+        ran_as.len(),
+        read_as.len(),
+        listed.len()
+    ));
+    std::fs::write(
+        dir.join("inv.ini"),
+        format!("[web]\nw1 ansible_connection=local\n{listed}"),
+    )
+    .expect("an inventory");
+    std::fs::write(dir.join("text.txt"), "{{ 'MARK' ~ 'ED' }}").expect("the text");
+    let play = format!(
+        "- hosts: \"{ran_as}\"
+  gather_facts: false
+  tasks:
+    - command: cat {dir}/text.txt
+      register: r
+- hosts: w1
+  gather_facts: false
+  vars:
+    from_vars: \"{{{{ hostvars['{read_as}'].r.stdout }}}}\"
+  tasks:
+    - set_fact:
+        copied: \"{{{{ hostvars['{read_as}'].r.stdout }}}}\"
+        whole: \"{{{{ hostvars['{read_as}'].r }}}}\"
+    - debug:
+        msg: \"read={{{{ hostvars['{read_as}'].r.stdout }}}} copied={{{{ copied }}}} vars={{{{ from_vars }}}} whole={{{{ whole.stdout }}}}\"
+",
+        dir = dir.display()
+    );
+    std::fs::write(dir.join("play.yml"), play).expect("the play");
+    let out = volant_within(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            dir.join("play.yml").to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(60),
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stdout}{stderr}");
+    assert!(
+        !stdout.contains("MARKED"),
+        "the text was rendered: {stdout}"
+    );
+    assert!(
+        stdout.contains("read={{ 'MARK' ~ 'ED' }} copied={{ 'MARK' ~ 'ED' }} vars={{ 'MARK' ~ 'ED' }} whole={{ 'MARK' ~ 'ED' }}"),
+        "{stdout}{stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A module that answers `<name> says <word>`, as a `library/` holds one.
 fn library_module(dir: &Path, name: &str, field: &str) {
     std::fs::create_dir_all(dir).expect("a library directory");
