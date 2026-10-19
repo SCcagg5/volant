@@ -373,9 +373,8 @@ exit {code}
     assert_eq!(resolve::pick(&list(&[&without]), || None), None);
 }
 
-/// A module sitting in the working directory is not imported by the probe in place of the real
-/// one. `python -c` puts that directory first on the module path, so a `json.py` or an
-/// `ansible.py` beside the playbook would otherwise decide the answer.
+/// A `json.py` or `ansible.py` in the working directory does not decide the probe's answer, which
+/// `python -c` alone would let it do by putting that directory first on the module path.
 #[test]
 fn a_file_in_the_working_directory_is_not_imported_by_the_probe() {
     let tmp = scratch();
@@ -390,9 +389,8 @@ fn a_file_in_the_working_directory_is_not_imported_by_the_probe() {
     assert!(resolve::imports("python3", "json", Some(tmp.path())));
 }
 
-/// `python -m` puts the working directory first on the module path, and `ansible.cli.galaxy` is
-/// run that way inside the runtime. A package of the standard library in that directory does not
-/// replace the real one.
+/// The runtime's commands, `python -m ansible.cli.galaxy` among them, do not import a module from
+/// the working directory in place of the real one.
 #[test]
 fn the_runtimes_commands_do_not_import_from_the_working_directory() {
     let tmp = scratch();

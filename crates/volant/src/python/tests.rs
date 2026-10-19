@@ -881,9 +881,8 @@ fn the_helper_refuses_a_byte_conflict_in_the_union() {
     );
 }
 
-/// A module sitting in the working directory is not imported by the helper in place of the real
-/// one: `python -c` puts that directory first on the module path, and the helper imports `json`
-/// and the rest of the standard library before it does anything else.
+/// A `json.py` in the working directory does not replace the real module in the helper, which
+/// imports the standard library first (`python -c` puts that directory first on the path).
 #[test]
 fn the_helper_does_not_import_a_file_from_the_working_directory() {
     let tmp = scratch();
