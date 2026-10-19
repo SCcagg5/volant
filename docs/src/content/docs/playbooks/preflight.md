@@ -42,7 +42,7 @@ Listings and `--syntax-check` never call the pre-flight, so you can read a playb
 
 - The first pass reads the play as written, so a task that `--tags` would have dropped still stops the run when it uses something not supported yet. The second pass reads the compiled steps, after tag selection. This errs toward stopping more often, never less.
 - `tags` and `timeout` are checked before their value is looked at, so `tags: 3` does not get Ansible's type error.
-- A `with_` key that names a real lookup plugin is reported by that name as not supported yet. Ansible runs all twenty-five; only `with_items` has a loop here.
+- A `with_` key that names a real lookup plugin runs, except `with_flattened`, `with_cartesian` and `with_filetree`. Those three are refused as a `conflicting action statements` error.
 - For a module this release does not support yet, the arguments are not parsed, so the error is about the module and not about a `key=value` on the next line.
 - An invalid `meta` action is rejected before the first connection rather than after the play banner, with the reference's message and exit code 1.
 - `gather_facts`, `ignore_errors` and `become` written as something other than true or false are rejected when the playbook loads, one step earlier than Ansible rejects them, with the reference's message and exit code. A templated `ignore_errors: "{{ ... }}"` is not: it is rendered when the task runs, for each loop item, and read with the reference's boolean rules.

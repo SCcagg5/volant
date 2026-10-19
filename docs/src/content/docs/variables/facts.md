@@ -1,6 +1,6 @@
 ---
 title: Facts
-description: How Volant gathers facts, the two names each fact is readable under, and what is not supported yet.
+description: How Volant gathers facts, the two names each fact is readable under, and how they are cached.
 ---
 
 A play gathers facts unless it sets `gather_facts: false`. Volant either runs ansible-core's own `setup` module on the [warm Python path](/internals/python/), or lets the agent collect the facts natively when the playbook provably reads nothing else, see [Native facts](#native-facts).
@@ -43,6 +43,6 @@ Facts are the host's own words, so they arrive untrusted: a template inside a fa
 
 With `fact_caching = jsonfile` facts persist from one run to the next, see [The fact cache](/hosts/fact-cache/).
 
-## Not there yet
+## Limiting the facts
 
-- `gather_subset` and `gather_timeout` are not supported yet. Remove them and the play gathers the full set of facts.
+`gather_subset` and `gather_timeout` work on a play, and on the `setup` module with `filter`, as in ansible-core.

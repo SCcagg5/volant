@@ -25,7 +25,7 @@ Rejected before the host is asked anything, in the reference's own words:
 - `dest is required`
 - `src and content are mutually exclusive`
 - `can not use content with a dir as dest`
-- `copying a directory is not supported yet: <src>` (the reference copies a directory recursively; this release does not yet).
+- `copying a directory is not supported yet: <src>`. The Rust plugin does not copy a directory, so the task runs on the bridge, which does.
 - A `src` that names nothing on the controller, wrapped as `Unexpected AnsibleActionFail error: Could not find or access '<src>' ...`.
 - A source larger than one frame is rejected by its size, before it is read.
 
@@ -102,7 +102,7 @@ An archive read on the controller, or already on the host, extracted by the `una
 Rejected before the host is asked anything:
 
 - `src (or content) and dest are required`
-- `a '~' path is not supported yet on 'unarchive'`, for `dest` or `creates`
+- `a '~' path is not supported yet on 'unarchive'`, for `dest` or `creates`. The task then runs on the bridge.
 - A `src` that names nothing on the controller: `Task failed: Could not find or access '<src>' ...\nIf you are using a module and expect the file to exist on the remote, see the remote_src option`
 - `src is a directory, not an archive: <src>`, for a `src` found as a directory on the controller.
 - A source larger than one frame is rejected by its size, before it is read.
