@@ -1,0 +1,50 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: Read a file whose text looks like a template
+      command: cat {{ payload }}
+      register: r
+
+    - name: Delegate to the text itself
+      command: id
+      delegate_to: "{{ r.stdout }}"
+      ignore_unreachable: true
+
+    - name: Keep the text in a fact
+      set_fact:
+        target: "{{ r.stdout }}"
+
+    - name: Delegate to the fact
+      command: id
+      delegate_to: "{{ target }}"
+      ignore_unreachable: true
+
+    - name: Delegate a whole block
+      block:
+        - command: id
+        - command: id
+      delegate_to: "{{ r.stdout }}"
+      ignore_unreachable: true
+
+    - name: A delegate that connects locally
+      command: id
+      delegate_to: "{{ r.stdout }}"
+      vars:
+        ansible_connection: local
+
+    - name: A host name the playbook wrote
+      command: id
+      delegate_to: "{{ chosen }}"
+      vars:
+        chosen: h2
+
+- name: Whether the payload ran
+  hosts: h1
+  gather_facts: false
+  tasks:
+    - name: Look for the marker the payload would have written
+      shell: "test -e {{ playbook_dir }}/marker && echo ran || echo never ran"
+      register: marker
+    - name: The payload never ran
+      debug:
+        var: marker.stdout

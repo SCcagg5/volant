@@ -912,6 +912,7 @@ fn the_published_host_variables_are_the_ones_this_module_reads() {
         include_str!("escalation/probe.rs"),
         include_str!("escalation/su.rs"),
         include_str!("escalation/sudo.rs"),
+        include_str!("names.rs"),
         include_str!("session.rs"),
         include_str!("shell.rs"),
         include_str!("ssh.rs"),
@@ -932,11 +933,18 @@ fn the_published_host_variables_are_the_ones_this_module_reads() {
             .join("../../docs/src/content/docs/hosts/connections.md"),
     )
     .expect("the connections page is in the repository");
+    // Every name in the first cell of a row, so one row can carry a variable and its aliases.
     let mut published: Vec<&str> = page
         .lines()
-        .filter_map(|line| line.strip_prefix("| `ansible_"))
-        .filter_map(|rest| rest.split_once('`').map(|(name, _)| name))
-        .filter(|name| !name.starts_with("become"))
+        .filter(|line| line.starts_with("| `ansible_"))
+        .filter_map(|line| line.split('|').nth(1))
+        .flat_map(|cell| cell.split('`').skip(1).step_by(2))
+        .filter_map(|name| name.strip_prefix("ansible_"))
+        .filter(|name| {
+            !["become", "sudo_", "su_"]
+                .iter()
+                .any(|own| name.starts_with(own))
+        })
         .collect();
     published.sort_unstable();
     published.dedup();
@@ -1038,6 +1046,204 @@ fn the_user_and_port_keywords_rank_between_the_host_and_the_command_line(
     );
 }
 
+/// The `ansible_ssh_*` name of a connection setting beats the plain one, as in ansible-core
+/// 2.19.12; a null counts as not set.
+#[rstest]
+#[case::plain_names(
+    json!({"ansible_host": "h", "ansible_port": 22, "ansible_user": "u", "ansible_private_key_file": "/k"}),
+    "h", Some(22), Some("u"), Some("/k")
+)]
+#[case::ssh_names(
+    json!({"ansible_ssh_host": "h", "ansible_ssh_port": "2200", "ansible_ssh_user": "u", "ansible_ssh_private_key_file": "/k"}),
+    "h", Some(2200), Some("u"), Some("/k")
+)]
+#[case::ssh_names_win(
+    json!({"ansible_host": "a", "ansible_ssh_host": "b", "ansible_port": 1, "ansible_ssh_port": 2,
+           "ansible_user": "a", "ansible_ssh_user": "b", "ansible_private_key_file": "/a", "ansible_ssh_private_key_file": "/b"}),
+    "b", Some(2), Some("b"), Some("/b")
+)]
+#[case::null_is_not_set(
+    json!({"ansible_host": "a", "ansible_ssh_host": null, "ansible_user": "a", "ansible_ssh_user": null}),
+    "a", None, Some("a"), None
+)]
+fn the_legacy_names_of_the_connection_settings_win_as_they_do_in_the_reference(
+    #[case] vars: Value,
+    #[case] address: &str,
+    #[case] port: Option<u16>,
+    #[case] user: Option<&str>,
+    #[case] key: Option<&str>,
+) {
+    let Transport::Ssh(target) = Transport::for_host(&host(vars), &defaults()).unwrap() else {
+        panic!("expected ssh")
+    };
+    assert_eq!(target.address, address);
+    assert_eq!(target.port, port);
+    assert_eq!(target.user.as_deref(), user);
+    assert_eq!(target.own.private_key.as_deref(), key.map(Path::new));
+}
+
+/// The connection password of a host: the three names, the order among them, a number, and the
+/// empty string that still counts as set. A host that names none leaves the command line's.
+#[rstest]
+#[case::none(json!({}), None)]
+#[case::password(json!({"ansible_password": "a"}), Some("a"))]
+#[case::ssh_pass(json!({"ansible_ssh_pass": "a"}), Some("a"))]
+#[case::ssh_password(json!({"ansible_ssh_password": "a"}), Some("a"))]
+#[case::pass_over_password(json!({"ansible_password": "a", "ansible_ssh_pass": "b"}), Some("b"))]
+#[case::ssh_password_over_pass(json!({"ansible_ssh_pass": "a", "ansible_ssh_password": "b"}), Some("b"))]
+#[case::ssh_password_over_all(json!({"ansible_password": "a", "ansible_ssh_password": "c", "ansible_ssh_pass": "b"}), Some("c"))]
+#[case::number(json!({"ansible_password": 1234}), Some("1234"))]
+#[case::empty_is_set(json!({"ansible_password": ""}), Some(""))]
+#[case::null_is_not_set(json!({"ansible_password": "a", "ansible_ssh_password": null}), Some("a"))]
+fn a_host_names_its_connection_password_in_one_of_three_variables(
+    #[case] vars: Value,
+    #[case] want: Option<&str>,
+) {
+    let Transport::Ssh(target) = Transport::for_host(&host(vars), &defaults()).unwrap() else {
+        panic!("expected ssh")
+    };
+    assert_eq!(target.own.password.as_ref().map(Secret::expose), want);
+}
+
+#[rstest]
+#[case::list(json!({"ansible_password": ["a"]}))]
+#[case::bool(json!({"ansible_password": true}))]
+fn a_password_that_is_not_text_fails_the_host_without_showing_it(#[case] vars: Value) {
+    let err = Transport::for_host(&host(vars), &defaults()).unwrap_err();
+    assert!(
+        err.to_string().contains("host 'web1'") && err.to_string().contains("text or a number"),
+        "{err}"
+    );
+}
+
+/// None of the words of the `ssh` command line is the password; the `Debug` output is checked
+/// below.
+#[test]
+fn the_connection_password_is_not_on_the_command_line() {
+    let vars = json!({"ansible_password": "s3cret-pw", "ansible_user": "ops"});
+    let Transport::Ssh(target) = Transport::for_host(&host(vars), &defaults()).unwrap() else {
+        panic!("expected ssh")
+    };
+    for argv in [target.ssh_argv("true"), target.ssh_argv_with("true", true)] {
+        assert!(
+            argv.iter().all(|word| !word.contains("s3cret-pw")),
+            "{argv:?}"
+        );
+        // A password is offered through `SSH_ASKPASS`, so `ssh` may ask for it once and no more.
+        assert!(argv.join(" ").contains("BatchMode=no"), "{argv:?}");
+        assert!(
+            argv.join(" ").contains("NumberOfPasswordPrompts=1"),
+            "{argv:?}"
+        );
+    }
+}
+
+/// Every `ansible_` name written in `names.rs` is in `names::all()`, which the fact scan reads,
+/// so a managed host cannot set it.
+#[test]
+fn every_connection_name_in_names_rs_is_in_the_list_the_scan_reads() {
+    let written: std::collections::BTreeSet<&str> = include_str!("names.rs")
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .filter(|text| text.starts_with("ansible_"))
+        .collect();
+    let listed: std::collections::BTreeSet<&str> = names::all().collect();
+    assert!(!listed.is_empty());
+    assert_eq!(
+        written, listed,
+        "a name in names.rs is missing from names::all(), or the other way round"
+    );
+}
+
+/// Every type that can hold a connection password prints a placeholder, in the one-line and the
+/// pretty form of `Debug`, so a `{:?}` added to a log line later cannot show it.
+#[test]
+fn no_type_that_holds_a_connection_password_shows_it_in_debug_output() {
+    let password = "s3cret-pw";
+    let vars = json!({"ansible_password": password, "ansible_become_password": password});
+    let transport = Transport::for_host(&host(vars), &defaults()).unwrap();
+    let Transport::Ssh(target) = transport.clone() else {
+        panic!("expected ssh")
+    };
+    let mut with_defaults = defaults();
+    with_defaults.become_password = Some(password.into());
+    let mut escalating = escalation(Some(password));
+    escalating.password = Some(password.into());
+    let secret = Secret::new(password);
+    let source = crate::askpass::Source::Variable(password);
+    let shown = [
+        format!("{secret:?}"),
+        format!("{secret:#?}"),
+        format!("{:?}", Some(secret.clone())),
+        format!("{source:?}"),
+        format!("{source:#?}"),
+        format!("{:?}", target.own),
+        format!("{:#?}", target.own),
+        format!("{target:?}"),
+        format!("{target:#?}"),
+        format!("{transport:?}"),
+        format!("{transport:#?}"),
+        format!("{with_defaults:?}"),
+        format!("{with_defaults:#?}"),
+        format!("{escalating:?}"),
+        format!("{escalating:#?}"),
+    ];
+    for text in &shown {
+        assert!(!text.contains(password), "{text}");
+    }
+    assert!(shown[0].contains("<redacted>") && shown[3].contains("<redacted>"));
+}
+
+/// Without a password variable, and with the empty one, `ssh` never prompts.
+#[rstest]
+#[case::none(json!({}))]
+#[case::empty(json!({"ansible_password": ""}))]
+fn a_host_without_a_password_runs_ssh_in_batch_mode(#[case] vars: Value) {
+    let Transport::Ssh(target) = Transport::for_host(&host(vars), &defaults()).unwrap() else {
+        panic!("expected ssh")
+    };
+    let text = target.ssh_argv("true").join(" ");
+    assert!(text.contains("BatchMode=yes"), "{text}");
+    assert!(!text.contains("NumberOfPasswordPrompts"), "{text}");
+}
+
+/// `ansible_ssh_timeout` beats `ansible_timeout`, which beats `-T`, as in ansible-core 2.19.12;
+/// `ansible_ssh_executable` names the program; a timeout that is no whole number fails.
+#[rstest]
+#[case::default(json!({}), Ok((10, "ssh")))]
+#[case::timeout(json!({"ansible_timeout": 3}), Ok((3, "ssh")))]
+#[case::quoted(json!({"ansible_timeout": " 4 "}), Ok((4, "ssh")))]
+#[case::ssh_timeout_wins(json!({"ansible_timeout": 3, "ansible_ssh_timeout": "5"}), Ok((5, "ssh")))]
+#[case::zero(json!({"ansible_timeout": 0}), Ok((0, "ssh")))]
+#[case::executable(json!({"ansible_ssh_executable": "/opt/bin/ssh2"}), Ok((10, "/opt/bin/ssh2")))]
+#[case::not_a_number(json!({"ansible_timeout": "soon"}), Err("must be a whole number of seconds, found \"soon\""))]
+#[case::negative(json!({"ansible_ssh_timeout": -1}), Err("found -1"))]
+fn the_timeout_and_the_ssh_program_come_from_the_host_over_the_defaults(
+    #[case] vars: Value,
+    #[case] want: Result<(u64, &str), &str>,
+) {
+    let mut d = defaults();
+    d.connect_timeout = Duration::from_secs(10);
+    match (Transport::for_host(&host(vars), &d), want) {
+        (Ok(Transport::Ssh(target)), Ok((seconds, program))) => {
+            assert_eq!(target.connect_timeout, Duration::from_secs(seconds));
+            assert_eq!(target.own.executable, program);
+            let argv = target.ssh_argv("true");
+            assert_eq!(argv[0], program);
+            assert!(
+                argv.contains(&format!("ConnectTimeout={seconds}")),
+                "{argv:?}"
+            );
+        }
+        (Err(err), Err(says)) => {
+            assert!(err.to_string().contains(says), "{err}");
+            assert!(err.to_string().contains("host 'web1'"), "{err}");
+        }
+        (got, want) => panic!("got {got:?}, wanted {want:?}"),
+    }
+}
+
 /// A managed host cannot choose how it is reached: facts named like the connection settings
 /// are dropped, and the inventory's answer stands.
 #[rstest]
@@ -1103,6 +1309,79 @@ fn a_host_that_cannot_be_reached_is_refused_by_name(
     assert!(text.contains(key) || key == "ansible_connection", "{text}");
     assert!(text.contains(quoted), "{text}");
 }
+
+/// An ssh address that starts with `-`, or holds whitespace or a control character, is refused
+/// naming host, variable and value (stricter than ansible-core 2.19.12, which passes it on).
+#[rstest]
+#[case::name("web1.example.com", true)]
+#[case::short_name("db_1", true)]
+#[case::ipv4("10.0.0.5", true)]
+#[case::ipv6("fe80::1", true)]
+#[case::ipv6_scoped("fe80::1%eth0", true)]
+#[case::ipv6_bracketed("[::1]", true)]
+#[case::user_at_host("deploy@web1", true)]
+#[case::dash_inside("web-1", true)]
+#[case::leading_dash("-oProxyCommand=touch /tmp/x", false)]
+#[case::leading_dash_name("-web1", false)]
+#[case::lone_dash("-", false)]
+#[case::double_dash("--", false)]
+#[case::space("web 1", false)]
+#[case::trailing_space("web1 ", false)]
+#[case::tab("web1\t", false)]
+#[case::newline("web1\nx", false)]
+#[case::escape("web1\u{1b}[0m", false)]
+#[case::nul("web1\u{0}", false)]
+#[case::unicode_space("web1\u{a0}x", false)]
+fn an_ssh_address_is_a_name_not_an_option(#[case] address: &str, #[case] accepted: bool) {
+    let from_variable = Transport::for_vars(
+        "web1",
+        json!({ "ansible_host": address }).as_object().unwrap(),
+        &defaults(),
+    );
+    let named = Transport::for_vars(address, &Map::new(), &defaults());
+    if accepted {
+        let Transport::Ssh(target) = from_variable.unwrap() else {
+            panic!("expected ssh")
+        };
+        assert_eq!(target.address, address);
+        let argv = target.ssh_argv("true");
+        assert_eq!(argv[argv.len() - 2], "--");
+        assert_eq!(argv[argv.len() - 3], address);
+        assert!(named.is_ok());
+    } else {
+        let text = format!("{:#}", from_variable.unwrap_err());
+        assert!(text.contains("host 'web1'"), "{text}");
+        assert!(text.contains("ansible_host"), "{text}");
+        assert!(text.contains(&address.escape_debug().to_string()), "{text}");
+        // With no `ansible_host`, the inventory name is the address and is held to the same rule.
+        let text = format!("{:#}", named.unwrap_err());
+        assert!(text.contains("inventory_hostname"), "{text}");
+        assert!(text.contains(&address.escape_debug().to_string()), "{text}");
+    }
+}
+
+/// A user name that starts with `-` is accepted, as ansible-core does, and stays the value of
+/// `-l`, which `ssh` never reads as an option.
+#[rstest]
+#[case("deploy")]
+#[case("-oProxyCommand=touch")]
+#[case("-x")]
+#[case("deploy@web1")]
+fn a_user_beginning_with_a_dash_stays_the_value_of_l(#[case] user: &str) {
+    let Transport::Ssh(target) = Transport::for_vars(
+        "web1",
+        json!({ "ansible_user": user }).as_object().unwrap(),
+        &defaults(),
+    )
+    .unwrap() else {
+        panic!("expected ssh")
+    };
+    let argv = target.ssh_argv("true");
+    let at = argv.iter().position(|word| word == "-l").expect("-l");
+    assert_eq!(argv[at + 1], user);
+    assert!(at + 1 < argv.len() - 3, "before the address: {argv:?}");
+}
+
 /// Two ssh identities of one name are two links.
 #[test]
 fn two_ports_of_one_host_are_two_keys() {

@@ -1,0 +1,17 @@
+- hosts: h1
+  gather_facts: false
+  ignore_errors: true
+  timeout: 1
+  tasks:
+    - command: "true"
+      notify: [own timeout, own ignore]
+    - meta: flush_handlers
+    - debug:
+        msg: not reached
+  handlers:
+    - name: own timeout
+      timeout: 5
+      command: sleep 2
+    - name: own ignore
+      ignore_errors: false
+      command: "false"

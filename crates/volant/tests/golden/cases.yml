@@ -507,3 +507,23 @@
   vars: {d: {'<<': {a: 1}, c: 2}}
 - template: "{{ d | to_json }}"
   vars: {d: {<<: [], <<: {}, a: 1}}
+# A raw block writes text: it is rendered once, however it is read afterwards.
+- template: "{% raw %}{{ x }}{% endraw %}"
+  vars: {x: 5}
+- template: "a{% raw %}{{ x }}{% endraw %}b{{ x }}"
+  vars: {x: 5}
+- template: "{%- raw -%} {{ x }} {%- endraw -%}"
+  vars: {x: 5}
+- template: "{% raw %}{% if x %}{% endraw %}"
+  vars: {x: 5}
+- template: "{{ y }}"
+  vars: {x: 5, y: "{% raw %}{{ x }}{% endraw %}"}
+- template: "{{ z }}"
+  vars: {x: 5, y: "{% raw %}{{ x }}{% endraw %}", z: "{{ y }}"}
+- template: "{{ '{{' }} x {{ '}}' }}"
+  vars: {x: 5}
+- template: "{{ ['{% raw %}{{ x }}{% endraw %}'] }}"
+  vars: {x: 5}
+- template: "{{ r }}|{% raw %}{{ r }}{% endraw %}"
+  untrusted: {r: "{% raw %}{{ x }}{% endraw %}{{ x }}"}
+  vars: {x: 5}

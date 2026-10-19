@@ -1,0 +1,35 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: One host records three pieces of text
+      command: cat {{ playbook_dir }}/{{ item }}
+      register: pieces
+      loop: [brace_a.txt, brace_b.txt, brace_c.txt]
+      loop_control:
+        label: "{{ item }}"
+    - name: A host is named after each piece
+      add_host:
+        name: "{{ item.stdout }}"
+        ansible_connection: local
+      loop: "{{ pieces.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      changed_when: false
+    - name: The author joins two names
+      set_fact:
+        joined: "{{ groups['all'] | select('match', '^(A[{]|[{] )') | sort | join('') }}"
+    - name: The joined text is read
+      debug:
+        msg: "{{ joined }}"
+    - name: The author builds braces from names
+      set_fact:
+        built: "{{ '{' ~ groups['all'] | select('match', '^[{] ') | first }}"
+    - name: The built text is read
+      debug:
+        msg: "{{ built }}"
+    - name: The author replaces a marker with a brace
+      set_fact:
+        swapped: "{{ groups['all'] | select('match', '^LBLB') | first | replace('LB', '{') }}"
+    - name: The swapped text is read
+      debug:
+        msg: "{{ swapped }}"

@@ -1,0 +1,12 @@
+- hosts: h1
+  gather_facts: false
+  timeout: 1
+  tasks:
+    - command: "true"
+      notify: slow
+    - meta: flush_handlers
+    - debug:
+        msg: not reached
+  handlers:
+    - name: slow
+      command: sleep 3

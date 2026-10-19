@@ -5,11 +5,34 @@ use super::bootstrap::{
     EXIT_AGENT_MISSING, EXIT_AGENT_UNRUNNABLE, EXIT_NO_SPACE, EXIT_SHORT_WRITE, EXIT_UNAME_FAILED,
     space_needed_kib,
 };
-use super::control::{CONTROL_PERSIST, SERVER_ALIVE_COUNT_MAX, SERVER_ALIVE_INTERVAL, SSH_PROGRAM};
-use super::defaults::SshTarget;
+use super::control::{CONTROL_PERSIST, SERVER_ALIVE_COUNT_MAX, SERVER_ALIVE_INTERVAL};
+use super::defaults::{ConnectError, SshTarget};
 use super::shell::shell_word;
 
 impl SshTarget {
+    /// Which password an `ssh` call of this target offers: the host variable's, or the one of
+    /// the command line when the host names none.
+    fn password_source(&self) -> crate::askpass::Source<'_> {
+        match &self.own.password {
+            Some(password) => crate::askpass::Source::Variable(password.expose()),
+            None => crate::askpass::Source::Run,
+        }
+    }
+
+    /// Whether an `ssh` call of this target offers a password.
+    pub(super) fn offers_password(&self) -> bool {
+        crate::askpass::offers(self.password_source())
+    }
+
+    /// The environment an `ssh` call of this target is started with, which hands it the password
+    /// through `SSH_ASKPASS` when there is one.
+    pub(super) fn askpass_environment(
+        &self,
+    ) -> Result<Vec<(&'static str, std::ffi::OsString)>, ConnectError> {
+        crate::askpass::environment(self.password_source())
+            .map_err(|e| ConnectError::Unreachable(format!("storing the connection password: {e}")))
+    }
+
     /// The `ssh` command line for one remote command. Options first, then the host, then `--`.
     pub fn ssh_argv(&self, remote_command: &str) -> Vec<String> {
         self.ssh_argv_with(remote_command, false)
@@ -20,7 +43,8 @@ impl SshTarget {
     /// is the remote command's own argument list, and an option appended there would reach
     /// the remote shell instead.
     pub fn ssh_argv_with(&self, remote_command: &str, compress: bool) -> Vec<String> {
-        let mut argv = vec![SSH_PROGRAM.to_string()];
+        let offers_password = self.offers_password();
+        let mut argv = vec![self.own.executable.clone()];
         if compress {
             argv.push("-C".into());
         }
@@ -28,7 +52,7 @@ impl SshTarget {
             "-o".to_string(),
             // A password given with `-k` or a password file comes through `SSH_ASKPASS`, which
             // `BatchMode` would switch off.
-            if crate::askpass::installed() {
+            if offers_password {
                 "BatchMode=no"
             } else {
                 "BatchMode=yes"
@@ -37,7 +61,7 @@ impl SshTarget {
             "-o".into(),
             format!("ConnectTimeout={}", self.connect_timeout.as_secs()),
         ]);
-        if crate::askpass::installed() {
+        if offers_password {
             // One wrong answer is the end of it, as in the reference, not three tries.
             argv.extend(["-o".into(), "NumberOfPasswordPrompts=1".into()]);
         }
@@ -78,7 +102,7 @@ impl SshTarget {
         if let Some(port) = self.port {
             argv.extend(["-p".into(), port.to_string()]);
         }
-        if let Some(key) = &self.private_key {
+        if let Some(key) = &self.own.private_key {
             argv.extend(["-i".into(), key.display().to_string()]);
         }
         argv.extend(self.common_args.iter().cloned());

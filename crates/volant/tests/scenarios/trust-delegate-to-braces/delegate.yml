@@ -1,0 +1,52 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: Read two files whose text is part of a template
+      shell: "cat {{ playbook_dir }}/payload-a.txt; echo; cat {{ playbook_dir }}/payload-q.txt"
+      register: r
+
+    - name: A task variable joins a brace to the delegate's name
+      command: id
+      delegate_to: "{{ r.stdout_lines[0] }}"
+      vars:
+        ansible_connection: local
+        where: "{{ '{' }}{{ inventory_hostname }}"
+        again: "{{ where }}"
+
+    - name: A task variable replaces a word of the name with braces
+      command: id
+      delegate_to: "{{ r.stdout_lines[1] }}"
+      vars:
+        ansible_connection: local
+        ansible_user: "{{ inventory_hostname | replace('QQ', '{{') }}"
+        ansible_become_user: "{{ inventory_hostname_short | replace('QQ', '{{') }}"
+
+    - name: A variable is built from another that holds the name
+      command: id
+      delegate_to: "{{ r.stdout_lines[0] }}"
+      vars:
+        ansible_connection: local
+        a: "{{ inventory_hostname }}"
+        b: "{{ '{' ~ a }}"
+        c: "{{ b }}"
+
+    - name: A host of the inventory chosen by the playbook
+      command: id
+      delegate_to: "{{ groups['db'][0] }}"
+
+    - name: A host with a brace in its name
+      command: id
+      delegate_to: "{{ odd }}"
+      vars:
+        odd: "we{ird"
+
+- name: Whether the payload ran
+  hosts: h1
+  gather_facts: false
+  tasks:
+    - name: Look for the marker the payload would have written
+      shell: "test -e {{ playbook_dir }}/marker && echo ran || echo never ran"
+      register: marker
+    - name: The payload never ran
+      debug:
+        var: marker.stdout
