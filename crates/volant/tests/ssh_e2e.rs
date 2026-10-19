@@ -203,11 +203,8 @@ fn ssh_vvvv_shows_the_commands_it_runs_and_the_transfer_arguments_stay_inert() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A host that names its connection password in a variable logs in to a password account over a
-/// real `ssh`. The account is the one `VOLANT_SSH_TEST_PASSWORD_USER` names on the sshd the other
-/// tests use, with the password in `VOLANT_SSH_TEST_PASSWORD`; without them there is no such
-/// account and the test says so and passes. A wrong password ends as `Permission denied` with
-/// exit 4, and at `-vvvv` neither password is in the output.
+/// A password variable logs in to the account `VOLANT_SSH_TEST_PASSWORD_USER` names, with
+/// `VOLANT_SSH_TEST_PASSWORD`; the test passes with a message when they are unset.
 #[test]
 #[ignore = "needs sshd on localhost, run through just ssh-test"]
 fn ssh_a_password_variable_logs_in_to_a_password_account() {

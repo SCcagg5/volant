@@ -24,9 +24,9 @@ use super::names::{self, first_set, secret_text};
 use super::shell::validate_remote_tmp;
 
 /// The destination `ssh` gets for a host: `ansible_ssh_host` or `ansible_host`, given with the
-/// name that set it, or the inventory name when neither is set. Both can come from data the playbook reads, and the address sits in the argument list
-/// where `ssh` reads options, so a value that starts with `-` would be taken as one and the
-/// remote command as the host. A value with whitespace or a control character is no address
+/// name that set it, or the inventory name when neither is set. Both can come from data the
+/// playbook reads, and the address sits in the argument list where `ssh` reads options, so a
+/// value that starts with `-` would be taken as one and the remote command as the host. A value with whitespace or a control character is no address
 /// either. ansible-core 2.19.12 passes the value on unchecked, so this is stricter than the
 /// reference on purpose. `user@host` and IPv6 literals pass.
 fn ssh_address(host_name: &str, ansible_host: Option<(&str, String)>) -> anyhow::Result<String> {

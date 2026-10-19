@@ -873,10 +873,8 @@ fn the_escalation_program_comes_from_the_variable_the_keyword_or_the_defaults(
     }
 }
 
-/// The user and the password of an escalation, from the names ansible-core 2.19.12 reads. When a
-/// host sets several, the method's own name wins over `ansible_become_pass`, which wins over
-/// `ansible_become_password`; each case was run against the reference with a right and a wrong
-/// value. A number is a password, another shape is not, and a null is not set.
+/// Escalation user and password names in ansible-core 2.19.12's order: the method's own name,
+/// then `ansible_become_pass`, then `ansible_become_password`; a null is not set.
 #[rstest::rstest]
 #[case::password(json!({"ansible_become_password": "a"}), None, "a", "root")]
 #[case::pass_over_password(json!({"ansible_become_password": "a", "ansible_become_pass": "b"}), None, "b", "root")]

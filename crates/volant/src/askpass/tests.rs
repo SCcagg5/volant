@@ -38,9 +38,8 @@ fn a_missing_file_gives_no_answer() {
     );
 }
 
-/// A password a host variable gave is read from a file of its own that only this user can read,
-/// one file for one password, and the file is gone once the run's guard drops. An empty one
-/// offers nothing, and neither the program nor its arguments hold the text.
+/// A variable's password gets a private file, one per password, in a 0700 directory that goes
+/// with the run's guard; an empty one offers nothing.
 #[cfg(unix)]
 #[test]
 fn a_variable_password_gets_a_private_file_that_goes_with_the_run() {
@@ -73,8 +72,14 @@ fn a_variable_password_gets_a_private_file_that_goes_with_the_run() {
     assert!(offers(Source::Variable(password)));
     assert!(!offers(Source::Variable("")));
     assert!(environment(Source::Variable("")).unwrap().is_empty());
+    let dir = path.parent().unwrap().to_path_buf();
+    assert_eq!(
+        std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
     drop(guard);
     assert!(!path.exists(), "the password file outlived the run");
+    assert!(!dir.exists(), "the password directory outlived the run");
 }
 
 #[cfg(unix)]

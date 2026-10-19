@@ -1046,10 +1046,8 @@ fn the_user_and_port_keywords_rank_between_the_host_and_the_command_line(
     );
 }
 
-/// The names behind each connection setting, and which one wins when a host sets two. Every
-/// case was run against ansible-core 2.19.12 with a right and a wrong value: the `ansible_ssh_*`
-/// name beats the plain one, and `ansible_ssh_password` beats `ansible_ssh_pass`, which beats
-/// `ansible_password`. A null counts as not set.
+/// The `ansible_ssh_*` name of a connection setting beats the plain one, as in ansible-core
+/// 2.19.12; a null counts as not set.
 #[rstest]
 #[case::plain_names(
     json!({"ansible_host": "h", "ansible_port": 22, "ansible_user": "u", "ansible_private_key_file": "/k"}),
@@ -1118,20 +1116,14 @@ fn a_password_that_is_not_text_fails_the_host_without_showing_it(#[case] vars: V
     );
 }
 
-/// The password is in no `Debug` of the target, so no log line or error that formats one shows
-/// it, and none of the words of the `ssh` command line is it either.
+/// None of the words of the `ssh` command line is the password; the `Debug` output is checked
+/// below.
 #[test]
-fn the_connection_password_is_in_neither_the_debug_output_nor_the_command_line() {
+fn the_connection_password_is_not_on_the_command_line() {
     let vars = json!({"ansible_password": "s3cret-pw", "ansible_user": "ops"});
-    let transport = Transport::for_host(&host(vars), &defaults()).unwrap();
-    assert!(
-        !format!("{transport:?}").contains("s3cret-pw"),
-        "{transport:?}"
-    );
-    let Transport::Ssh(target) = transport else {
+    let Transport::Ssh(target) = Transport::for_host(&host(vars), &defaults()).unwrap() else {
         panic!("expected ssh")
     };
-    assert!(format!("{target:?}").contains("<redacted>"));
     for argv in [target.ssh_argv("true"), target.ssh_argv_with("true", true)] {
         assert!(
             argv.iter().all(|word| !word.contains("s3cret-pw")),
@@ -1146,9 +1138,8 @@ fn the_connection_password_is_in_neither_the_debug_output_nor_the_command_line()
     }
 }
 
-/// The scan that checks a managed host cannot set a connection variable reads the names from
-/// `names::all()`. A name written in `names.rs` and left out of it would escape the scan, so
-/// every `ansible_` name in the file has to be in the list.
+/// Every `ansible_` name written in `names.rs` is in `names::all()`, which the fact scan reads,
+/// so a managed host cannot set it.
 #[test]
 fn every_connection_name_in_names_rs_is_in_the_list_the_scan_reads() {
     let written: std::collections::BTreeSet<&str> = include_str!("names.rs")
@@ -1217,9 +1208,8 @@ fn a_host_without_a_password_runs_ssh_in_batch_mode(#[case] vars: Value) {
     assert!(!text.contains("NumberOfPasswordPrompts"), "{text}");
 }
 
-/// The connection timeout and the `ssh` program: `ansible_ssh_timeout` beats `ansible_timeout`,
-/// and both beat the command line's `-T` and `ansible.cfg`'s `timeout`, as measured on
-/// ansible-core 2.19.12. A value that is not a whole number of seconds fails the host.
+/// `ansible_ssh_timeout` beats `ansible_timeout`, which beats `-T`, as in ansible-core 2.19.12;
+/// `ansible_ssh_executable` names the program; a timeout that is no whole number fails.
 #[rstest]
 #[case::default(json!({}), Ok((10, "ssh")))]
 #[case::timeout(json!({"ansible_timeout": 3}), Ok((3, "ssh")))]

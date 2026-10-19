@@ -1399,11 +1399,8 @@ fn fake_password_host(name: &str, expected: &str) -> std::path::PathBuf {
     dir
 }
 
-/// A connection password a host names in a variable reaches `ssh` through `SSH_ASKPASS` only. The
-/// fake `ssh` accepts `s3cret-conn-pw` and nothing else, and the run is at `-vvvv`: neither the
-/// right nor the wrong password is in any output, in any argument or in any environment `ssh` was
-/// started with, and the file that held it is gone afterwards. The names and the order among them
-/// are the reference's, and a variable beats `--connection-password-file`.
+/// A password variable reaches `ssh` only through `SSH_ASKPASS`, in the reference's name order and
+/// over the password file: at `-vvvv` no output, argument or environment holds it.
 #[rstest]
 #[case::password("ansible_password=s3cret-conn-pw", &[], 0, "changed: [box]")]
 #[case::ssh_pass("ansible_ssh_pass=s3cret-conn-pw", &[], 0, "changed: [box]")]
@@ -1428,12 +1425,13 @@ fn fake_password_host(name: &str, expected: &str) -> std::path::PathBuf {
     "ansible_password=s3cret-conn-pw ansible_ssh_executable={dir}/bin/ssh-alt", &[], 0, "changed: [box]"
 )]
 fn a_connection_password_variable_reaches_ssh_through_askpass_only(
+    #[context] ctx: rstest::Context,
     #[case] vars: &str,
     #[case] file: &[&str],
     #[case] code: i32,
     #[case] says: &str,
 ) {
-    let name = format!("pw-{}", vars.len() * 31 + file.len() + code as usize);
+    let name = format!("pw-{}", ctx.case.unwrap_or_default());
     let dir = fake_password_host(&name, "s3cret-conn-pw");
     let vars = vars.replace("{dir}", &dir.display().to_string());
     std::fs::write(
