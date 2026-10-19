@@ -14,6 +14,7 @@ use super::announce::{
 use super::args::PlaybookArgs;
 use super::hosts::{play_hosts, resolve_limit, tag_selection};
 use super::passwords::{ask_passwords, ssh_words};
+use super::signals::spawn_signal_watcher;
 use crate::bridge::Bridge;
 use crate::compile::{self, Compiled};
 use crate::config::Config;
@@ -433,11 +434,14 @@ async fn run_all(
             return Ok(1);
         }
     };
-    // Held to the end of the run: the file the `ssh` calls ask for the password is removed
-    // when it drops.
-    let _connection_password = connection_password
-        .map(|password| crate::askpass::install(&password))
-        .transpose()?;
+    // The signals first: a run stopped from here on removes the password files on its way out.
+    let (stop_tx, stop_rx) = watch::channel(false);
+    let abort = Arc::new(Abort::new(stop_tx));
+    spawn_signal_watcher(Arc::clone(&abort));
+    crate::askpass::remove_stale();
+    // Held to the end of the run: the directory with the files the `ssh` calls ask for a
+    // password, those of a host variable's passwords too, is removed when it drops.
+    let _askpass = crate::askpass::install(connection_password.as_deref())?;
     let defaults = ConnectionDefaults {
         remote_user: args.user.clone().or(config.remote_user),
         connection: args.connection.clone(),
@@ -461,9 +465,6 @@ async fn run_all(
     };
     let mut stats = Stats::default();
 
-    let (stop_tx, stop_rx) = watch::channel(false);
-    let abort = Arc::new(Abort::new(stop_tx));
-    spawn_signal_watcher(Arc::clone(&abort));
     let options = RunOptions {
         defaults,
         forks,
@@ -698,29 +699,6 @@ pub(super) fn armed(union: python::Union, enabled: bool, facts: Facts) -> python
         natives: Natives { enabled, facts },
         ..union
     }
-}
-
-/// Ctrl-C and SIGTERM both request a clean stop: running batches are cancelled, the recap is
-/// printed, and the process exits with ansible-playbook's code 99.
-fn spawn_signal_watcher(stop: Arc<Abort>) {
-    tokio::spawn(async move {
-        #[cfg(unix)]
-        {
-            use tokio::signal::unix::{SignalKind, signal};
-            let Ok(mut term) = signal(SignalKind::terminate()) else {
-                return;
-            };
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => {}
-                _ = term.recv() => {}
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = tokio::signal::ctrl_c().await;
-        }
-        stop.interrupt();
-    });
 }
 
 /// The recap, then what `set_stats` collected when the run asks to see it.

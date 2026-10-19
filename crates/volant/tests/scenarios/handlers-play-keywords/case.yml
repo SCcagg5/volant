@@ -1,0 +1,10 @@
+# The play's own keywords reach the handlers of its handlers list as they reach its tasks: one run for each keyword that changes what a handler does.
+runs:
+  - args: [-i, inv.ini, environment.yml]
+  - args: [-i, inv.ini, ignore-errors.yml]
+  - args: [-i, inv.ini, timeout.yml]
+  - args: [-i, inv.ini, any-errors-fatal.yml]
+  - args: [-i, inv.ini, run-once.yml]
+  - args: [-i, inv.ini, ignore-unreachable.yml]
+  - args: [-i, inv.ini, connection.yml]
+  - args: [-i, inv.ini, own-keyword-wins.yml]

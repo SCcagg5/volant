@@ -3,11 +3,13 @@
 //! stdout carry protocol frames: the agent itself for `local`, an `ssh` running the agent
 //! remotely for `ssh`.
 
+mod agent_dir;
 mod bootstrap;
 mod choose;
 mod control;
 mod defaults;
 mod escalation;
+mod names;
 mod session;
 mod shell;
 mod ssh;
@@ -17,10 +19,14 @@ pub use bootstrap::{space_needed_kib, triple_for};
 pub use control::{control_dir, raise_open_file_limit};
 pub use defaults::{
     BecomeMethod, ConnectError, ConnectionDefaults, ConnectionKeywords, ConnectionNotFound,
-    Escalation, EscalationProgram, INCORRECT_SU_PASSWORD, INCORRECT_SUDO_PASSWORD,
-    MISSING_SUDO_PASSWORD, SshTarget, Transport,
+    Escalation, EscalationProgram, HostOwn, INCORRECT_SU_PASSWORD, INCORRECT_SUDO_PASSWORD,
+    MISSING_SUDO_PASSWORD, Secret, SshTarget, Transport,
 };
+#[cfg(test)]
+pub(crate) use names::all as connection_variables;
+pub(crate) use names::{first_set, secret_text};
 pub(crate) use shell::validate_remote_tmp;
+pub(crate) use trace::shell_quote;
 
 #[cfg(test)]
 mod tests;

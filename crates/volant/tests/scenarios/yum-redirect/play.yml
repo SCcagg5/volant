@@ -1,0 +1,30 @@
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Skipped, bare
+      yum: {name: x}
+      when: false
+    - name: Skipped, builtin
+      ansible.builtin.yum: {name: x}
+      when: false
+    - name: Skipped, legacy
+      ansible.legacy.yum: {name: x}
+      when: false
+    - name: Backend from the host, bare
+      yum: {name: x}
+      register: bare
+      failed_when: false
+    - name: Backend from the host, builtin
+      ansible.builtin.yum: {name: x}
+      register: builtin
+      failed_when: false
+    - name: Backend from the host, legacy
+      ansible.legacy.yum: {name: x}
+      register: legacy
+      failed_when: false
+    - name: Show
+      debug:
+        msg:
+          - "{{ bare.msg | default('none') }}"
+          - "{{ builtin.msg | default('none') }}"
+          - "{{ legacy.msg | default('none') }}"

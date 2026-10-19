@@ -1,0 +1,45 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    all_groups: "{{ groups | dict2items | map(attribute='key') | sort | join(',') }}"
+  tasks:
+    - name: One host records the payload
+      command: cat {{ payload }}
+      register: r
+    - name: A group is named after the payload
+      add_host:
+        name: nh
+        groups: ["{{ r.stdout }}"]
+        ansible_connection: local
+      changed_when: false
+    - name: The groups are read through a variable of the play
+      debug:
+        msg: "{{ all_groups }}"
+    - name: The members are read through the map
+      debug:
+        msg: "{{ groups.values() | list | flatten | unique | sort | join(',') }}"
+    - name: The group names are listed
+      debug:
+        msg: "{{ groups.keys() | list | sort | join(',') }}"
+    - name: The group names are looped over
+      debug:
+        msg: "{{ item }}"
+      loop: "{{ groups.keys() | list | sort }}"
+
+- hosts: nh
+  gather_facts: false
+  tasks:
+    - name: The host reads its own groups
+      debug:
+        msg: "{{ group_names | join(',') }}"
+
+- name: Whether the payload ran
+  hosts: h1
+  gather_facts: false
+  tasks:
+    - name: Look for the marker the payload would have written
+      shell: "test -e {{ playbook_dir }}/marker && echo ran || echo never ran"
+      register: marker
+    - name: The payload never ran
+      debug:
+        var: marker.stdout

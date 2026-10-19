@@ -439,3 +439,127 @@ fn volant_runtime_in_the_environment_sets_the_mode() {
     unsafe { std::env::remove_var("VOLANT_RUNTIME") };
     assert_eq!(Config::load().unwrap().runtime, crate::runtime::Mode::Auto);
 }
+
+/// `find` against `find_ini_config_file` of ansible-core 2.19.12: only the world-write bit of
+/// the working directory skips it, and the warning is dropped when `ANSIBLE_CONFIG` named a file.
+#[cfg(unix)]
+#[rstest::rstest]
+#[case::plain_directory(0o755, "file", "none", true, true, "cwd", false)]
+#[case::group_writable(0o770, "file", "none", true, true, "cwd", false)]
+#[case::world_writable(0o777, "file", "none", true, true, "home", true)]
+#[case::world_bit_alone(0o703, "file", "none", true, true, "home", true)]
+#[case::sticky_does_not_exempt(0o1777, "file", "none", true, true, "home", true)]
+#[case::falls_to_system(0o777, "file", "none", false, true, "system", true)]
+#[case::nothing_else(0o777, "file", "none", false, false, "none", true)]
+#[case::no_file_no_warning(0o777, "none", "none", true, true, "home", false)]
+#[case::dangling_link_is_no_file(0o777, "dangling", "none", true, true, "home", false)]
+#[case::link_to_a_file_counts(0o777, "link", "none", true, true, "home", true)]
+#[case::link_in_a_plain_directory(0o755, "link", "none", true, true, "cwd", false)]
+#[case::env_file_wins_and_is_quiet(0o777, "file", "file", true, true, "env", false)]
+#[case::env_file_in_a_plain_directory(0o755, "file", "file", true, true, "env", false)]
+fn the_working_directory_is_a_source_unless_world_writable(
+    #[case] mode: u32,
+    #[case] in_cwd: &str,
+    #[case] explicit: &str,
+    #[case] home_has: bool,
+    #[case] system_has: bool,
+    #[case] source: &str,
+    #[case] skipped: bool,
+) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let root = tempfile::tempdir().unwrap();
+    let dir = |name: &str| {
+        let path = root.path().join(name);
+        std::fs::create_dir(&path).unwrap();
+        path
+    };
+    let (cwd, home, other) = (dir("cwd"), dir("home"), dir("other"));
+    let system = root.path().join("system.cfg");
+    let env_file = other.join("env.cfg");
+    std::fs::write(&env_file, "").unwrap();
+    match in_cwd {
+        "file" => std::fs::write(cwd.join("ansible.cfg"), "").unwrap(),
+        "link" => std::os::unix::fs::symlink(&env_file, cwd.join("ansible.cfg")).unwrap(),
+        "dangling" => {
+            std::os::unix::fs::symlink(other.join("gone"), cwd.join("ansible.cfg")).unwrap();
+        }
+        _ => {}
+    }
+    if home_has {
+        std::fs::write(home.join(".ansible.cfg"), "").unwrap();
+    }
+    if system_has {
+        std::fs::write(&system, "").unwrap();
+    }
+    let explicit = match explicit {
+        "file" => Some(env_file.clone()),
+        _ => None,
+    };
+    std::fs::set_permissions(&cwd, std::fs::Permissions::from_mode(mode)).unwrap();
+    let found = locate::find(
+        explicit.as_deref().map(Path::as_os_str),
+        &cwd,
+        Some(&home),
+        &system,
+    );
+    std::fs::set_permissions(&cwd, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let expected = match source {
+        "cwd" => Some(cwd.join("ansible.cfg")),
+        "home" => Some(home.join(".ansible.cfg")),
+        "system" => Some(system),
+        "env" => Some(env_file),
+        _ => None,
+    };
+    assert_eq!(found.path, expected, "the file read");
+    assert_eq!(found.skipped, skipped, "the warning");
+}
+
+/// A working directory that cannot be read is no source and draws no warning, as in the
+/// reference, which catches the `OSError` and goes on.
+#[test]
+fn a_working_directory_that_is_gone_is_skipped_without_a_warning() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    std::fs::create_dir(&home).unwrap();
+    std::fs::write(home.join(".ansible.cfg"), "").unwrap();
+    let found = locate::find(
+        None,
+        &root.path().join("gone"),
+        Some(&home),
+        &root.path().join("none"),
+    );
+    assert_eq!(found.path, Some(home.join(".ansible.cfg")));
+    assert!(!found.skipped);
+}
+
+/// The warning is the reference's, word for word.
+#[test]
+fn the_world_writable_warning_is_the_references() {
+    assert_eq!(
+        locate::world_writable_warning(Path::new("/tmp/x")),
+        "Ansible is being run in a world writable directory (/tmp/x), ignoring it as an \
+         ansible.cfg source. For more information see \
+         https://docs.ansible.com/ansible/devel/reference_appendices/config.html#cfg-in-world-writable-dir"
+    );
+}
+
+/// The mode of a directory decides, and one that cannot be read counts as world-writable, so it
+/// is no source.
+#[cfg(unix)]
+#[rstest::rstest]
+#[case::world_writable(0o777, true)]
+#[case::sticky(0o1777, true)]
+#[case::world_bit_alone(0o702, true)]
+#[case::group_writable(0o775, false)]
+#[case::plain(0o755, false)]
+fn the_mode_of_a_directory_decides_whether_others_can_write_it(
+    #[case] mode: u32,
+    #[case] expected: bool,
+) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(mode)).unwrap();
+    assert_eq!(is_world_writable(dir.path()), expected);
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(is_world_writable(&dir.path().join("gone")));
+}

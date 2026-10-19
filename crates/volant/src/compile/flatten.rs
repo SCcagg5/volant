@@ -13,7 +13,7 @@ use crate::template::Templar;
 
 use super::builder::{Builder, Seen};
 use super::include::refuse_public;
-use super::inherit::{extend, layered};
+use super::inherit::{extend, layered, merge};
 use super::model::{Compiled, Handler, Section, Step, StepKind};
 use super::tags::TagSelection;
 /// The check the reference inserts in front of a role that ships `meta/argument_specs.yml`.
@@ -296,23 +296,11 @@ pub(crate) fn compile(
     builder.flush_point(mark);
     // The play's own handlers run behind every role's, measured.
     for handler in &play.handlers {
-        // The play's `module_defaults` and `collections` reach a handler as they reach a task.
-        let mut task = handler.task.clone();
-        task.module_defaults = empty
-            .module_defaults
-            .iter()
-            .chain(&handler.task.module_defaults)
-            .cloned()
-            .collect();
-        task.collections = handler
-            .task
-            .collections
-            .clone()
-            .or_else(|| empty.collections.clone());
-        // And the play's check and diff modes, `--check` and `--diff` among them: a handler
-        // that ran for real under `--check` would change the host.
-        task.check_mode = task.check_mode.or_else(|| empty.check_mode.clone());
-        task.diff = task.diff.or_else(|| empty.diff.clone());
+        // Every keyword the play carries in `empty` reaches a handler as it reaches a task,
+        // the way it reaches a handler out of a role: `no_log`, `environment`, `timeout`, the
+        // play's check and diff modes (`--check` and `--diff` among them: a handler that ran for
+        // real under `--check` would change the host) and the rest.
+        let task = merge(&empty, &handler.task);
         builder.handlers.push(Handler {
             task,
             listen: handler.listen.clone(),

@@ -3381,5 +3381,190 @@
       "template": "{{ lookup('varnames', '[', wantlist=True) }}"
     },
     "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The lookup plugin 'varnames' failed: Unable to use \"[\" as a search parameter: unterminated character set at position 0"
+  },
+  {
+    "case": {
+      "template": "{{ d | to_json }}",
+      "vars": {
+        "base": {
+          "a": 1,
+          "b": 2
+        },
+        "d": {
+          "a": 1,
+          "b": 9,
+          "z": 0
+        }
+      }
+    },
+    "result": "{\"a\": 1, \"b\": 9, \"z\": 0}"
+  },
+  {
+    "case": {
+      "template": "{{ d | to_json }}",
+      "vars": {
+        "x": {
+          "k": "x",
+          "only_x": 1
+        },
+        "y": {
+          "k": "y",
+          "only_y": 2
+        },
+        "d": {
+          "k": "x",
+          "only_y": 2,
+          "only_x": 1,
+          "own": 3
+        }
+      }
+    },
+    "result": "{\"k\": \"x\", \"only_y\": 2, \"only_x\": 1, \"own\": 3}"
+  },
+  {
+    "case": {
+      "template": "{{ d | to_json }}",
+      "vars": {
+        "inner": {
+          "p": 1
+        },
+        "outer": {
+          "p": 1,
+          "q": 2
+        },
+        "d": {
+          "p": 1,
+          "q": 2,
+          "r": 3
+        }
+      }
+    },
+    "result": "{\"p\": 1, \"q\": 2, \"r\": 3}"
+  },
+  {
+    "case": {
+      "template": "{{ d | to_json }}",
+      "vars": {
+        "d": {
+          "a": 1,
+          "b": 4
+        }
+      }
+    },
+    "result": "{\"a\": 1, \"b\": 4}"
+  },
+  {
+    "case": {
+      "template": "{{ d | to_json }}",
+      "vars": {
+        "d": {
+          "<<": {
+            "a": 1
+          },
+          "c": 2
+        }
+      }
+    },
+    "result": "{\"<<\": {\"a\": 1}, \"c\": 2}"
+  },
+  {
+    "case": {
+      "template": "{{ d | to_json }}",
+      "vars": {
+        "d": {
+          "a": 1
+        }
+      }
+    },
+    "result": "{\"a\": 1}"
+  },
+  {
+    "case": {
+      "template": "{% raw %}{{ x }}{% endraw %}",
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": "{{ x }}"
+  },
+  {
+    "case": {
+      "template": "a{% raw %}{{ x }}{% endraw %}b{{ x }}",
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": "a{{ x }}b5"
+  },
+  {
+    "case": {
+      "template": "{%- raw -%} {{ x }} {%- endraw -%}",
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": "{{ x }}"
+  },
+  {
+    "case": {
+      "template": "{% raw %}{% if x %}{% endraw %}",
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": "{% if x %}"
+  },
+  {
+    "case": {
+      "template": "{{ y }}",
+      "vars": {
+        "x": 5,
+        "y": "{% raw %}{{ x }}{% endraw %}"
+      }
+    },
+    "result": "{{ x }}"
+  },
+  {
+    "case": {
+      "template": "{{ z }}",
+      "vars": {
+        "x": 5,
+        "y": "{% raw %}{{ x }}{% endraw %}",
+        "z": "{{ y }}"
+      }
+    },
+    "result": "{{ x }}"
+  },
+  {
+    "case": {
+      "template": "{{ '{{' }} x {{ '}}' }}",
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": "{{ x }}"
+  },
+  {
+    "case": {
+      "template": "{{ ['{% raw %}{{ x }}{% endraw %}'] }}",
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": [
+      "{% raw %}{{ x }}{% endraw %}"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ r }}|{% raw %}{{ r }}{% endraw %}",
+      "untrusted": {
+        "r": "{% raw %}{{ x }}{% endraw %}{{ x }}"
+      },
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": "{% raw %}{{ x }}{% endraw %}{{ x }}|{{ r }}"
   }
 ]
