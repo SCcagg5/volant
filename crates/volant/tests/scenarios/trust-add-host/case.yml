@@ -1,7 +1,9 @@
-# A host name or a group name that add_host took from a result is data in every later read, and
-# a name that holds no template keeps working.
+# A host name or a group name that add_host or group_by took from a result is data in every later
+# read, whatever it holds, and a name the playbook wrote keeps working.
 needs: [ansible-core]
 runs:
   - args: [-i, inv.ini, -e, "payload={{ playbook_dir }}/payload.txt", group.yml]
   - args: [-i, inv.ini, -e, "payload={{ playbook_dir }}/payload.txt", host.yml]
+  - args: [-i, inv.ini, group-by.yml]
+  - args: [-i, inv.ini, brace.yml]
   - args: [-i, inv.ini, plain.yml]

@@ -1100,16 +1100,16 @@ const NAME_ROWS: &[NameRow] = &[
         &[EVIL],
         "nh",
         &["nh"],
-        &["group_names", "groups"],
+        &["group_names", "groups", "hostvars"],
         false,
     ),
-    name_row("nh", &[EVIL], "h1", &["h1"], &["groups"], false),
+    name_row("nh", &[EVIL], "h1", &["h1"], &["groups", "hostvars"], false),
     name_row(
         "nh",
         &[NOTE],
         "nh",
         &["nh"],
-        &["group_names", "groups"],
+        &["group_names", "groups", "hostvars"],
         false,
     ),
     name_row(EVIL, &[], EVIL, &[EVIL], EVERY_LIST, true),
@@ -1168,6 +1168,32 @@ fn an_add_host_name_that_holds_a_template_is_data_wherever_it_is_read() {
             "{:?} as a host that holds a template",
             row.name
         );
+    }
+}
+
+/// `group_by` names a group from a registered result the way `add_host` does: the group, and
+/// each parent, is data when it holds a template, and a read of the lists that carry it taints.
+#[test]
+fn a_group_by_name_that_holds_a_template_is_data_wherever_it_is_read() {
+    let evil = "{{ lookup('pipe','id') }}";
+    for (group, parents) in [(evil, vec![]), ("kind", vec![evil]), ("kind", vec!["a"])] {
+        let tmp = scratch();
+        let inv = Inventory::parse_ini("[g]\nh1\n").unwrap();
+        let mut store = VarStore::new(&inv, None, tmp.path(), Map::new()).unwrap();
+        let parents: Vec<String> = parents.iter().map(ToString::to_string).collect();
+        store.add_to_group("h1", group, &parents);
+        let data = store.untrusted_of("h1", &scope(&["h1"]));
+        let holds = group == evil || parents.iter().any(|p| p == evil);
+        for name in ["groups", "hostvars"] {
+            assert_eq!(
+                data.contains(name),
+                holds,
+                "{name} after {group:?} under {parents:?}"
+            );
+        }
+        if group == evil {
+            assert!(data.contains("group_names"), "group_names after {group:?}");
+        }
     }
 }
 
