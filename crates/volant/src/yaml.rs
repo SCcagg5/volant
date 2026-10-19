@@ -376,7 +376,7 @@ pub fn bool_from_str(text: &str) -> Option<bool> {
 /// leaf of a list or mapping is treated the same way; mapping keys are never rendered.
 pub(crate) fn unsafe_data(value: Value) -> Value {
     match value {
-        Value::String(s) if s.contains("{{") || s.contains("{%") => {
+        Value::String(s) if crate::template::Templar::is_template(&s) => {
             Value::String(wrap(&s, "volant_unsafe"))
         }
         Value::Array(items) => Value::Array(items.into_iter().map(unsafe_data).collect()),

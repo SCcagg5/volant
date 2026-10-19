@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, PoisonError, RwLock};
 
-use minijinja::machinery::{Instruction, Instructions, WhitespaceConfig};
+use minijinja::machinery::{Instruction, Instructions};
 use minijinja::{Environment, ErrorKind};
 use serde_json::{Map, Value};
 
@@ -17,8 +17,7 @@ use super::context::{Vars, begin, context_of, is_literal, reads};
 use super::env::{environment, holds_undefined, truthy, type_name};
 use super::filters;
 use super::vm::{
-    convert_error, eval_expr, holds_template, keep_literal, render_str, single_expression,
-    unwrap_unsafe,
+    convert_error, eval_expr, holds_template, keep_literal, single_expression, unwrap_unsafe,
 };
 use super::{RESOLVING, Tainted, TemplateError};
 
@@ -135,10 +134,6 @@ impl Templar {
         Arc::clone(env)
     }
 
-    pub fn is_template(text: &str) -> bool {
-        text.contains("{{") || text.contains("{%")
-    }
-
     /// Renders a string. Exactly one `{{ expression }}` gives the expression's value with its
     /// type; text around or between expressions gives a string.
     pub fn render<'a>(
@@ -185,26 +180,6 @@ impl Templar {
             value = next;
         }
         Ok(value)
-    }
-
-    fn render_once(&self, text: &str, ctx: &minijinja::Value) -> Result<Value, TemplateError> {
-        if !Self::is_template(text) {
-            return Ok(Value::String(text.to_string()));
-        }
-        // Whitespace around the expression, a final newline included, is text: the reference
-        // keeps it, so the result is a string.
-        if text.trim() == text
-            && let Some(expr) = single_expression(text)
-        {
-            return self.evaluate_in(expr, ctx);
-        }
-        let ws = WhitespaceConfig {
-            keep_trailing_newline: true,
-            ..WhitespaceConfig::default()
-        };
-        render_str(self, "<string>", text, ctx, ws)
-            .map(Value::String)
-            .map_err(convert_error)
     }
 
     /// `render`, one pass: a result that is itself a template is not rendered again, which is how
@@ -338,7 +313,11 @@ impl Templar {
         Ok((value, tainted.load(Ordering::Relaxed)))
     }
 
-    fn evaluate_in(&self, expr: &str, ctx: &minijinja::Value) -> Result<Value, TemplateError> {
+    pub(super) fn evaluate_in(
+        &self,
+        expr: &str,
+        ctx: &minijinja::Value,
+    ) -> Result<Value, TemplateError> {
         let value = eval_expr(self, expr, ctx).map_err(convert_error)?;
         // Strict mode only raises on operations that force an undefined value (printing,
         // comparing, ...); an attribute lookup that never gets used stays a lazy Undefined, alone

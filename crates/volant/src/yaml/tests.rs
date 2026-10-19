@@ -164,6 +164,7 @@ fn unsafe_text_escapes_and_reads_back_whatever_it_holds() {
     for text in [
         "{{ a }} }} \"q\"",
         "{% if x %}",
+        "{# c #}",
         "{{ a }}\\",
         "{{ \u{1f600} }}",
         "{{ a\u{85}b }}\n\r\t",

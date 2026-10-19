@@ -15,7 +15,7 @@ use crate::bridge::Bridge;
 
 use super::filters;
 use super::globals;
-use super::vm::concat;
+use super::vm::{concat, note_emit};
 use super::{ATTR_KEY, CONCAT_KEY, ITEM_KEY};
 
 /// The engine's environment: minijinja's, strict about undefined values, with every filter,
@@ -33,6 +33,7 @@ pub(super) fn environment(base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) -> En
         if !value.is_undefined() && holds_undefined(value) {
             return Err(minijinja::Error::from(ErrorKind::UndefinedError));
         }
+        note_emit(out, value);
         if value.is_none() {
             return Ok(());
         }

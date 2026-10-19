@@ -1222,3 +1222,21 @@ fn a_raw_block_in_text_from_a_host_is_never_rendered() {
         "a name built from a host's text is data"
     );
 }
+
+/// What the reference renders: any string that holds `{{`, `{%` or `{#`, and no other brace.
+#[test]
+fn a_template_is_a_string_with_an_opening_tag() {
+    for (text, want) in [
+        ("{{ x }}", true),
+        ("a {% if x %}b{% endif %}", true),
+        ("{# note #}", true),
+        ("${#list[@]}", true),
+        ("x {", false),
+        ("{ {", false),
+        ("{x} {y}", false),
+        ("#{ {", false),
+        ("", false),
+    ] {
+        assert_eq!(Templar::is_template(text), want, "{text:?}");
+    }
+}

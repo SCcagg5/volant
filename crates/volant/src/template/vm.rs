@@ -2,6 +2,7 @@
 //! Running compiled templates: the bytecode rewrite, one-expression detection and the
 //! conversion of minijinja's errors into [`TemplateError`].
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -106,7 +107,11 @@ pub(super) fn concat(
 /// cannot be rewritten in place, so the swap happens on the bytecode: the concatenation
 /// instruction and a two-argument call take the same two operands off the stack in the same
 /// order, and a call keeps its own, so every jump target stays where it was.
-pub(super) fn route_calls(instructions: &mut Instructions<'_>) {
+///
+/// Says whether the code opens a capture (`{% set x %}...{% endset %}`, `{% filter %}`), whose
+/// `{{ }}` print into a buffer, not into the output.
+pub(super) fn route_calls(instructions: &mut Instructions<'_>) -> bool {
+    let mut captures = false;
     // A macro or a `set` that takes the name `q` or `query` shadows the lookup shorthand.
     let mut shadowed = Vec::new();
     let mut at = 0;
@@ -114,6 +119,7 @@ pub(super) fn route_calls(instructions: &mut Instructions<'_>) {
         if let Instruction::BuildMacro(name, ..) | Instruction::StoreLocal(name) = op {
             shadowed.push(name.to_string());
         }
+        captures |= matches!(op, Instruction::BeginCapture(..));
         at += 1;
     }
     let mut idx = 0;
@@ -147,6 +153,97 @@ pub(super) fn route_calls(instructions: &mut Instructions<'_>) {
         }
         idx += 1;
     }
+    captures
+}
+
+/// What a render wrote through `{{ }}`, which is all a string render needs to know to tell whether
+/// the template made one output node: the number of expressions printed and the first one, as a
+/// value. Text between the tags is the other kind of node, and the text of the whole render
+/// tells those apart (see [`Emitted::single`]).
+#[derive(Default)]
+pub(super) struct Emitted {
+    count: u32,
+    first: Option<minijinja::Value>,
+    /// Where the render's own output lives. A macro prints into an output of its own.
+    top: usize,
+    /// The code holds a capture, which prints into the same output through a buffer: the count
+    /// is not the number of nodes then.
+    captures: bool,
+    /// An expression printed `none`, which is no node and so can leave one node of the rest.
+    none: bool,
+}
+
+/// What a template that makes no more than one node is worth, once it has rendered to `text`.
+pub(super) enum Node {
+    /// No node at all: the reference's result is `None`.
+    None,
+    /// Exactly one expression and no text: the reference keeps its type.
+    Value(minijinja::Value),
+    /// Text, or several nodes: a string.
+    Text,
+}
+
+impl Emitted {
+    /// Whether an expression printed `none`.
+    pub(super) fn printed_none(&self) -> bool {
+        self.none
+    }
+
+    /// The reference joins the nodes of a template into one string, except when there is one node
+    /// (its value, as it is) or none (`None`). `text` is what the whole render wrote. An
+    /// expression that is the only thing written has written exactly its own text; any more text
+    /// means a text node beside it. A capture prints through a buffer into the same output, so
+    /// with one in the code the count says nothing and only the text can be judged.
+    pub(super) fn single(self, text: &str) -> Node {
+        if self.captures {
+            return if text.is_empty() {
+                Node::None
+            } else {
+                Node::Text
+            };
+        }
+        match (self.count, self.first) {
+            (0, _) if text.is_empty() => Node::None,
+            (1, Some(value)) => {
+                let shown = container_repr(&value).unwrap_or_else(|| value.to_string());
+                if shown == text {
+                    Node::Value(value)
+                } else {
+                    Node::Text
+                }
+            }
+            _ => Node::Text,
+        }
+    }
+}
+
+/// Where `out` lives, to tell the render's own output from the one of a macro it calls.
+fn address(out: &minijinja::Output<'_>) -> usize {
+    std::ptr::from_ref(out) as usize
+}
+
+thread_local! {
+    /// The expressions the render running on this thread has printed. A render inside a render, a
+    /// lookup that renders a file, saves the outer one's and puts it back: see [`render_counted`].
+    static EMITTED: RefCell<Emitted> = RefCell::new(Emitted::default());
+}
+
+/// Notes one `{{ }}` the VM is about to print into `out`. Called by the formatter of the
+/// environment. A `none` is no node: the reference leaves it out of the result.
+pub(super) fn note_emit(out: &minijinja::Output<'_>, value: &minijinja::Value) {
+    EMITTED.with_borrow_mut(|e| {
+        if address(out) != e.top {
+            return;
+        }
+        if value.is_none() {
+            e.none = true;
+            return;
+        }
+        if e.count == 0 {
+            e.first = Some(value.clone());
+        }
+        e.count = e.count.saturating_add(1);
+    });
 }
 
 /// `env.render_named_str`, with `~` routed through [`concat()`]. Compiled once per call, as
@@ -160,6 +257,17 @@ pub(super) fn render_str(
     ctx: &minijinja::Value,
     ws_config: WhitespaceConfig,
 ) -> Result<String, minijinja::Error> {
+    render_counted(templar, name, source, ctx, ws_config).map(|(text, _)| text)
+}
+
+/// [`render_str`], and what the render printed through `{{ }}`.
+pub(super) fn render_counted(
+    templar: &Templar,
+    name: &str,
+    source: &str,
+    ctx: &minijinja::Value,
+    ws_config: WhitespaceConfig,
+) -> Result<(String, Emitted), minijinja::Error> {
     let config = TemplateConfig {
         syntax_config: SyntaxConfig,
         ws_config,
@@ -168,19 +276,29 @@ pub(super) fn render_str(
         default_auto_escape: Arc::new(|_| AutoEscape::None),
     };
     let mut compiled = CompiledTemplate::new(name, source, &config)?;
-    route_calls(&mut compiled.instructions);
-    compiled.blocks.values_mut().for_each(route_calls);
+    let mut captures = route_calls(&mut compiled.instructions);
+    for block in compiled.blocks.values_mut() {
+        captures |= route_calls(block);
+    }
     let env =
         templar.env_for(std::iter::once(&compiled.instructions).chain(compiled.blocks.values()));
     let mut out = String::with_capacity(compiled.buffer_size_hint);
-    Vm::new(&env).eval(
+    let mut output = make_string_output(&mut out);
+    let outer = EMITTED.replace(Emitted {
+        top: address(&output),
+        captures,
+        ..Emitted::default()
+    });
+    let run = Vm::new(&env).eval(
         &compiled.instructions,
         ctx.clone(),
         &compiled.blocks,
-        &mut make_string_output(&mut out),
+        &mut output,
         compiled.initial_auto_escape,
-    )?;
-    Ok(out)
+    );
+    let emitted = EMITTED.replace(outer);
+    run?;
+    Ok((out, emitted))
 }
 
 /// `env.compile_expression(expr)?.eval(ctx)`, with `~` routed through [`concat()`].
@@ -193,7 +311,7 @@ pub(super) fn eval_expr(
     let mut codegen = CodeGenerator::new("<expression>", expr);
     codegen.compile_expr(&ast);
     let (mut instructions, _) = codegen.finish();
-    route_calls(&mut instructions);
+    let _ = route_calls(&mut instructions);
     let env = templar.env_for([&instructions]);
     let mut out = String::new();
     let (value, _) = Vm::new(&env).eval(
