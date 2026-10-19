@@ -6918,6 +6918,159 @@
   },
   {
     "case": {
+      "template": "{{ '{:.70000f}'.format(1.5) | length }}"
+    },
+    "result": 70002
+  },
+  {
+    "case": {
+      "template": "{{ '{:.70000e}'.format(1.5) | length }}"
+    },
+    "result": 70006
+  },
+  {
+    "case": {
+      "template": "{{ '{:.70000f}'.format(1.5)[:8] }}"
+    },
+    "result": "1.500000"
+  },
+  {
+    "case": {
+      "template": "{{ '{:d}'.format(18446744073709551615) }}"
+    },
+    "result": "18446744073709551615"
+  },
+  {
+    "case": {
+      "template": "{{ '{:x}'.format(18446744073709551615) }}"
+    },
+    "result": "ffffffffffffffff"
+  },
+  {
+    "case": {
+      "template": "{{ '{:,}'.format(18446744073709551615) }}"
+    },
+    "result": "18,446,744,073,709,551,615"
+  },
+  {
+    "case": {
+      "template": "{{ '{:b}'.format(-18446744073709551615) }}"
+    },
+    "result": "-1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  {
+    "case": {
+      "template": "{{ '{:e}'.format(18446744073709551615) }}"
+    },
+    "result": "1.844674e+19"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.find('b', 100000000000000000000) }}"
+    },
+    "result": -1
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.rfind('b', 0, 100000000000000000000) }}"
+    },
+    "result": 1
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.count('b', 0, 100000000000000000000) }}"
+    },
+    "result": 1
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.startswith('a', 0, 100000000000000000000) }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.find('b', -100000000000000000000) }}"
+    },
+    "result": 1
+  },
+  {
+    "case": {
+      "template": "{{ 'a'.rjust(100000000000000000000) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Python int too large to convert to C ssize_t"
+  },
+  {
+    "case": {
+      "template": "{{ 'a'.ljust(100000000000000000000) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Python int too large to convert to C ssize_t"
+  },
+  {
+    "case": {
+      "template": "{{ 'a'.center(100000000000000000000) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Python int too large to convert to C ssize_t"
+  },
+  {
+    "case": {
+      "template": "{{ 'a'.zfill(100000000000000000000) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Python int too large to convert to C ssize_t"
+  },
+  {
+    "case": {
+      "template": "{{ 'a'.expandtabs(100000000000000000000) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Python int too large to convert to C int"
+  },
+  {
+    "case": {
+      "template": "{{ t.expandtabs(10000000000) }}",
+      "vars": {
+        "t": "a\tb"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Python int too large to convert to C int"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.replace('a', 'b', 100000000000000000000) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Python int too large to convert to C ssize_t"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.split('b', 100000000000000000000) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Python int too large to convert to C ssize_t"
+  },
+  {
+    "case": {
+      "template": "{{ 'abc'.rsplit('b', 100000000000000000000) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Python int too large to convert to C ssize_t"
+  },
+  {
+    "case": {
+      "template": "{{ '{:>100000000000000000000}'.format('a') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Too many decimal digits in format string"
+  },
+  {
+    "case": {
+      "template": "{{ '{:.100000000000000000000f}'.format(1.5) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Too many decimal digits in format string"
+  },
+  {
+    "case": {
+      "template": "{{ '{:{}}'.format('a', 100000000000000000000) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: Too many decimal digits in format string"
+  },
+  {
+    "case": {
       "template": "{{ name.upper() }}",
       "vars": {
         "name": "web-01"
