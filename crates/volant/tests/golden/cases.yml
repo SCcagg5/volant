@@ -1235,6 +1235,47 @@
   vars: {"x": [1]}
 - template: ">{% set y = x | list %}{% set _ = y.append(2) %}{{ x }}{{ y }}"
   vars: {"x": [1]}
+# What a list or mapping that a template changed still answers: tests, filters, loops, slices and comparisons.
+- template: ">{% set d = {'a': 1} %}{% set _ = d.update({'b': 2}) %}{{ 'a' in d }} {{ 'z' in d }} {{ d is mapping }} {{ d | length }} {{ d | list }} {{ d.keys() | list }}"
+- template: ">{% set l = [1, 2] %}{% set _ = l.append(3) %}{{ 3 in l }} {{ 9 in l }} {{ l is sequence }} {{ l is iterable }} {{ l | length }} {{ l[-1] }} {{ l[0] }} {{ l[1:] }} {{ l[:-1] }} {{ l[::-1] }}"
+- template: ">{% set l = [3, 1, 2] %}{% set _ = l.append(0) %}{{ l | sort }} {{ l | first }} {{ l | last }} {{ l | sum }} {{ l | max }} {{ l | min }} {{ l | join('-') }} {{ l | map('string') | list }} {{ l | select('odd') | list }} {{ l | reverse | list }} {{ l | unique | list }}"
+- template: ">{% set l = [1, 2] %}{% set _ = l.append(3) %}{{ l == [1, 2, 3] }} {{ l != [1, 2, 3] }} {{ [1, 2, 3] == l }} {{ l + [4] }} {{ l * 2 }} {{ [0] + l }}"
+- template: ">{% set d = {'a': 1} %}{% set _ = d.update({'b': 2}) %}{{ d == {'a': 1, 'b': 2} }} {{ d | dictsort }} {{ d | dict2items }} {{ d.items() | list }} {{ d | combine({'c': 3}) }} {{ d | to_json }}"
+- template: ">{% set l = [] %}{% set _ = l.append('x') %}{{ l | to_json }} {{ l | to_nice_json | length }} {{ l | length }} {{ l | list | length }} {{ l | count }} {{ l | type_debug }}"
+- template: ">{% set d = {} %}{% set _ = d.update(a=1) %}{{ d | type_debug }} {{ d.a }} {{ d['a'] }} {{ d.get('a') }} {{ d.b | default('none') }} {{ d['b'] | default('none') }}"
+- template: ">{% set l = [1] %}{% set _ = l.append(2) %}{% for x in l %}{{ x }}{% if not loop.last %},{% endif %}{% endfor %} {{ l | length }} {% for i, x in l | enumerate %}{% endfor %}"
+- template: ">{% set l = ['b', 'a'] %}{% set _ = l.sort() %}{% for x in l %}{{ loop.index }}{{ x }}{% endfor %}"
+- template: ">{% set l = [[1, 2], [3]] %}{% set _ = l[0].append(9) %}{{ l | flatten }} {{ l | map('length') | list }} {{ l[0] | length }} {{ l | length }}"
+- template: ">{% set d = {'k': [1]} %}{% set _ = d.k.append(2) %}{{ d.k | sum }} {{ d | dict2items | map(attribute='value') | list }} {{ d['k'] | length }} {{ d.keys() | list }} {{ d.values() | list }}"
+- template: ">{% set items = [{'n': 'a', 'v': 1}, {'n': 'b', 'v': 2}] %}{% set _ = items.append({'n': 'c', 'v': 3}) %}{{ items | map(attribute='n') | list }} {{ items | selectattr('v', 'gt', 1) | map(attribute='n') | list }} {{ items | length }}"
+- template: ">{% set names = [] %}{% for i in range(3) %}{% set _ = names.append('n' ~ i) %}{% endfor %}{{ names | join(',') }}{% if names | length > 2 %} many{% endif %}{% if 'n1' in names %} has{% endif %}"
+- template: ">{% set l = [1, 2, 3] %}{% set _ = l.pop() %}{{ l }} {% set _ = l.clear() %}{{ l }} {{ l | length }} {{ l | default('x') }} {% if not l %}empty{% endif %}"
+- template: ">{% set d = {} %}{% if not d %}empty {% endif %}{% set _ = d.update({'a': 1}) %}{% if d %}full{% endif %} {{ d | length }}"
+- template: ">{% set l = [1, 2, 3, 4] %}{% set _ = l.reverse() %}{{ l | batch(2) | list }} {{ l | slice(2) | list }} {{ l | zip(l) | list }} {{ l | map('int') | list }}"
+- template: ">{% set a = [1] %}{% set b = [2] %}{% set _ = a.extend(b) %}{% set _ = b.append(3) %}{{ a }}{{ b }}"
+- template: ">{% set l = [1] %}{% set m = [l, l] %}{% set _ = m[0].append(2) %}{{ m }}"
+- template: ">{{ x.append(2) }}{{ x | length }}{{ x }}"
+  vars: {"x": [1]}
+- template: ">{{ d.update({'b': 2}) }}{{ d | length }}{{ d }}"
+  vars: {"d": {"a": 1}}
+- template: ">{% set _ = x.append(7) %}{{ x | to_json }} {{ x | length }} {{ x | first }} {{ x | last }}"
+  vars: {"x": [1, 2]}
+- template: ">{% set _ = d.setdefault('n', {}).update({'k': 1}) %}{{ d }} {{ d.n.k }}"
+  vars: {"d": {}}
+- template: ">{% for h in hosts %}{% set _ = h.tags.append('t') %}{% endfor %}{{ hosts }}"
+  vars: {"hosts": [{"n": 1, "tags": []}, {"n": 2, "tags": ["a"]}]}
+- template: ">{% set w = [] %}{% for h in hosts %}{% if h.up %}{% set _ = w.append(h.n) %}{% endif %}{% endfor %}{{ w }}"
+  vars: {"hosts": [{"n": 1, "up": true}, {"n": 2, "up": false}, {"n": 3, "up": true}]}
+- template: ">{% set r = {} %}{% for h in hosts %}{% set _ = r.update({h.n: h.up}) %}{% endfor %}{{ r }} {{ r | length }}"
+  vars: {"hosts": [{"n": "a", "up": true}, {"n": "b", "up": false}]}
+- template: ">{% set ns = namespace(l=[], d={}) %}{% for i in range(2) %}{% set _ = ns.l.append(i) %}{% set _ = ns.d.update({i|string: i}) %}{% endfor %}{{ ns.l }} {{ ns.d }}"
+- template: ">{% macro m(v) %}{% set l = [] %}{% for i in range(v) %}{% set _ = l.append(i) %}{% endfor %}{{ l | join('') }}{% endmacro %}{{ m(3) }}{{ m(2) }}{{ m(1) }}"
+- template: ">{% set l = [1, 2] %}{% set _ = l.append(3) %}{% set t = l | list %}{% set _ = t.append(4) %}{{ l }}{{ t }}"
+- template: ">{% set l = [1, 2] %}{% set _ = l.append(3) %}{% set t = l.copy() %}{% set _ = t.append(4) %}{{ l }}{{ t }}"
+- template: ">{% set text = 'a,b' %}{% set parts = text.split(',') %}{% set _ = parts.append('c') %}{{ parts | length }}{{ parts }}{{ text }}"
+- template: ">{% set l = [1] %}{{ l.append(2) }}{{ l.append(3) }}{{ l }}"
+- template: ">{% set l = [1] %}{% set x = l.append(2) %}{{ x is none }}{{ x }}{{ l }}"
+- template: ">{% set l = [1] %}{% set _ = l.append(2) %}{% set _ = l.append(3) %}{{ l | length }}{{ l[2] }}{{ l.count(2) }}{{ l.index(3) }}"
 - template: ">{% set _ = d.update({'b': 2}) %}{{ d }}"
   vars: {"d": {"a": 1}}
 - template: ">{% set _ = d.setdefault('k', []).append(1) %}{{ d }}"
