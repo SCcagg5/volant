@@ -177,7 +177,7 @@ fn our_yaml_loading_of_vars_matches_the_reference() {
 }
 
 /// `case.yml` of a scenario, as the generator's `scenario.py` reads it: the argv of each run,
-/// `modes`, `env`, `forks`, `needs` and `unordered`.
+/// `modes`, `env`, `forks`, `needs`, `unordered` and `links`.
 struct Case {
     runs: Vec<Vec<String>>,
     single: bool,
@@ -185,7 +185,20 @@ struct Case {
     forks: u64,
     needs: Vec<String>,
     unordered: Vec<String>,
+    links: Vec<(String, String)>,
 }
+
+/// The keys a case.yml takes.
+const KEYS: [&str; 8] = [
+    "args",
+    "runs",
+    "modes",
+    "env",
+    "forks",
+    "needs",
+    "unordered",
+    "links",
+];
 
 /// The `modes` of a case.yml and the arguments each appends to a run, in the order recorded.
 const MODES: [(&str, &[&str]); 3] = [
@@ -208,6 +221,24 @@ fn string_list(value: &Value, what: &str) -> Vec<String> {
         .collect()
 }
 
+/// The `links` of a case.yml: a path and the target of the link made there.
+fn links(name: &str, value: Option<&Value>) -> Vec<(String, String)> {
+    let Some(links) = value.filter(|v| !v.is_null()) else {
+        return Vec::new();
+    };
+    links
+        .as_object()
+        .unwrap_or_else(|| panic!("{name}: links is not a mapping"))
+        .iter()
+        .map(|(path, target)| {
+            let target = target
+                .as_str()
+                .unwrap_or_else(|| panic!("{name}: link {path} is not a string"));
+            (path.clone(), target.to_string())
+        })
+        .collect()
+}
+
 impl Case {
     fn parse(name: &str, doc: &Value) -> Self {
         let map = doc
@@ -215,16 +246,7 @@ impl Case {
             .unwrap_or_else(|| panic!("{name}/case.yml is not a mapping"));
         for key in map.keys() {
             assert!(
-                [
-                    "args",
-                    "runs",
-                    "modes",
-                    "env",
-                    "forks",
-                    "needs",
-                    "unordered"
-                ]
-                .contains(&key.as_str()),
+                KEYS.contains(&key.as_str()),
                 "{name}/case.yml: {key} is not supported"
             );
         }
@@ -302,6 +324,7 @@ impl Case {
                 .map(|v| string_list(v, &format!("{name}: {key}")))
                 .unwrap_or_default()
         };
+        let links = links(name, map.get("links"));
         Self {
             runs,
             single: map.contains_key("args") && modes.is_empty(),
@@ -309,6 +332,7 @@ impl Case {
             forks,
             needs: list("needs"),
             unordered: list("unordered"),
+            links,
         }
     }
 
@@ -425,6 +449,45 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
+/// The links under `dir` whose target does not exist.
+fn dangling_links(dir: &Path, found: &mut Vec<PathBuf>) {
+    for entry in std::fs::read_dir(dir).expect("the directory lists") {
+        let path = entry.expect("the directory lists").path();
+        if path.is_symlink() {
+            if !path.exists() {
+                found.push(path);
+            }
+        } else if path.is_dir() {
+            dangling_links(&path, found);
+        }
+    }
+}
+
+/// `cargo package` cannot archive a link whose target is missing: a scenario names such a link in
+/// the `links` of its case.yml, and a fixture holds no other.
+#[test]
+fn no_tracked_fixture_is_a_dangling_link() {
+    let mut found = Vec::new();
+    dangling_links(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests"),
+        &mut found,
+    );
+    assert!(found.is_empty(), "dangling links in tests: {found:?}");
+}
+
+/// The `links` of a case in a copy: each path becomes a link to its target, which may not exist.
+fn make_links(copy: &Path, links: &[(String, String)]) {
+    for (path, target) in links {
+        let link = copy.join(path);
+        std::fs::create_dir_all(link.parent().expect("a link sits in a directory"))
+            .expect("the link's directory is made");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, &link).expect("the link is made");
+        #[cfg(not(unix))]
+        panic!("{path} -> {target}: a link in a scenario needs unix");
+    }
+}
+
 /// One scenario under `tests/scenarios`: each run of Volant, in a fresh copy of the directory, has
 /// the exit code and the whole stdout ansible-core printed there.
 #[rstest]
@@ -491,6 +554,7 @@ fn a_scenario_matches_the_reference(#[files("tests/scenarios/*/case.yml")] case:
                     .join(format!("volant-scenario-{}-{name}-{i}", std::process::id()));
                 let _ = std::fs::remove_dir_all(&copy);
                 copy_dir(dir, &copy);
+                make_links(&copy, &spec.links);
                 let own = copy.join("ansible.cfg");
                 let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_volant"));
                 command

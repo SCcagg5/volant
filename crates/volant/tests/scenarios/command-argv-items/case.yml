@@ -1,0 +1,3 @@
+# An argv item that is not a string is run as the text Python's str gives it, and an argv that is
+# not a list becomes one. No modes: `command` is not run under --check.
+args: [-i, inv.ini, argv.yml]

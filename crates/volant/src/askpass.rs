@@ -136,13 +136,13 @@ fn bases() -> Vec<PathBuf> {
 }
 
 #[cfg(unix)]
-fn effective_uid() -> u32 {
+pub(crate) fn effective_uid() -> u32 {
     // SAFETY: `geteuid` takes no argument and cannot fail.
     unsafe { libc::geteuid() }
 }
 
 #[cfg(not(unix))]
-fn effective_uid() -> u32 {
+pub(crate) fn effective_uid() -> u32 {
     0
 }
 

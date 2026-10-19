@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use minijinja::value::{Object, Rest, ValueKind, from_args};
 use minijinja::{Error, ErrorKind, State, Value};
 
-use super::type_name;
+use super::{any_undefined, type_name};
 
 /// What makes two keys the same key in a Python `dict`: `1`, `1.0` and `true` are one key. An
 /// integer is held whole, so two integers beyond 64 bits stay two keys.
@@ -79,7 +79,7 @@ fn invalid(message: String) -> Error {
 }
 
 /// The name Python gives the type of a value, as the messages of `dict` quote it.
-fn python_type(value: &Value) -> &'static str {
+pub(super) fn python_type(value: &Value) -> &'static str {
     match value.kind() {
         ValueKind::None => "NoneType",
         ValueKind::Bool => "bool",
@@ -273,4 +273,68 @@ pub(super) fn cycler(items: Rest<Value>) -> Result<Value, Error> {
 /// reads as any other undefined variable.
 pub(super) fn undef(_args: Rest<Value>) -> Value {
     Value::UNDEFINED
+}
+
+/// What a call is bound to. Python words the failure of a function written in Python and of one
+/// written in C (`strftime`, `isoformat`) in two ways.
+#[derive(Clone, Copy)]
+pub(super) enum Callee {
+    Python,
+    Native,
+}
+
+/// The arguments of a call, by position then by keyword, in the order of `names`, as Python binds
+/// them. An undefined argument is an undefined read, as for any plugin the reference calls.
+pub(super) fn bind<const N: usize>(
+    callee: Callee,
+    name: &str,
+    names: &[&str; N],
+    args: &[Value],
+) -> Result<[Option<Value>; N], Error> {
+    if any_undefined(args) {
+        return Err(Error::from(ErrorKind::UndefinedError));
+    }
+    let (positional, keywords) = match args.split_last() {
+        Some((last, rest)) if last.is_kwargs() => (rest, Some(last)),
+        _ => (args, None),
+    };
+    if positional.len() > N {
+        let given = positional.len();
+        return Err(invalid(match callee {
+            Callee::Python => {
+                format!("{name}() takes from 0 to {N} positional arguments but {given} were given")
+            }
+            Callee::Native => format!(
+                "{name}() takes at most {N} argument{} ({given} given)",
+                if N == 1 { "" } else { "s" }
+            ),
+        }));
+    }
+    let mut bound: [Option<Value>; N] = std::array::from_fn(|at| positional.get(at).cloned());
+    if let Some(keywords) = keywords {
+        for key in keywords.try_iter()? {
+            let word = key.to_string();
+            let Some(at) = names.iter().position(|known| *known == word) else {
+                return Err(invalid(match callee {
+                    Callee::Python => {
+                        format!("{name}() got an unexpected keyword argument '{word}'")
+                    }
+                    Callee::Native => {
+                        format!("'{word}' is an invalid keyword argument for {name}()")
+                    }
+                }));
+            };
+            if bound[at].is_some() {
+                return Err(invalid(match callee {
+                    Callee::Python => format!("{name}() got multiple values for argument '{word}'"),
+                    Callee::Native => format!(
+                        "argument for {name}() given by name ('{word}') and position ({})",
+                        at + 1
+                    ),
+                }));
+            }
+            bound[at] = Some(keywords.get_item(&key)?);
+        }
+    }
+    Ok(bound)
 }

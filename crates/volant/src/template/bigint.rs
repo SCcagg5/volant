@@ -124,6 +124,20 @@ pub(crate) fn to_template(value: &serde_json::Value) -> Value {
     }
 }
 
+/// What to add to an operator's refusal, when the operand it names is an object: the value of an
+/// integer wider than 128 bits is one to minijinja, which names no limit.
+pub(crate) fn refusal_note(err: &minijinja::Error) -> &'static str {
+    let refused = err.kind() == minijinja::ErrorKind::InvalidOperation
+        && err
+            .detail()
+            .is_some_and(|d| d.starts_with("tried to use ") && d.contains("types plain object"));
+    if refused {
+        " (an integer wider than 128 bits takes part in no arithmetic)"
+    } else {
+        ""
+    }
+}
+
 /// Serializes a template value as `Value` does, except that a [`BigInt`] is a JSON number.
 struct Wire<'a>(&'a Value);
 

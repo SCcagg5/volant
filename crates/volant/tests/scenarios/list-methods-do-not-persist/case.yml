@@ -1,0 +1,5 @@
+# A template that changes a list or a mapping in place changes its own copy: the next task, the
+# next field and the next template read the variable as it was. A list that a variable shares
+# with a name inside one template changes for that template only.
+args: [-i, inv.ini, play.yml]
+needs: ["ansible-core"]
