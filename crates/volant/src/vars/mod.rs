@@ -7,6 +7,7 @@ mod host_vars;
 mod layers;
 mod load;
 mod magic;
+mod shared;
 mod store;
 
 pub(crate) use host_vars::PENDING_PYTHON;

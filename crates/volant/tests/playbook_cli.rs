@@ -5888,9 +5888,8 @@ fn the_implicit_localhost_runs_under_the_controller_python() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// An inventory with no host leaves only the implicit `localhost`, and the run says so once, as
-/// ansible-core 2.19.12 does. `localhost_warning` silences it, and an inventory that holds a
-/// host never gets it.
+/// An inventory with no host warns once, as ansible-core 2.19.12 does, unless `localhost_warning`
+/// is off.
 #[rstest::rstest]
 #[case::no_host("", &[], true)]
 #[case::a_host("h1 ansible_connection=local\n", &[], false)]

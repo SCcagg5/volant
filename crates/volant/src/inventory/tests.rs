@@ -107,10 +107,8 @@ fn the_controller_is_an_implicit_local_host() {
     );
 }
 
-/// A spelling of the controller that the inventory does not list means the inventory's own
-/// controller host, the first it defines, with that host's variables: ansible-core 2.19.12 keeps
-/// one controller host and hands it out for every spelling. With none defined the spelling is an
-/// implicit host of its own name.
+/// An unlisted spelling of the controller means the first controller host the inventory defines,
+/// as in ansible-core 2.19.12, or an implicit host of its own name when none is defined.
 #[rstest]
 #[case::none_defined("[web]\nweb1\n", "127.0.0.1", &["127.0.0.1"], json!(null))]
 #[case::another_spelling("[web]\nweb1\nlocalhost foo=1\n", "127.0.0.1", &["localhost"], json!(1))]

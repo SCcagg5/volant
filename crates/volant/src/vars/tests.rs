@@ -409,11 +409,8 @@ fn the_run_s_tag_lists_decide_the_kubeconfig_block() {
     assert_eq!(holds(&mut store), (false, json!(["all"]), json!(["foo"])));
 }
 
-/// `hostvars` answers for the three spellings of the controller whether the inventory lists them
-/// or not, as ansible-core 2.19.12 does. An unlisted one is an implicit host with a local
-/// connection and the controller's Python, named after the first spelling a host ran under
-/// (`localhost` until one has) and shared by the three spellings. Another spelling of a listed
-/// one is that host.
+/// `hostvars` answers for the three spellings of the controller, listed or not, as ansible-core
+/// 2.19.12 does: an unlisted one is an implicit local host, a spelling of a listed one is that host.
 #[rstest::rstest]
 #[case::implicit_localhost("", "web1", "localhost", "localhost", json!("local"), json!(null))]
 #[case::implicit_loopback("", "web1", "127.0.0.1", "localhost", json!("local"), json!(null))]
