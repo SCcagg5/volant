@@ -1044,6 +1044,133 @@ h1
     assert!(!store.untrusted_of("n1", &scope(&["n1"])).contains("plain"));
 }
 
+const EVIL: &str = "{{ lookup('pipe','id') }}";
+const BLOCK: &str = "a{% if x %}b{% endif %}";
+const NOTE: &str = "{# note #}";
+
+/// One `add_host` and one read of it.
+struct NameRow {
+    /// The host `add_host` added, and the groups it joined.
+    name: &'static str,
+    groups: &'static [&'static str],
+    /// The host whose template reads, the hosts of its batch and of its whole play.
+    reader: &'static str,
+    batch: &'static [&'static str],
+    whole: &'static [&'static str],
+    /// The lists that taint the read, and whether `hostvars[name]` does.
+    tainted: &'static [&'static str],
+    host_is_data: bool,
+}
+
+const fn name_row(
+    name: &'static str,
+    groups: &'static [&'static str],
+    reader: &'static str,
+    play: &'static [&'static str],
+    tainted: &'static [&'static str],
+    host_is_data: bool,
+) -> NameRow {
+    NameRow {
+        name,
+        groups,
+        reader,
+        batch: play,
+        whole: play,
+        tainted,
+        host_is_data,
+    }
+}
+
+const EVERY_LIST: &[&str] = &[
+    "ansible_play_batch",
+    "ansible_play_hosts",
+    "ansible_play_hosts_all",
+    "groups",
+    "hostvars",
+    "inventory_hostname",
+    "inventory_hostname_short",
+    "play_hosts",
+];
+
+const NAME_ROWS: &[NameRow] = &[
+    name_row("web1", &["web"], "web1", &["web1"], &[], false),
+    name_row("a{b}", &["x}{y"], "a{b}", &["a{b}"], &[], false),
+    name_row(
+        "nh",
+        &[EVIL],
+        "nh",
+        &["nh"],
+        &["group_names", "groups"],
+        false,
+    ),
+    name_row("nh", &[EVIL], "h1", &["h1"], &["groups"], false),
+    name_row(
+        "nh",
+        &[NOTE],
+        "nh",
+        &["nh"],
+        &["group_names", "groups"],
+        false,
+    ),
+    name_row(EVIL, &[], EVIL, &[EVIL], EVERY_LIST, true),
+    name_row(EVIL, &[], "h1", &["h1"], &["groups", "hostvars"], true),
+    NameRow {
+        whole: &["h1", BLOCK],
+        ..name_row(
+            BLOCK,
+            &[],
+            "h1",
+            &["h1"],
+            &["ansible_play_hosts_all", "groups", "hostvars"],
+            true,
+        )
+    },
+];
+
+/// A host name or a group name that still holds a template after `add_host` rendered it came
+/// from text the playbook did not write. Reading it back through a list taints the render of
+/// that read, and a read of nothing it is in stays clean.
+#[test]
+fn an_add_host_name_that_holds_a_template_is_data_wherever_it_is_read() {
+    const LISTS: [&str; 9] = [
+        "ansible_play_batch",
+        "ansible_play_hosts",
+        "ansible_play_hosts_all",
+        "group_names",
+        "groups",
+        "hostvars",
+        "inventory_hostname",
+        "inventory_hostname_short",
+        "play_hosts",
+    ];
+    for row in NAME_ROWS {
+        let tmp = scratch();
+        let inv = Inventory::parse_ini("[g]\nh1\n").unwrap();
+        let mut store = VarStore::new(&inv, None, tmp.path(), Map::new()).unwrap();
+        let strings = |v: &[&str]| v.iter().map(ToString::to_string).collect::<Vec<_>>();
+        store.add_host(row.name, &strings(row.groups), &Map::new());
+        let at = Scope {
+            play_hosts: strings(row.batch),
+            batch_hosts: strings(row.batch),
+            all_play_hosts: strings(row.whole),
+            ..Scope::default()
+        };
+        let data = store.untrusted_of(row.reader, &at);
+        let got: Vec<&str> = LISTS.into_iter().filter(|n| data.contains(*n)).collect();
+        assert_eq!(
+            got, row.tainted,
+            "{:?} added with {:?}, read by {:?}",
+            row.name, row.groups, row.reader
+        );
+        assert_eq!(
+            store.untrusted_hosts().contains(row.name),
+            row.host_is_data,
+            "{:?} as a host that holds a template",
+            row.name
+        );
+    }
+}
+
 /// A vaulted vars file is read with the run's secrets; one it cannot read is named.
 #[test]
 fn a_vaulted_vars_file_is_decrypted_or_refused_by_name() {

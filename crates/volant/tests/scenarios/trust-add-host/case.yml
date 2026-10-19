@@ -1,0 +1,7 @@
+# A host name or a group name that add_host took from a result is data in every later read, and
+# a name that holds no template keeps working.
+needs: [ansible-core]
+runs:
+  - args: [-i, inv.ini, -e, "payload={{ playbook_dir }}/payload.txt", group.yml]
+  - args: [-i, inv.ini, -e, "payload={{ playbook_dir }}/payload.txt", host.yml]
+  - args: [-i, inv.ini, plain.yml]
