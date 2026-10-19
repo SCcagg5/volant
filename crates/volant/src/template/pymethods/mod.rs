@@ -13,12 +13,14 @@ pub(crate) mod format;
 pub(crate) mod limits;
 mod lists;
 pub(super) mod mutable;
+mod percent;
 mod search;
 mod text;
 mod translate;
 
 use args::{Call, raise, type_of};
 use mutable::{Dict, MutDict, MutList, is_dict, is_list};
+pub(super) use percent::{format_filter, percent};
 
 /// Installs the hook on `env`.
 pub(super) fn register(env: &mut Environment<'static>) {

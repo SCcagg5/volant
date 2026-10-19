@@ -20,8 +20,8 @@ use super::env::{attr_call, const_call, container_repr, holds_undefined, var_cal
 use super::pymethods::mutable::MUTATORS;
 use super::templar::Templar;
 use super::{
-    CONCAT_KEY, ITEM_KEY, MITEM_KEY, MKLIST_KEY, MKMAP_KEY, QUERY_KEY, TemplateError, UNDEFINED,
-    VAULT_NAME,
+    CONCAT_KEY, CONST_KEY, ITEM_KEY, MITEM_KEY, MKLIST_KEY, MKMAP_KEY, QUERY_KEY, REM_KEY,
+    REMT_KEY, TemplateError, UNDEFINED, VAULT_NAME,
 };
 
 /// Replaces every `!unsafe` wrapper inside `value` by its text, and every `!vault` wrapper that
@@ -185,6 +185,7 @@ pub(super) fn route_calls(instructions: &mut Instructions<'_>, mutating: bool) -
             }
             _ => None,
         };
+        let tuple_before = idx > 0 && writes_a_tuple(instructions.get(idx - 1));
         let Some(op) = instructions.get_mut(idx) else {
             break;
         };
@@ -193,6 +194,10 @@ pub(super) fn route_calls(instructions: &mut Instructions<'_>, mutating: bool) -
         }
         match op {
             Instruction::StringConcat => *op = Instruction::CallFunction(CONCAT_KEY, Some(2)),
+            Instruction::Rem => {
+                let key = if tuple_before { REMT_KEY } else { REM_KEY };
+                *op = Instruction::CallFunction(key, Some(2));
+            }
             Instruction::GetItem => {
                 let key = if mutating { MITEM_KEY } else { ITEM_KEY };
                 *op = Instruction::CallFunction(key, Some(2));
@@ -315,6 +320,24 @@ pub(super) fn note_emit(out: &minijinja::Output<'_>, value: &minijinja::Value) {
         }
         e.count = e.count.saturating_add(1);
     });
+}
+
+/// Whether an instruction pushes a list written out in the template, `(a, b)` or `['a', 'b']`: what
+/// stands on the right of `%` as a tuple does. A list that a variable holds, or a call answers, is
+/// one argument, as it is in Python.
+fn writes_a_tuple(op: Option<&Instruction<'_>>) -> bool {
+    match op {
+        Some(Instruction::BuildList(Some(_))) => true,
+        Some(Instruction::LoadConst(value)) => value.kind() == minijinja::value::ValueKind::Seq,
+        // The same two, after the rewrite of a template that changes lists in place.
+        Some(Instruction::CallFunction(name, _)) => {
+            *name == MKLIST_KEY
+                || name
+                    .strip_prefix(CONST_KEY)
+                    .is_some_and(|json| json.starts_with('['))
+        }
+        _ => false,
+    }
 }
 
 /// Whether compiled code calls a method that changes a list or mapping in place.
