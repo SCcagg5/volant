@@ -143,7 +143,7 @@ pub fn register(
         add_filter(env, "batch", f::batch);
         add_filter(env, "slice", f::slice);
         add_text_filter(env, "sum", f::sum);
-        add_filter(env, "indent", f::indent);
+        add_filter(env, "indent", super::pymethods::limits::indent);
         add_filter(env, "select", f::select);
         add_filter(env, "reject", f::reject);
         add_filter(env, "selectattr", f::selectattr);
@@ -154,7 +154,7 @@ pub fn register(
         add_filter(env, "chain", f::chain);
         add_filter(env, "zip", f::zip);
         add_filter(env, "pprint", f::pprint);
-        add_filter(env, "format", f::format);
+        add_filter(env, "format", super::pymethods::format_filter);
     }
     {
         use minijinja::tests as t;
@@ -248,6 +248,8 @@ pub fn register(
     add_filter(env, "type_debug", |v: Value| {
         if v.is_undefined() {
             "UndefinedMarker"
+        } else if v.downcast_object_ref::<super::clock::DateTime>().is_some() {
+            "datetime"
         } else {
             super::type_name(&json(&v))
         }
@@ -279,24 +281,7 @@ pub fn register(
 
     super::lookups::register(env, base_dir, bridge);
 
-    // Python's `str` and `dict` methods (`.split()`, `.startswith()`, `.keys()`...), which real
-    // roles call on values. Anything neither `pycompat` nor this engine has must still fail by
-    // name, not silently: `pycompat` answers a method it does not know with a bare
-    // `UnknownMethod`, and an error of its own (a bad argument) keeps its detail.
-    env.set_unknown_method_callback(|state, value, method, args| {
-        minijinja_contrib::pycompat::unknown_method_callback(state, value, method, args).map_err(
-            |e| {
-                if e.kind() == ErrorKind::UnknownMethod && e.detail().is_none() {
-                    Error::new(
-                        ErrorKind::UnknownMethod,
-                        format!("method {method} is not available yet"),
-                    )
-                } else {
-                    e
-                }
-            },
-        )
-    });
+    super::pymethods::register(env);
 }
 
 fn json(v: &Value) -> serde_json::Value {
@@ -431,9 +416,14 @@ fn ternary(value: Value, true_val: Value, false_val: Value, none_val: Option<Val
 #[cfg(test)]
 mod tests;
 
-/// `string`, which prints a `range` as Python does and leaves every other value to MiniJinja.
+/// `string`, which prints a `range` or a `datetime` as Python does and leaves every other value
+/// to MiniJinja.
 fn string(state: &State, value: Value) -> Result<Value, Error> {
-    if value.downcast_object_ref::<super::env::Range>().is_some() {
+    if value.downcast_object_ref::<super::env::Range>().is_some()
+        || value
+            .downcast_object_ref::<super::clock::DateTime>()
+            .is_some()
+    {
         return Ok(Value::from(
             super::env::container_repr(&value).unwrap_or_default(),
         ));

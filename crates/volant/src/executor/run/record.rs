@@ -11,6 +11,7 @@ use crate::playbook::PlayTask;
 use crate::template::Templar;
 use crate::vars::VarStore;
 
+use super::judge::task_fails;
 use super::local::set_fact_data;
 use super::register::registered_value;
 
@@ -84,7 +85,7 @@ pub(in crate::executor) fn record_facts(
     results: &[(Option<Value>, TaskResult)],
 ) -> Vec<String> {
     let mut removed = Vec::new();
-    if results.iter().any(|(_, result)| result.failed()) {
+    if task_fails(results) {
         return removed;
     }
     for (_, result) in results {
@@ -119,9 +120,7 @@ pub(in crate::executor) fn record_inventory_results(
     results: &[(Option<Value>, TaskResult)],
 ) {
     let kind = short_name(&task.module);
-    if !["add_host", "group_by", "set_stats"].contains(&kind)
-        || results.iter().any(|(_, r)| r.failed())
-    {
+    if !["add_host", "group_by", "set_stats"].contains(&kind) || task_fails(results) {
         return;
     }
     let names = |value: Option<&Value>| -> Vec<String> {
@@ -214,7 +213,7 @@ pub(in crate::executor) fn record_local_facts(
         "include_vars" => false,
         _ => return,
     };
-    if results.iter().any(|(_, r)| r.failed()) {
+    if task_fails(results) {
         return;
     }
     let mut written = BTreeSet::new();

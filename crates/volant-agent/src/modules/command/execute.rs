@@ -12,6 +12,7 @@ use std::time::Instant;
 use serde_json::{Map, Value, json};
 use volant_protocol::TaskResult;
 
+use super::argv::argv_arg;
 #[cfg(unix)]
 use super::exec_failure;
 #[cfg(unix)]
@@ -65,13 +66,13 @@ pub(crate) fn execute(
     // the list is the process and no shell is started for it, and the task reports the list as
     // its `cmd`. A `shell:` written as a mapping carrying only `argv` used to be refused here as
     // "no command given", against a reference that runs it.
-    let from_argv = args.get("argv").and_then(Value::as_array);
+    let from_argv = match argv_arg(args) {
+        Ok(list) => list,
+        Err(failure) => return Run::Done(failure),
+    };
+    let has_argv = from_argv.is_some();
     let mut argv: Vec<String> = match from_argv {
-        Some(list) => list
-            .iter()
-            .filter_map(Value::as_str)
-            .map(str::to_string)
-            .collect(),
+        Some(list) => list,
         // `executable` is the shell the line is handed to, and selecting it is the whole point of
         // writing the argument: `sh` is a fallback, not the answer to every task.
         None if uses_shell && !raw.is_empty() => vec![
@@ -85,7 +86,7 @@ pub(crate) fn execute(
         None if uses_shell => Vec::new(),
         None => shlex::split(raw).unwrap_or_default(),
     };
-    let display: Value = if uses_shell && from_argv.is_none() {
+    let display: Value = if uses_shell && !has_argv {
         json!(raw)
     } else {
         json!(argv)

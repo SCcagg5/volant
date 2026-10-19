@@ -194,6 +194,10 @@ Volant reads the `ANSIBLE_*` variables named above, plus a few of its own.
   What a task does with a controller `src` that a managed host named. See [A source file a managed host named](/reference/action-plugins/#a-source-file-a-managed-host-named).
 </Option>
 
+<Option name="VOLANT_HOST_NAMED_DEST_DIRS" arg="/dir:/other" config="[volant] host_named_dest_dirs">
+  The controller directories a `fetch` may write under when a managed host named its `dest`. See [A dest a managed host named](/reference/action-plugins/#a-dest-a-managed-host-named).
+</Option>
+
 <Option name="VOLANT_NATIVE_MODULES" arg="0" config="[volant] native_modules">
   With `0`, every task runs ansible-core's Python module instead of the agent's native version. See [Native modules](/internals/python/#native-modules).
 </Option>
@@ -233,3 +237,5 @@ volant runtime remove [ID | --all]
 ## Not there yet
 
 Every `ansible-playbook` option is accepted. `--scp-extra-args` and `--sftp-extra-args` have no effect, because files move over the agent link. The [parity page](/reference/parity/#ansible-playbook-option) lists the rest.
+
+`volant` has two subcommands, `playbook` and `runtime`. The other Ansible tools have no counterpart yet: `ansible` for ad-hoc commands, `ansible-inventory`, `ansible-vault`, `ansible-doc`, `ansible-config` and `ansible-galaxy`. There is no `volant check` and no `volant lint`. Run those tools from ansible-core, or use the listing options of `volant playbook`.

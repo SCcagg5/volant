@@ -31,7 +31,7 @@ Volant reads the playbooks, roles and inventories you already have, in Ansible's
 *Volant* is French for steering wheel: the thing you drive with. Here, it is what you drive your infrastructure with.
 
 > [!WARNING]
-> Volant is in **pre-alpha**. It runs real playbooks end to end, but not every playbook yet. Anything it does not support yet is named before it connects to a host, so nothing half-runs.
+> Volant is in **pre-alpha**. It runs real playbooks end to end, but not every playbook yet. Most of what it does not support yet is named before it connects to a host. A few gaps are not: see the [known gaps](https://volant.sh/start/compatibility/#known-gaps).
 
 ## Why it is fast
 
@@ -84,17 +84,17 @@ localhost                  : ok=1    changed=1    unreachable=0    failed=0    s
 | **Plays** | `pre_tasks`, roles with dependencies and argument specs, `tasks`, `post_tasks`, handlers with `listen` and `flush_handlers`, `serial` |
 | **Tasks** | `when`, `loop`, `register`, `until`, `changed_when`, `failed_when`, `ignore_errors`, `no_log`, `environment`, tags, `run_once`, `delegate_to` |
 | **Structure** | blocks with `rescue` and `always`, `import_*` and `include_*` for tasks, roles and playbooks |
-| **Modules** | `command`, `shell`, `raw`, controller modules such as `debug`, `set_fact` and `assert`, most ansible-core Python modules, native versions of `setup`, `stat`, `file`, `apt`, `systemd`, `lineinfile`, `copy`, `package_facts`, `service_facts`, `user` and `group`, modules from installed collections, and `copy`, `dnf`, `fetch`, `package`, `reboot`, `service`, `template` and `unarchive` as [action plugins](https://volant.sh/reference/action-plugins/) |
+| **Modules** | `command`, `shell`, `raw`, controller modules such as `debug`, `set_fact` and `assert`, most ansible-core Python modules, native versions of `setup`, `stat`, `file`, `apt`, `systemd`, `lineinfile`, `copy`, `package_facts`, `service_facts`, `user` and `group`, modules from installed collections, and the modules backed by an [action plugin](https://volant.sh/reference/action-plugins/), such as `copy`, `template`, `uri` and `script` |
 | **Hosts** | INI, YAML, TOML, script and plugin inventories, `group_vars` and `host_vars`, the full host-pattern grammar, SSH with keys, `become` through `sudo`, fact gathering with a `jsonfile` cache |
 | **Run modes** | `--check` and `--diff`, vault (`!vault`, vaulted files, `--ask-vault-pass`, `--vault-id`), SSH passwords with `-k` or `ansible_password` |
 | **Listings** | `--list-tasks`, `--list-tags`, `--list-hosts` and `--syntax-check`, byte for byte like Ansible |
 
-Not there yet: a few modules backed by an action plugin (`uri`, `script`), a collection's own action plugins. See [Will my playbook run?](https://volant.sh/start/compatibility/) and the [roadmap](https://volant.sh/project/roadmap/).
+Not there yet: custom action, callback and vars plugins, the `stdout_callback` setting, a few templating features, and every `volant` subcommand except `playbook` and `runtime`. See [Will my playbook run?](https://volant.sh/start/compatibility/) and the [roadmap](https://volant.sh/project/roadmap/).
 
 ## Promises
 
 - Your files stay yours: no conversion step and no new format.
-- Anything this release does not support yet is named before the first connection, never skipped in silence.
+- Most of what this release does not support yet is named before the first connection. The [known gaps](https://volant.sh/start/compatibility/#known-gaps) are the exceptions: there a run can ignore a setting or give a wrong result without an error.
 - Linux over SSH comes first. Windows and network devices come later.
 - Volant collects no telemetry and makes no network call other than the ones your playbook asks for.
 

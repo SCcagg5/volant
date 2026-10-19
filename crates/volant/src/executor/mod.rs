@@ -67,6 +67,9 @@ pub struct RunOptions {
     /// `[volant] host_named_paths`, or `VOLANT_HOST_NAMED_PATHS`: what a task that reads a
     /// controller file does when a managed host named the file.
     pub host_named_paths: crate::config::HostNamedPaths,
+    /// `[volant] host_named_dest_dirs`, or `VOLANT_HOST_NAMED_DEST_DIRS`: the controller
+    /// directories a `fetch` may write under when a managed host named its `dest`.
+    pub host_named_dest_dirs: Vec<PathBuf>,
     /// Where the sockets of the shared `ssh` connections live, from
     /// [`crate::transport::control_dir`]; `None` when `[volant] ssh_control_master` is off or no
     /// safe directory exists, and every `ssh` then opens its own connection.

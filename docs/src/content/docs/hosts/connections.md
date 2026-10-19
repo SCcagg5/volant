@@ -14,7 +14,7 @@ Volant reaches a managed host, puts a small static agent there, and talks to it 
 | `ssh` | Runs the OpenSSH client from your `PATH`. Volant builds the command line itself, without a wrapper and without a Rust SSH library, so your `~/.ssh/config` applies. |
 | `local` | Runs the agent as a child process on the controller, with no network. |
 
-Ansible's other connection plugins (`paramiko_ssh`, `winrm`, `psrp`) and a collection's are not supported yet: that host is reported unreachable, with the transport named, and the rest of the run continues. A value that names no plugin at all fails the task with `the connection plugin '<name>' was not found`, as Ansible does. That applies whether the value is the host's own connection, a `delegate_to` target's, or that of the host running a `run_once` task.
+Ansible's other connection plugins (`paramiko_ssh`, `winrm`, `psrp`) and a collection's are not supported yet: that host is reported unreachable, with the transport named, and the rest of the run continues. A value that names no plugin at all fails the task with `the connection plugin '<name>' was not found`, as Ansible does. A `connection` keyword that names a collection's plugin, such as `docker`, fails the task the same way. That applies whether the value is the host's own connection, a `delegate_to` target's, or that of the host running a `run_once` task.
 
 A password comes from `-k`, from `--connection-password-file` or from the `ansible_password` variable. Volant hands it to `ssh` through `SSH_ASKPASS` and a private temporary file that is removed at the end of the run, which needs OpenSSH 8.4 or later. The password is never on a command line, in the environment of a program or in the output, `-vvvv` included. A vaulted `ansible_password` works like any vaulted variable. Without a password, `ssh` runs with `BatchMode=yes` and never prompts, so a host that would ask for a password or a passphrase is reported unreachable instead of hanging the run.
 
@@ -148,7 +148,6 @@ ulimit -Sn; ulimit -Hn
 
 ## Not there yet
 
-- `connection` as a play, block or task keyword.
 - Windows and network devices.
 
 [Keywords](/reference/keywords/) is the full list, generated from the tables the engine reads.

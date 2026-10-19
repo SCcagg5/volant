@@ -45,6 +45,7 @@ blake3 = "1.8"
 clap = { version = "4", features = ["derive"] }
 ctr = "0.9"
 hmac = "0.12"
+indexmap = "2"
 insta = { version = "1", features = ["filters"] }
 libc = "0.2"
 miniz_oxide = "0.9.1"

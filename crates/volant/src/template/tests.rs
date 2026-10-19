@@ -1635,3 +1635,158 @@ fn integers_of_any_width_keep_their_digits_through_templates() {
     let err = t.render("{{ c + 1 }}", &vars).unwrap_err();
     assert!(err.0.contains("wider than 128 bits"), "{err}");
 }
+
+const ISO: &str = r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{6})?$";
+const SPACED: &str = r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(\.\d{6})?$";
+const AT_SPACED: &str = r"^at \d{4}-\d\d-\d\d \d\d:\d\d:\d\d(\.\d{6})?$";
+
+/// What `now()` and `lipsum()` print, checked by shape: the clock and the dice are not the point.
+#[rstest::rstest]
+#[case::bare("{{ now() }}", ISO)]
+#[case::utc_positional("{{ now(true) }}", ISO)]
+#[case::format("{{ now(utc=true, fmt='%Y-%m-%d') }}", r"^\d{4}-\d\d-\d\d$")]
+#[case::format_positional("{{ now(false, '%H:%M') }}", r"^\d\d:\d\d$")]
+#[case::empty_format("{{ now(fmt='') }}", ISO)]
+#[case::none_format("{{ now(fmt=none) }}", ISO)]
+#[case::unknown_directive("{{ now(fmt='%Q') }}", "^%Q$")]
+#[case::strftime("{{ now().strftime('%Y%m%d') }}", r"^\d{8}$")]
+#[case::strftime_flag("{{ now().strftime('%-d') }}", r"^\d{1,2}$")]
+#[case::isoformat("{{ now().isoformat() }}", ISO)]
+#[case::isoformat_seconds("{{ now().isoformat(' ', 'seconds') }}", r"^\S+ \S+$")]
+#[case::in_text("at {{ now() }}", AT_SPACED)]
+#[case::concatenated("{{ 'at ' ~ now() }}", AT_SPACED)]
+#[case::string_filter("{{ now() | string }}", SPACED)]
+#[case::type_name("{{ now() | type_debug }}", "^datetime$")]
+#[case::lipsum_text("{{ lipsum(2, false, 1, 2) }}", r"^[A-Z][a-z]*\.\n\n[A-Z][a-z]*\.$")]
+#[case::lipsum_html(
+    "{{ lipsum(2, true, 1, 2) }}",
+    r"^<p>[A-Z][a-z]*\.</p>\n<p>[A-Z][a-z]*\.</p>$"
+)]
+#[case::lipsum_html_by_default(
+    "{{ lipsum(1, min=3, max=5) }}",
+    r"^<p>[A-Z][a-z]*( [a-z]+){2,3}\.</p>$"
+)]
+#[case::lipsum_keywords("{{ lipsum(html=false, n=1, min=1, max=2) }}", r"^[A-Z][a-z]*\.$")]
+#[case::lipsum_none("{{ lipsum(n=0) }}", "^$")]
+#[case::lipsum_negative("{{ lipsum(-1) }}", "^$")]
+fn now_and_lipsum_print_their_shape(#[case] text: &str, #[case] shape: &str) {
+    let out = templar().render(text, &Map::new()).unwrap();
+    let pattern = regex::Regex::new(shape).unwrap();
+    assert!(
+        out.as_str().is_some_and(|s| pattern.is_match(s)),
+        "{text}: {out}"
+    );
+}
+
+/// `now()` is a `datetime`: attributes, methods and comparisons answer, nothing else does.
+#[rstest::rstest]
+#[case::year("{{ now().year > 2000 }}", json!(true))]
+#[case::month("{{ now().month in range(1, 13) }}", json!(true))]
+#[case::item("{{ now()['month'] == now().month }}", json!(true))]
+#[case::microsecond("{{ now().microsecond < 1000000 }}", json!(true))]
+#[case::zone("{{ now().tzinfo is none }}", json!(true))]
+#[case::weekday("{{ now().weekday() + 1 == now().isoweekday() }}", json!(true))]
+#[case::timestamp("{{ now().timestamp() > 1700000000 }}", json!(true))]
+#[case::earlier("{{ now() <= now() }}", json!(true))]
+#[case::not_a_string("{{ now() is string }}", json!(false))]
+#[case::to_json("{{ [now()] | to_json | length > 20 }}", json!(true))]
+fn now_answers_like_a_datetime(#[case] text: &str, #[case] want: Value) {
+    assert_eq!(templar().render(text, &Map::new()), Ok(want), "{text}");
+}
+
+/// What the reference says when a call is wrong. Python's own words, from ansible-core 2.19.12.
+#[rstest::rstest]
+#[case::too_many(
+    "{{ now(1, 2, 3) }}",
+    "_now() takes from 0 to 2 positional arguments but 3 were given"
+)]
+#[case::unknown_keyword("{{ now(foo=1) }}", "_now() got an unexpected keyword argument 'foo'")]
+#[case::twice_utc(
+    "{{ now(true, utc=false) }}",
+    "_now() got multiple values for argument 'utc'"
+)]
+#[case::twice_fmt(
+    "{{ now(true, '%Y', fmt='%Y') }}",
+    "_now() got multiple values for argument 'fmt'"
+)]
+#[case::format_type("{{ now(fmt=5) }}", "strftime() argument 1 must be str, not int")]
+#[case::method_arguments(
+    "{{ now().strftime('%Y', 1) }}",
+    "strftime() takes at most 1 argument (2 given)"
+)]
+#[case::method_missing(
+    "{{ now().strftime() }}",
+    "strftime() missing required argument 'format' (pos 1)"
+)]
+#[case::separator(
+    "{{ now().isoformat('xx') }}",
+    "isoformat() argument 1 must be a unicode character, not str"
+)]
+#[case::timespec("{{ now().isoformat('T', 'nope') }}", "Unknown timespec value")]
+#[case::lipsum_text_count(
+    "{{ lipsum('a') }}",
+    "'str' object cannot be interpreted as an integer"
+)]
+#[case::lipsum_float_count(
+    "{{ lipsum(1.5) }}",
+    "'float' object cannot be interpreted as an integer"
+)]
+#[case::lipsum_float_min(
+    "{{ lipsum(1, true, 1.5, 2) }}",
+    "'float' object cannot be interpreted as an integer"
+)]
+#[case::lipsum_empty_range("{{ lipsum(1, true, 5, 3) }}", "empty range in randrange(5, 3)")]
+#[case::lipsum_equal_bounds("{{ lipsum(1, true, 1, 1) }}", "empty range in randrange(1, 1)")]
+#[case::lipsum_keyword(
+    "{{ lipsum(foo=1) }}",
+    "generate_lorem_ipsum() got an unexpected keyword argument 'foo'"
+)]
+#[case::lipsum_twice(
+    "{{ lipsum(1, n=2) }}",
+    "generate_lorem_ipsum() got multiple values for argument 'n'"
+)]
+#[case::lipsum_too_many(
+    "{{ lipsum(1, false, 1, 2, 3) }}",
+    "generate_lorem_ipsum() takes from 0 to 4 positional arguments but 5 were given"
+)]
+fn now_and_lipsum_refuse_in_the_words_of_python(#[case] text: &str, #[case] want: &str) {
+    let err = templar().render(text, &Map::new()).unwrap_err();
+    assert!(err.0.contains(want), "{text}: {err}");
+}
+
+/// `lipsum` makes `n` paragraphs of at least `min` and fewer than `max` words, each ending in a dot.
+#[test]
+fn lipsum_makes_paragraphs_within_its_bounds() {
+    let t = templar();
+    for _ in 0..30 {
+        let out = t
+            .render("{{ lipsum(4, false, 3, 9) }}", &Map::new())
+            .unwrap();
+        let paragraphs: Vec<&str> = out.as_str().unwrap().split("\n\n").collect();
+        assert_eq!(paragraphs.len(), 4, "{out}");
+        for paragraph in paragraphs {
+            let words = paragraph.split(' ').count();
+            assert!((3..9).contains(&words), "{words} words in {paragraph}");
+            assert!(paragraph.ends_with('.'), "{paragraph}");
+            assert!(paragraph.starts_with(char::is_uppercase), "{paragraph}");
+        }
+    }
+    let default = t.render("{{ lipsum() }}", &Map::new()).unwrap();
+    let default = default.as_str().unwrap();
+    assert_eq!(default.matches("<p>").count(), 5, "{default}");
+    assert_eq!(default.matches("</p>").count(), 5, "{default}");
+}
+
+/// `lipsum` is random: two calls do not give the same text.
+#[test]
+fn lipsum_differs_from_one_call_to_the_next() {
+    let t = templar();
+    let texts: BTreeSet<String> = (0..5)
+        .map(|_| {
+            t.render("{{ lipsum(1, false, 40, 100) }}", &Map::new())
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    assert!(texts.len() > 1, "{texts:?}");
+}

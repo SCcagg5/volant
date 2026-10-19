@@ -364,10 +364,10 @@ mod unit {
     #[test]
     fn a_method_nobody_knows_names_itself() {
         let err = templar()
-            .render("{{ 'x'.casefold() }}", &Map::new())
+            .render("{{ 'x'.encode() }}", &Map::new())
             .unwrap_err();
         assert!(
-            err.0.contains("method casefold is not available yet"),
+            err.0.contains("method encode is not available yet"),
             "{err}"
         );
     }

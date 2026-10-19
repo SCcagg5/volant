@@ -13,10 +13,19 @@ use serde_json::Value;
 
 use crate::bridge::Bridge;
 
+use super::clock::DateTime;
+use super::context::Context;
 use super::filters;
 use super::globals;
+use super::pymethods::mutable::{
+    MutDict, MutList, is_literal, is_mutable, key, mutable, snapshot_answer,
+};
+use super::pymethods::percent;
 use super::vm::{concat, note_emit};
-use super::{ATTR_KEY, CONCAT_KEY, ITEM_KEY};
+use super::{
+    ATTR_KEY, CONCAT_KEY, CONST_KEY, CONTEXT_KEY, ITEM_KEY, MATTR_KEY, MITEM_KEY, MKLIST_KEY,
+    MKMAP_KEY, REM_KEY, REMT_KEY, VAR_KEY,
+};
 
 /// The engine's environment: minijinja's, strict about undefined values, with every filter,
 /// test and lookup of the engine; the lookups the engine lacks go to `bridge`.
@@ -51,12 +60,38 @@ pub(super) fn environment(base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) -> En
     env.add_function("cycler", globals::cycler);
     env.add_function("joiner", minijinja_contrib::globals::joiner);
     env.add_function("undef", globals::undef);
+    env.add_function("now", super::clock::now);
+    env.add_function("lipsum", super::lipsum::lipsum);
     env.add_function(ITEM_KEY, chained_item);
+    env.add_function(MITEM_KEY, mutable_item);
+    env.add_function(MKLIST_KEY, |items: Rest<minijinja::Value>| {
+        MutList::from_items(items.0)
+    });
+    env.add_function(
+        MKMAP_KEY,
+        |pairs: Rest<minijinja::Value>| -> Result<minijinja::Value, minijinja::Error> {
+            let mut entries = indexmap::IndexMap::new();
+            for pair in pairs.chunks(2) {
+                entries.insert(key(&pair[0])?, pair[1].clone());
+            }
+            Ok(MutDict::from_entries(entries))
+        },
+    );
+    env.add_function(REM_KEY, |l: minijinja::Value, r: minijinja::Value| {
+        percent(&l, &r, false)
+    });
+    env.add_function(REMT_KEY, |l: minijinja::Value, r: minijinja::Value| {
+        percent(&l, &r, true)
+    });
     env
 }
 
-/// Python's `repr` of a list or mapping, `None` for any other value.
+/// Python's `repr` of a list or mapping, and `str` of a `datetime`, which has two forms; `None`
+/// for any other value.
 pub(super) fn container_repr(value: &minijinja::Value) -> Option<String> {
+    if let Some(moment) = value.downcast_object_ref::<DateTime>() {
+        return Some(moment.python_str());
+    }
     if let Some(range) = value.downcast_object_ref::<Range>() {
         return Some(range.to_string());
     }
@@ -95,10 +130,41 @@ fn chained_item(
 }
 
 /// The function name an attribute lookup is routed through: `ATTR_KEY` then the attribute.
-/// Leaked once per distinct name, because compiled code holds names for as long as it lives.
-pub(super) fn attr_call(name: &str) -> &'static str {
+pub(super) fn attr_call(name: &str, mutable: bool) -> &'static str {
+    routed(if mutable { MATTR_KEY } else { ATTR_KEY }, name)
+}
+
+/// The function name a variable read is routed through in a template that changes values in
+/// place: `VAR_KEY` then the name.
+pub(super) fn var_call(name: &str) -> &'static str {
+    routed(VAR_KEY, name)
+}
+
+/// The function name a list or mapping constant is routed through, or `None` when the constant is
+/// not one that JSON carries back unchanged (a mapping with a key that is not a string).
+pub(super) fn const_call(value: &minijinja::Value) -> Option<&'static str> {
+    if !is_literal(value) {
+        return None;
+    }
+    Some(routed(CONST_KEY, &serde_json::to_string(value).ok()?))
+}
+
+/// What a constant routed by [`const_call`] answers: a new mutable list or mapping.
+pub(super) fn fresh_const(json: &str) -> Option<minijinja::Value> {
+    let parsed: Value = serde_json::from_str(json).ok()?;
+    Some(minijinja::Value::from_function(
+        move || -> minijinja::Value {
+            let plain = minijinja::Value::from_serialize(&parsed);
+            mutable(&plain).unwrap_or(plain)
+        },
+    ))
+}
+
+/// `prefix` and `name` as one name. Leaked once per distinct name, because compiled code holds
+/// names for as long as it lives.
+fn routed(prefix: &str, name: &str) -> &'static str {
     static NAMES: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
-    let full = format!("{ATTR_KEY}{name}");
+    let full = format!("{prefix}{name}");
     let mut names = NAMES.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(known) = names.get(full.as_str()) {
         return known;
@@ -106,6 +172,57 @@ pub(super) fn attr_call(name: &str) -> &'static str {
     let leaked: &'static str = Box::leak(full.into_boxed_str());
     names.insert(leaked);
     leaked
+}
+
+/// The render's root context, which keeps the mutable form of each plain value it handed out.
+fn root(state: &State) -> Option<minijinja::Value> {
+    state.lookup(CONTEXT_KEY)
+}
+
+/// The mutable form of a value a template read from a name, an attribute or an item.
+pub(super) fn made_mutable(state: &State, value: minijinja::Value) -> minijinja::Value {
+    root(state)
+        .and_then(|ctx| {
+            ctx.downcast_object_ref::<Context>()
+                .map(|ctx| ctx.mutable_read(value.clone()))
+        })
+        .unwrap_or(value)
+}
+
+/// `chained_attr`, for a template that changes values in place.
+pub(super) fn mutable_attr(name: String) -> minijinja::Value {
+    minijinja::Value::from_function(
+        move |state: &State,
+              parent: minijinja::Value|
+              -> Result<minijinja::Value, minijinja::Error> {
+            if parent.is_undefined() {
+                return Ok(minijinja::Value::UNDEFINED);
+            }
+            Ok(made_mutable(state, parent.get_attr(&name)?))
+        },
+    )
+}
+
+/// A variable read, for a template that changes values in place.
+pub(super) fn mutable_var(name: String) -> minijinja::Value {
+    minijinja::Value::from_function(move |state: &State| -> minijinja::Value {
+        made_mutable(
+            state,
+            state.lookup(&name).unwrap_or(minijinja::Value::UNDEFINED),
+        )
+    })
+}
+
+/// `chained_item`, for a template that changes values in place.
+fn mutable_item(
+    state: &State,
+    parent: minijinja::Value,
+    key: minijinja::Value,
+) -> Result<minijinja::Value, minijinja::Error> {
+    if parent.is_undefined() {
+        return Ok(minijinja::Value::UNDEFINED);
+    }
+    Ok(made_mutable(state, parent.get_item(&key)?))
 }
 
 pub(super) fn type_name(v: &Value) -> &'static str {
@@ -195,7 +312,14 @@ where
         if any_undefined(&args[..checked.min(args.len())]) {
             return Ok(minijinja::Value::UNDEFINED);
         }
-        f.call(state, &args)
+        let answer = f.call(state, &args)?;
+        // ansible-core hands back a copy of what a filter answers, so a list changed in place
+        // does not change through what a filter made of it.
+        Ok(if args.iter().any(is_mutable) {
+            snapshot_answer(&answer)
+        } else {
+            answer
+        })
     }
 }
 

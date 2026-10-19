@@ -81,19 +81,7 @@ fn py_float(f: f64) -> String {
     if f.is_infinite() {
         return if f > 0.0 { ".inf" } else { "-.inf" }.into();
     }
-    let sci = format!("{f:e}");
-    let (mantissa, exp) = sci.split_once('e').expect("exponent form");
-    let exp: i32 = exp.parse().expect("exponent");
-    let text = if (-4..16).contains(&exp) {
-        let s = f.to_string();
-        if s.contains('.') { s } else { format!("{s}.0") }
-    } else {
-        format!(
-            "{mantissa}e{}{:02}",
-            if exp < 0 { '-' } else { '+' },
-            exp.abs()
-        )
-    };
+    let text = crate::template::pymethods::format::float::repr(f);
     if !text.contains('.') && text.contains('e') {
         text.replacen('e', ".0e", 1)
     } else {
