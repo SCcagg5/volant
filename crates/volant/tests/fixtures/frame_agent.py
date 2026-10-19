@@ -39,8 +39,9 @@ def hostile(batch):
         result(batch, b'{"changed":false,"rc":0,"stdout":"' + b"\\n" * n + b'","stderr":""}')
     elif frame == "depth":
         result(batch, b'{"changed":false,"x":' + b"[" * n + b"]" * n + b"}")
-    elif frame == "log":
-        write(b'{"type":"log","level":"info","message":"' + b"x" * n + b'"}')
+    elif frame in ("log", "logjunk"):
+        junk = b'"index":"x",' if frame == "logjunk" else b""
+        write(b'{"type":"log",' + junk + b'"level":"info","message":"' + b"x" * n + b'"}')
         send({"type": "task_result", "batch": batch, "index": 0, "result": {"changed": False, "rc": 0}})
     elif frame == "stdout":
         # n bytes of ordinary lines, 50 bytes each.
@@ -67,7 +68,7 @@ while True:
               "interpreters": ["/usr/bin/python3"], "natives": []})
     elif kind == "run_batch":
         for i, task in enumerate(msg["tasks"]):
-            if task["args"].get("_raw_params") == "bad":
+            if task["args"].get("_raw_params", "").startswith("bad"):
                 hostile(msg["id"])
             else:
                 send({"type": "task_result", "batch": msg["id"], "index": i,

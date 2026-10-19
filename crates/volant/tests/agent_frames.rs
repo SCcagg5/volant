@@ -119,6 +119,12 @@ const BAD_TASK: &str = "    - command: \"{{ inventory_hostname }}\"\n";
     4,
     "log message of 2000042 bytes, over the 1048576 byte limit"
 )]
+#[case::a_long_log_line_with_a_junk_field(
+    "logjunk",
+    60_000_000,
+    4,
+    "message of 60000055 bytes, over the 1048576 byte limit"
+)]
 fn a_frame_over_a_limit_fails_its_host_alone(
     #[case] frame: &str,
     #[case] n: u64,
