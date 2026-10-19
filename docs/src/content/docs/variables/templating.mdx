@@ -72,7 +72,33 @@ Every filter, test and lookup in this list also answers under its `ansible.built
 
 `first_found`, `fileglob` and `template` look for files along `ansible_search_path`. In a role's task that is the role's directory, the directory of the task's file, then the playbook's directory. Outside a role it is the playbook's directory. `role_path` is set in a role's task and is undefined outside one. `fileglob` tries a relative pattern under `files/` of each entry, then in the entry itself, and the first entry with a match wins. It returns files only, sorted, and a single match comes back as a string. Each one is checked against ansible-core in the golden test corpus under `crates/volant/tests/golden`.
 
-A value also answers a handful of Python methods: `.split()`, `.startswith()` and `.find()` on a string, `.keys()` on a mapping, and the others that `minijinja-contrib`'s Python compatibility layer provides. A method neither that layer nor the engine knows fails with its own name rather than silently doing nothing.
+## Python methods
+
+A template can call the methods Python gives to its values, as it can in ansible-core. A method that Volant does not run fails with its own name, so nothing is skipped without a message.
+
+These `str` methods run, with the arguments and keywords Python takes and Python's wording for a wrong call (`must be str or None, not int`, `substring not found`):
+
+| Group | Methods |
+|---|---|
+| Cut and join | `split`, `rsplit`, `splitlines`, `partition`, `rpartition`, `join`, `expandtabs` |
+| Trim and pad | `strip`, `lstrip`, `rstrip`, `removeprefix`, `removesuffix`, `center`, `ljust`, `rjust`, `zfill` |
+| Search | `find`, `rfind`, `index`, `rindex`, `count`, `startswith`, `endswith`, `replace` |
+| Case | `upper`, `lower`, `title`, `capitalize`, `swapcase`, `casefold` |
+| Test | `isalpha`, `isalnum`, `isdigit`, `isdecimal`, `isnumeric`, `isspace`, `islower`, `isupper`, `istitle`, `isascii`, `isidentifier`, `isprintable` |
+| Other | `format`, `format_map`, `translate`, `maketrans` |
+
+Positions count characters, not bytes, and `start` and `end` take negative values. `split(maxsplit=1)` and the other keyword forms work. `startswith` and `endswith` take a text or a tuple of texts. A list is accepted as a tuple, because Volant's Jinja has no tuple type.
+
+What differs from CPython:
+
+- `casefold` is lower case plus `ß` to `ss`. It is not the full Unicode case folding.
+- `isdigit`, `isalpha` and the other tests outside ASCII follow Rust's Unicode tables. `'½'.isdigit()` is true here and false in Python.
+- A format field can read an item (`{0[a]}`, `{a[0]}`) but not an attribute (`{0.real}`).
+- A width, a count or a precision that would make a method build more than 256 MiB of text (`'a'.ljust(10000000000)`, `'{:.300000000f}'.format(x)`) stops the task with an error that names the limit. Python builds the text until the machine runs out of memory. A number too large for an index gives Python's own error, `Python int too large to convert to C ssize_t`.
+- `encode` and `decode` are not available, because Volant has no bytes values.
+- A backslash escape such as `'\n'` inside a template string is read by the template engine. ansible-core 2.19 keeps the two characters. Pass a value in a variable when the text must hold a real newline.
+
+`.keys()`, `.values()`, `.items()` and `.get()` on a mapping and `.count()` on a list come from `minijinja-contrib`'s Python compatibility layer.
 
 `difference`, `intersect` and `union` build a Python `set` in ansible-core, whose order is its own: small integers happen to come out sorted, and strings come out in an order that changes with `PYTHONHASHSEED` from one run to the next. Volant sorts the result when every element is an integer, which matches every integer case measured, and otherwise keeps the order in which the elements first appeared. On strings, that order is not guaranteed to match a given run of ansible-core.
 

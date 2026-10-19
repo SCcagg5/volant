@@ -69,7 +69,7 @@ A path a lookup found on the controller is the playbook's own content; an item b
 - `retries` is the number of retries after the first attempt, not the total: the task runs up to `retries + 1` times. It is 3 when only `until` is written, for up to four runs.
 - A `retries` below 1 turns retrying off: the task runs once and its result has no `attempts`.
 - Volant waits `delay` seconds, 5 by default, after each of the first `retries` failed runs, never after the last one.
-- The result carries the number of retries actually run under `attempts`, at most `retries`. A task that runs out of retries has failed, even if the module itself succeeded.
+- The result carries the number of retries actually run under `attempts`, at most `retries`. A task that runs out of retries has failed, even if the module itself succeeded. With a `failed_when`, its result on the last run decides instead: `failed_when: false` lets the task pass, and the registered result still says `failed: true`.
 - `retries` without `until` repeats the task while its result is failed.
 - A task backed by an action plugin (`copy`, `dnf`, `package`...) retries its whole sequence of sub-tasks from the start on each attempt, with a fresh plugin and any file sent again; `until` reads only the last sub-task's result.
 

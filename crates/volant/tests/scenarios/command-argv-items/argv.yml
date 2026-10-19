@@ -1,0 +1,60 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    n: 16
+    f: 1.5
+    flag: true
+    nothing: ~
+    items: [1, 2]
+  tasks:
+    - name: scalars
+      command:
+        argv: [/bin/echo, 17, -3, 1.5, 0.00001, 1.0e+16, true, no, ~]
+      register: scalars
+    - debug:
+        var: scalars.cmd
+    - name: templates
+      command:
+        argv: [/bin/echo, "{{ n }}", "{{ n + 1 }}", "{{ f }}", "{{ flag }}", "{{ nothing }}", "{{ items | length }}", "{{ items }}"]
+      register: templated
+    - debug:
+        var: templated.cmd
+    - name: structures
+      command:
+        argv: [/bin/echo, [x, 1, true, ~], {k: [v, 2.5, {z: ~}]}, ["it's", 'say "hi"', "a'b\"c"]]
+      register: structures
+    - debug:
+        var: structures.stdout
+    - name: shell with argv
+      shell:
+        argv: [/bin/echo, 5, false]
+      register: shell_argv
+    - debug:
+        var: shell_argv.cmd
+    - name: argv as a string
+      command:
+        argv: "/bin/echo,a,b"
+      register: split
+    - debug:
+        var: split.cmd
+    - name: argv as a number
+      command:
+        argv: 5
+      register: number
+      ignore_errors: true
+    - debug:
+        var: number.cmd
+    - name: argv as a mapping
+      command:
+        argv: {a: b}
+      register: mapping
+      ignore_errors: true
+    - debug:
+        var: mapping.msg
+    - name: the program is an integer
+      command:
+        argv: [17, a]
+      register: program
+      ignore_errors: true
+    - debug:
+        var: program.cmd
