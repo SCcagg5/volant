@@ -1,7 +1,0 @@
-- hosts: h1
-  gather_facts: false
-  tasks:
-    - name: a public include_role
-      include_role:
-        name: base
-        public: true

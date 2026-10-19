@@ -1,0 +1,7 @@
+# The controller answers in hostvars under its three names whether the inventory lists it or not,
+# and a loop over hostvars lists only what the inventory holds. No modes: nothing here touches a host.
+runs:
+  - args: [-i, none.ini, play.yml]
+  - args: [-i, in_group.ini, play.yml]
+  - args: [-i, aliased.ini, play.yml]
+  - args: [-i, loopback.ini, play.yml]

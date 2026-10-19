@@ -120,6 +120,26 @@
   vars: {v: True}
 - template: "{{ v }}"
   vars: {v: False}
+# Aliases, tags and plain scalars as PyYAML reads them, through `from_yaml`, which loads its text
+# with PyYAML's own loader. A date prints as `to_json` prints it: the value model has no date.
+# `from_yaml` knows neither `!unsafe` nor `!vault`: the vars loader's rows are in the scenarios.
+- {template: "{{ s | from_yaml }}", vars: {s: "a: &n 5\nb: *n"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: &n yes\nb: [*n, *n]"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: &k key\nm: {*k : 1}"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: &n 010\nb: *n"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: &n \"5\"\nb: *n"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: &n |\n  x\n  y\nb: *n"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !!str 5"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !!int \"5\""}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !!float 5"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !!bool \"yes\""}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !!null x"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: [1:30, 190:20:30, 1:30.5]"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: [+.5, -.5, .5, 5., 1.e+3]"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: [010, 08, 0o10, 0x1F, 1_000, 1e3, 1.0e+3]"}}
+- {template: "{{ s | from_yaml | to_json }}", vars: {s: "a: [2020-01-02, 2020-1-2, 2020-01-02 10:11:12, 2020-01-02T10:11:12Z, 2020-01-02t10:11:12.5+01:00]"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !custom x"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !!int abc"}}
 # Ansible filters
 - template: "{{ missing | default('fallback') }}"
 - template: "{{ empty | default('fallback') }}"
@@ -493,3 +513,177 @@
 - template: "{% macro q(a) %}m{{ a }}{% endmacro %}{{ q(1) }}"
 - template: "{% macro query(a) %}m{{ a }}{% endmacro %}{{ query(2) }}"
 - template: "{{ lookup('varnames', '[', wantlist=True) }}"
+# `dict()` in every form Python's constructor takes. The errors are the reference's own.
+- template: "{{ dict() }}"
+- template: "{{ dict(M) }}"
+  vars: {M: {a: 1, b: 2}}
+- template: "{{ dict(a=1, b=2) }}"
+- template: "{{ dict(M, c=3) }}"
+  vars: {M: {a: 1, b: 2}}
+- template: "{{ dict(M, a=3) }}"
+  vars: {M: {a: 1, b: 2}}
+- template: "{{ dict(P) }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P) }}"
+  vars: {P: []}
+- template: "{{ dict(P | list) }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P, a=3) }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[a, 1], [a, 2]]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[a, [1, 2]], [b, {c: d}]]}
+- template: "{{ dict(K | zip(V)) }}"
+  vars: {K: [a, b], V: [1, 2]}
+- template: "{{ dict(K | zip(V)) }}"
+  vars: {K: [a, b, c], V: [1, 2]}
+- template: "{{ dict(K | zip(V) | list) }}"
+  vars: {K: [a, b], V: [1, 2]}
+- template: "{{ dict(M.items()) }}"
+  vars: {M: {a: 1, b: 2}}
+- template: "{{ dict(M | dict2items | map(attribute='key') | zip(M | dict2items | map(attribute='value'))) }}"
+  vars: {M: {a: 1, b: 2}}
+- template: "{{ dict(P | map('reverse')) }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P | batch(2)) }}"
+  vars: {P: [a, 1, b, 2]}
+- template: "{{ dict([['a', 1], ['b', 2]]) }}"
+- template: "{{ dict(['ab', 'cd']) }}"
+- template: "{{ dict(P) }}"
+  vars: {P: [{a: 1, b: 2}]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[1, 2], [true, 4]]}
+- template: "{{ dict(P) | dict2items }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P) | combine({'z': 1}) }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P)['b'] }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P) is mapping }}"
+  vars: {P: [[a, 1]]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[a, 1, 2]]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[a]]}
+- template: "{{ dict(P) }}"
+  vars: {P: [a]}
+- template: "{{ dict(P) }}"
+  vars: {P: [1]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[[1, 2], 3]]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[{a: 1}, 3]]}
+- template: "{{ dict(P) }}"
+  vars: {P: abcd}
+- template: "{{ dict(P) }}"
+  vars: {P: 5}
+- template: "{{ dict(P) }}"
+  vars: {P: null}
+- template: "{{ dict(P) }}"
+  vars: {P: true}
+- template: "{{ dict(P, P) }}"
+  vars: {P: []}
+- template: "{{ dict(1, 2) }}"
+- template: "{{ dict(nope) }}"
+- template: "{{ dict(a=nope) }}"
+# `cycler`, `joiner` and `undef`, the Jinja globals a template may call.
+- template: "{% set c = cycler('a', 'b') %}{{ c.next() }}{{ c.next() }}{{ c.next() }}"
+- template: "{% set c = cycler('a', 'b') %}{{ c.current }}{{ c.next() }}{{ c.current }}"
+- template: "{% set c = cycler(1, 2, 3) %}{{ c.next() }}{{ c.next() }}{{ c.reset() }}{{ c.next() }}"
+- template: "{% set c = cycler(*items) %}{% for i in range(5) %}{{ c.next() }}{% endfor %}"
+  vars: {items: [x, y]}
+- template: "{% set c = cycler('a', 'b') %}{% for i in range(4) %}{{ c.next() }}{% endfor %}"
+- template: "{{ cycler() }}"
+- template: "{% set j = joiner(',') %}{{ j() }}a{{ j() }}b{{ j() }}c"
+- template: "{% set j = joiner() %}{{ j() }}a{{ j() }}b"
+- template: "{% set j = joiner(' | ') %}{% for i in range(3) %}{{ j() }}{{ i }}{% endfor %}"
+- template: "{{ undef() }}"
+- template: "{{ undef(hint='x is needed') }}"
+- template: "{{ undef() | default('d') }}"
+- template: "{{ undef() is defined }}"
+- template: "{{ x }}"
+  vars: {x: "{{ undef(hint='x is needed') }}"}
+# Integers beyond 64 bits stay apart as keys; a mapping read through `dict` is still the mapping.
+- template: "{{ dict([[9223372036854775808, 'a'], [9223372036854775809, 'b']]) | length }}"
+- template: "{{ dict([[18446744073709551616, 'a'], [18446744073709551617, 'b']]) | length }}"
+- template: "{{ dict([[1, 'a'], [1.0, 'b'], [true, 'c'], [9223372036854775808, 'd']]) | length }}"
+- template: "{{ dict(vars) | length }}"
+  vars: {bad: "{{ nope }}"}
+# A merge key (`<<`) puts the merged pairs first and the explicit keys after them. An explicit key
+# takes the value of a merged key and keeps its place; in a list, an earlier mapping beats a later one.
+- template: "{{ d | to_json }}"
+  vars: {base: &base {a: 1, b: 2}, d: {z: 0, <<: *base, b: 9}}
+- template: "{{ d | to_json }}"
+  vars: {x: &x {k: x, only_x: 1}, y: &y {k: y, only_y: 2}, d: {<<: [*x, *y], own: 3}}
+- template: "{{ d | to_json }}"
+  vars: {inner: &inner {p: 1}, outer: &outer {<<: *inner, q: 2}, d: {<<: *outer, r: 3}}
+- template: "{{ d | to_json }}"
+  vars: {d: {a: 1, <<: {a: 2, b: 3}, <<: {b: 4}}}
+- template: "{{ d | to_json }}"
+  vars: {d: {'<<': {a: 1}, c: 2}}
+- template: "{{ d | to_json }}"
+  vars: {d: {<<: [], <<: {}, a: 1}}
+# A raw block writes text: it is rendered once, however it is read afterwards.
+- template: "{% raw %}{{ x }}{% endraw %}"
+  vars: {x: 5}
+- template: "a{% raw %}{{ x }}{% endraw %}b{{ x }}"
+  vars: {x: 5}
+- template: "{%- raw -%} {{ x }} {%- endraw -%}"
+  vars: {x: 5}
+- template: "{% raw %}{% if x %}{% endraw %}"
+  vars: {x: 5}
+- template: "{{ y }}"
+  vars: {x: 5, y: "{% raw %}{{ x }}{% endraw %}"}
+- template: "{{ z }}"
+  vars: {x: 5, y: "{% raw %}{{ x }}{% endraw %}", z: "{{ y }}"}
+- template: "{{ '{{' }} x {{ '}}' }}"
+  vars: {x: 5}
+- template: "{{ ['{% raw %}{{ x }}{% endraw %}'] }}"
+  vars: {x: 5}
+- template: "{{ r }}|{% raw %}{{ r }}{% endraw %}"
+  untrusted: {r: "{% raw %}{{ x }}{% endraw %}{{ x }}"}
+  vars: {x: 5}
+# A variable whose value is a template is rendered when a template reads it, so a filter or an
+# operator sees the final value.
+- template: "{{ s }}"
+  vars: {c: 7, b: "{{ c }}", s: "{{ b | int + 1 }}"}
+- template: "{{ b | int }}"
+  vars: {c: 7, b: "{{ c }}"}
+- template: "{{ d3 }}"
+  vars: {c: 7, d1: "{{ c }}", d2: "{{ d1 }}", d3: "{{ d2 | int * 2 }}"}
+- template: "{{ url | length }}|{{ url | regex_replace('example', 'zz') }}|{{ url | b64encode }}"
+  vars: {host: example.org, url: "http://{{ host }}:8080/x"}
+- template: "{{ l | map('upper') | list }}"
+  vars: {host: example.org, l: ["{{ host }}"]}
+- template: "{{ d.k | int + d.n.m | int }}"
+  vars: {c: 7, d: {k: "{{ c }}", n: {m: "{{ c }}"}}}
+- template: "{{ e.k | int + 1 }}"
+  vars: {c: 7, d: {k: "{{ c }}"}, e: "{{ d }}"}
+- template: "{{ d.ok }}"
+  vars: {d: {bad: "{{ missing }}", ok: 1}}
+- when: "cond"
+  vars: {port_s: "{{ 8080 }}", cond: "{{ port_s | int > 8000 }}"}
+- template: "{{ u | default('dflt') }}"
+  vars: {u: "{{ missing }}"}
+- template: "{{ u is defined }}"
+  vars: {u: "{{ missing }}"}
+- template: "{{ u }}"
+  vars: {u: "{{ missing }}"}
+- template: "{{ u | upper }}"
+  vars: {u: "{{ v }}", v: "{{ missing }}"}
+- template: "{{ a }}"
+  vars: {a: "{{ a }}"}
+- template: "{{ a }}"
+  vars: {a: "{{ b }}", b: "{{ a }}"}
+- template: "{{ a | default('x') }}"
+  vars: {a: "{{ a | default('x') }}"}
+- template: "{{ a | default('x') }}"
+  vars: {a: "{{ 1 | nosuchfilter }}"}
+# What came from a host stays text through a variable that reads it.
+- template: "{{ d | length }}|{{ d | upper }}|{{ (d | length) ~ (d | upper) }}"
+  vars: {c: 7, d: "{{ reg }}"}
+  untrusted: {reg: "{{ c }}"}
+- template: "{{ e | length }}|{{ e }}"
+  vars: {c: 7, d: "{{ reg }}", e: "{{ d | upper }}"}
+  untrusted: {reg: "{{ c }}"}

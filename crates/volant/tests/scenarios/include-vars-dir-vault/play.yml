@@ -1,0 +1,24 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: a directory with vaulted files, a plain one and a text file
+      include_vars: {dir: secrets, ignore_unknown_extensions: true}
+      register: r
+    - debug: var=r.ansible_included_var_files
+    - debug: msg="{{ token }} {{ deep_token }} {{ nested.key }} {{ public }}"
+
+    - name: the same under a name
+      include_vars: {dir: secrets, ignore_unknown_extensions: true, name: held}
+      register: r
+      ignore_errors: true
+    - debug: var=held.nested
+
+    - name: a directory without any vaulted file is shown
+      include_vars: {dir: plain}
+
+    - name: a loop over both censors the item that read a vaulted file
+      include_vars: {dir: "{{ item }}", ignore_unknown_extensions: true}
+      loop: [secrets, plain]
+
+    - name: files_matching can leave the vaulted files out
+      include_vars: {dir: secrets, ignore_unknown_extensions: true, files_matching: plain}

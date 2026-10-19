@@ -8,14 +8,17 @@ use std::time::Duration;
 
 use crate::executor::DEFAULT_CONNECT_TIMEOUT;
 
+mod locate;
 mod parse;
 mod paths;
 mod settings;
 
+pub(crate) use locate::is_world_writable;
 use parse::parse;
 use paths::{default_collections_path, default_roles_path, expand_home, path_list};
 use settings::{
-    boolean, cache_plugin, forks, gathering, integer, runtime_mode, switch, timeout_secs,
+    boolean, cache_plugin, forks, gathering, host_named_paths, integer, runtime_mode, switch,
+    timeout_secs,
 };
 
 /// Ansible's own default for `remote_tmp`, where the agent is cached on a host.
@@ -37,6 +40,38 @@ pub(crate) fn configured_async_dir() -> Option<String> {
 /// Ansible's own defaults for `[privilege_escalation]`.
 pub const DEFAULT_BECOME_USER: &str = "root";
 pub const DEFAULT_BECOME_METHOD: &str = "sudo";
+
+/// `[volant] host_named_paths`: what a `template`, `copy`, `script`, `unarchive` or `assemble`
+/// task does with a controller `src` that a managed host named, through a gathered fact or a
+/// registered result.
+///
+/// Measured on ansible-core 2.19.12: the reference reads whatever readable controller file such a
+/// name points at and sends it, or its rendering, to the host. `Allow` does the same. The two
+/// other modes tighten it. A `fetch` whose `dest` a host named is refused in every mode: that is
+/// a write on the controller, which no mode lets a host steer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HostNamedPaths {
+    /// The reference's behaviour: the file is looked up and sent.
+    #[default]
+    Allow,
+    /// The file is sent only when its path stays inside the directories where the author keeps
+    /// the files of the task: the playbook's, the role's and the ones the reference searches.
+    Contained,
+    /// The name is refused before any path is looked up.
+    Refuse,
+}
+
+impl HostNamedPaths {
+    /// The mode a word names.
+    pub fn parse(word: &str) -> Option<Self> {
+        match word {
+            "allow" => Some(Self::Allow),
+            "contained" => Some(Self::Contained),
+            "refuse" => Some(Self::Refuse),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -68,6 +103,10 @@ pub struct Config {
     /// 2.19.12: `[defaults] force_handlers = True` and `--force-handlers` give the same run, down
     /// to the recap.
     pub force_handlers: bool,
+    /// `[defaults] localhost_warning` or `ANSIBLE_LOCALHOST_WARNING`: warn when the inventory
+    /// holds no host and only the implicit `localhost` is left. On by default, as in the
+    /// reference.
+    pub localhost_warning: bool,
     /// `[defaults] show_custom_stats` or `ANSIBLE_SHOW_CUSTOM_STATS`: print what `set_stats`
     /// collected after the recap. Off by default, as in the reference.
     pub show_custom_stats: bool,
@@ -104,6 +143,10 @@ pub struct Config {
     /// engines. `ansible-config validate` is the one exception - it answers `Found unknown
     /// section 'volant'` and exits 1.
     pub batching: bool,
+    /// `[volant] host_named_paths`, or `VOLANT_HOST_NAMED_PATHS`: `allow` (the default, as the
+    /// reference does), `contained` or `refuse`. Not a playbook keyword, for the reason
+    /// `batching` is not one.
+    pub host_named_paths: HostNamedPaths,
     /// `[volant] native_modules`, or `VOLANT_NATIVE_MODULES`: whether an agent may answer a task
     /// with its native module instead of running the task's Python module. On by default; off
     /// sends every Python task to Python, which is the switch to compare the two.
@@ -146,6 +189,7 @@ impl Default for Config {
             vault_password_file: None,
             vault_identity_list: Vec::new(),
             force_handlers: false,
+            localhost_warning: true,
             show_custom_stats: false,
             enable_task_debugger: false,
             roles_path: default_roles_path(),
@@ -153,6 +197,7 @@ impl Default for Config {
             tags_run: Vec::new(),
             tags_skip: Vec::new(),
             batching: false,
+            host_named_paths: HostNamedPaths::Allow,
             native_modules: true,
             runtime: crate::runtime::Mode::Auto,
             ssh_control_master: true,
@@ -186,7 +231,11 @@ impl Config {
     /// cannot open is worth a line, and a warning changes no exit code.
     #[expect(clippy::too_many_lines)]
     pub fn load() -> anyhow::Result<Config> {
-        let mut config = match locate() {
+        let located = locate::current();
+        if located.skipped {
+            locate::warn_once();
+        }
+        let mut config = match located.path {
             Some(path) => match std::fs::read_to_string(&path) {
                 Ok(text) => parse(
                     &text,
@@ -285,6 +334,10 @@ impl Config {
         {
             config.force_handlers = on;
         }
+        if let Ok(flag) = std::env::var("ANSIBLE_LOCALHOST_WARNING") {
+            config.localhost_warning =
+                boolean("LOCALHOST_WARNING", "env: ANSIBLE_LOCALHOST_WARNING", &flag)?;
+        }
         if let Ok(flag) = std::env::var("ANSIBLE_SHOW_CUSTOM_STATS")
             && let Some(on) = crate::yaml::bool_from_str(flag.trim())
         {
@@ -320,6 +373,9 @@ impl Config {
             && let Some(on) = switch(&value)
         {
             config.batching = on;
+        }
+        if let Ok(value) = std::env::var("VOLANT_HOST_NAMED_PATHS") {
+            config.host_named_paths = host_named_paths(&value, "env: VOLANT_HOST_NAMED_PATHS")?;
         }
         if let Ok(value) = std::env::var("VOLANT_NATIVE_MODULES") {
             config.native_modules = boolean(
@@ -415,18 +471,10 @@ pub(crate) fn task_debugger() -> bool {
     TASK_DEBUGGER.load(Ordering::Relaxed)
 }
 
-/// `ANSIBLE_CONFIG`, then `./ansible.cfg`, `~/.ansible.cfg`, `/etc/ansible/ansible.cfg`.
+/// `ANSIBLE_CONFIG`, then `./ansible.cfg` unless the working directory is world-writable,
+/// `~/.ansible.cfg`, `/etc/ansible/ansible.cfg`.
 pub(crate) fn locate() -> Option<PathBuf> {
-    if let Ok(explicit) = std::env::var("ANSIBLE_CONFIG") {
-        let p = PathBuf::from(explicit);
-        return p.is_file().then_some(p);
-    }
-    let mut candidates = vec![PathBuf::from("ansible.cfg")];
-    if let Ok(home) = std::env::var("HOME") {
-        candidates.push(PathBuf::from(home).join(".ansible.cfg"));
-    }
-    candidates.push(PathBuf::from("/etc/ansible/ansible.cfg"));
-    candidates.into_iter().find(|p| p.is_file())
+    locate::current().path
 }
 
 #[cfg(test)]

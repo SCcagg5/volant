@@ -5,7 +5,7 @@
 use saphyr::{Scalar, Yaml};
 use serde_json::Value;
 
-use super::yaml::{Dialect, falsy};
+use super::yaml::{Dialect, falsy, load_failure};
 use super::{Inventory, InventoryPlugin, PLUGINS, ParseCx, PluginError, Source};
 use crate::yaml;
 
@@ -117,17 +117,9 @@ fn with_root<R>(
 ) -> Result<R, PluginError> {
     let bytes = std::fs::read(source.path()).map_err(|e| failed(e.to_string()))?;
     let text = String::from_utf8(bytes).map_err(|e| failed(e.to_string()))?;
-    let docs = yaml::load(&text, source.text()).map_err(|e| failed(format!("{e:#}")))?;
+    let docs = yaml::load(&text, source.text()).map_err(|e| failed(load_failure(&e)))?;
     let null = Yaml::Value(Scalar::Null);
-    let root = match docs.as_slice() {
-        [] => &null,
-        [one] => one,
-        _ => {
-            return Err(failed(
-                "YAML parsing failed: Expected a single document in the stream but found \n                 another document."
-                    .to_string(),
-            ));
-        }
-    };
+    // `load` refuses a second document, so there is at most one.
+    let root = docs.first().unwrap_or(&null);
     read(root).map_err(failed)
 }

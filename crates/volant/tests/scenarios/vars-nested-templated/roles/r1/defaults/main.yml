@@ -1,0 +1,5 @@
+rdc: 11
+rdb: "{{ rdc }}"
+rds: "{{ rdb | int + 1 }}"
+rdurl: "http://{{ ghost }}/p"
+rdlen: "{{ rdurl | length }}"

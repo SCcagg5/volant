@@ -227,6 +227,7 @@ fn hostvars_answers_alike_from_a_map_a_view_or_a_bare_map() {
                 facts: None,
                 untrusted: None,
                 untrusted_hosts: None,
+                base: None,
             };
             assert_eq!(t.render(text, vars).unwrap(), want, "{text}");
         }
@@ -240,6 +241,41 @@ fn hostvars_answers_alike_from_a_map_a_view_or_a_bare_map() {
     }
 }
 
+/// `hostvars` answers for a controller spelling the inventory does not list, and an iteration,
+/// a length and `in` over the listed hosts leave it out, as in ansible-core 2.19.12.
+#[rstest::rstest]
+#[case::implicit_is_read_by_name("{{ hostvars['localhost'].inventory_hostname }}", json!("localhost"))]
+#[case::implicit_is_a_member("{{ 'localhost' in hostvars }}", json!(true))]
+#[case::another_spelling_is_a_member("{{ '::1' in hostvars }}", json!(true))]
+#[case::an_unknown_name_is_not("{{ 'nosuch' in hostvars }}", json!(false))]
+#[case::iteration_lists_the_inventory("{{ hostvars | list }}", json!(["h1"]))]
+#[case::length_counts_the_inventory("{{ hostvars | length }}", json!(1))]
+#[case::keys_list_the_inventory("{{ hostvars.keys() | list }}", json!(["h1"]))]
+fn hostvars_hides_the_unlisted_controller_from_iteration(
+    #[case] source: &str,
+    #[case] want: Value,
+) {
+    let t = templar();
+    let hosts = Arc::new(vars(json!({
+        "h1": {"inventory_hostname": "h1"},
+        "localhost": {"inventory_hostname": "localhost"},
+        "127.0.0.1": {"inventory_hostname": "localhost"},
+        "::1": {"inventory_hostname": "localhost"}
+    })));
+    let shared = Arc::new(vars(json!({"groups": {"all": ["h1"]}})));
+    let own = Map::new();
+    let vars = Vars {
+        map: &own,
+        hostvars: Some(&hosts),
+        shared: Some(&shared),
+        facts: None,
+        untrusted: None,
+        untrusted_hosts: None,
+        base: None,
+    };
+    assert_eq!(t.render(source, vars).unwrap(), want, "{source}");
+}
+
 /// The context hands out the shared view itself, builds it once, ranks inventory-wide names over
 /// a fact and lists a shared name once.
 #[test]
@@ -247,14 +283,18 @@ fn the_context_hands_out_the_shared_view_and_ranks_inventory_wide_names() {
     {
         let shared = Arc::new(vars(json!({"a": {"y": 1}, "b": {"y": 2}})));
         let empty = Map::new();
-        let (ctx, _) = context_of(Vars {
-            map: &empty,
-            hostvars: Some(&shared),
-            shared: None,
-            facts: None,
-            untrusted: None,
-            untrusted_hosts: None,
-        });
+        let (ctx, _) = context_of(
+            &templar(),
+            Vars {
+                map: &empty,
+                hostvars: Some(&shared),
+                shared: None,
+                facts: None,
+                untrusted: None,
+                untrusted_hosts: None,
+                base: None,
+            },
+        );
         let first = ctx
             .get_attr("hostvars")
             .expect("hostvars is in the context")
@@ -287,6 +327,7 @@ fn the_context_hands_out_the_shared_view_and_ranks_inventory_wide_names() {
             facts: None,
             untrusted: None,
             untrusted_hosts: None,
+            base: None,
         };
         assert_eq!(
             t.render("{{ groups['web'] }}", vars).unwrap(),
@@ -296,24 +337,45 @@ fn the_context_hands_out_the_shared_view_and_ranks_inventory_wide_names() {
         // and for nothing else.
         assert_eq!(t.render("{{ own }}", vars).unwrap(), json!(1));
     }
-    {
+    // The host's own names whole in its map, or split with the base a loop's items share: a
+    // name either layer holds is listed once.
+    for (own, base) in [
+        (
+            json!({"groups": "a set_fact wrote this", "own": 1}),
+            json!({}),
+        ),
+        (
+            json!({"own": 1}),
+            json!({"groups": "a set_fact wrote this"}),
+        ),
+        (
+            json!({}),
+            json!({"groups": "a set_fact wrote this", "own": 1}),
+        ),
+    ] {
         let shared = Arc::new(vars(json!({"groups": {"web": ["h1"]}})));
-        let fact = vars(json!({"groups": "a set_fact wrote this", "own": 1}));
-        let (ctx, _) = context_of(Vars {
-            map: &fact,
-            hostvars: None,
-            shared: Some(&shared),
-            facts: None,
-            untrusted: None,
-            untrusted_hosts: None,
-        });
+        let facts = Arc::new(vars(json!({"own": 2})));
+        let own = vars(own);
+        let base = Arc::new(vars(base));
+        let (ctx, _) = context_of(
+            &templar(),
+            Vars {
+                map: &own,
+                hostvars: None,
+                shared: Some(&shared),
+                facts: Some(&facts),
+                untrusted: None,
+                untrusted_hosts: None,
+                base: Some(&base),
+            },
+        );
         let mut names: Vec<String> = ctx
             .try_iter()
             .expect("the root context walks as a mapping")
             .map(|name| name.to_string())
             .collect();
         names.sort();
-        assert_eq!(names, ["groups", "own"]);
+        assert_eq!(names, ["groups", "own"], "{own:?} over {base:?}");
     }
 }
 
@@ -353,6 +415,7 @@ fn extract_reads_hostvars_by_host_name_and_taints_like_a_bare_read() {
                 facts: None,
                 untrusted: None,
                 untrusted_hosts: None,
+                base: None,
             };
             assert_eq!(t.render(loop_text, v).unwrap(), want, "{server_group}");
         }
@@ -371,6 +434,7 @@ fn extract_reads_hostvars_by_host_name_and_taints_like_a_bare_read() {
                 facts: None,
                 untrusted: None,
                 untrusted_hosts,
+                base: None,
             };
             for text in [
                 "{{ hostvars['h2'].x }}",
@@ -385,6 +449,46 @@ fn extract_reads_hostvars_by_host_name_and_taints_like_a_bare_read() {
         }
         assert!(wrong.is_empty(), "{wrong:#?}");
     }
+}
+
+/// A host name from a managed host taints a listing of `hostvars`, and a nested template of
+/// another host still renders.
+#[test]
+fn a_host_name_from_data_taints_the_hostvars_listing_only() {
+    let t = templar();
+    let view = Arc::new(vars(json!({
+        "{{ 1 + 1 }}": {},
+        "h2": {"x": "{{ 40 + 2 }}"},
+    })));
+    let empty = Map::new();
+    let hosts = BTreeSet::from(["{{ 1 + 1 }}".to_string()]);
+    let mut wrong = Vec::new();
+    for (keys_data, text, want) in [
+        (true, "{{ hostvars | list | first }}", json!("{{ 1 + 1 }}")),
+        (
+            true,
+            "{{ hostvars.keys() | list | first }}",
+            json!("{{ 1 + 1 }}"),
+        ),
+        (true, "{{ hostvars.h2.x }}", json!(42)),
+        (false, "{{ hostvars | list | first }}", json!(2)),
+    ] {
+        let untrusted = BTreeSet::from([HOSTVARS_KEYS.to_string()]);
+        let v = Vars {
+            map: &empty,
+            hostvars: Some(&view),
+            shared: None,
+            facts: None,
+            untrusted: keys_data.then_some(&untrusted),
+            untrusted_hosts: Some(&hosts),
+            base: None,
+        };
+        let got = t.render(text, v);
+        if got.as_ref() != Ok(&want) {
+            wrong.push(format!("{keys_data} {text} -> {got:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
 /// Conditions need a boolean and accept stray braces; a delimited one reads an author string
@@ -430,6 +534,7 @@ fn conditions_need_a_boolean_and_never_evaluate_a_host_string() {
             facts: None,
             untrusted: Some(&registered),
             untrusted_hosts: Some(&hosts),
+            base: None,
         };
         for text in [
             "{{ s.stdout }}",
@@ -906,4 +1011,501 @@ fn text_prints_containers_none_and_chained_undefined_as_the_reference_does() {
     }
     assert!(t.render("{{ nope.a }}", &v).is_err());
     assert!(t.render("x {{ d.no.sub }}", &v).is_err());
+}
+
+/// What `dict` says when it refuses, in CPython's words. The golden rows only record that the
+/// reference failed; these are the texts it printed.
+#[rstest::rstest]
+#[case::too_long(
+    "{{ dict([['a', 1, 2]]) }}",
+    "dictionary update sequence element #0 has length 3; 2 is required"
+)]
+#[case::too_short(
+    "{{ dict([['a']]) }}",
+    "dictionary update sequence element #0 has length 1; 2 is required"
+)]
+#[case::second_element(
+    "{{ dict([['a', 1], ['b']]) }}",
+    "dictionary update sequence element #1 has length 1; 2 is required"
+)]
+#[case::text(
+    "{{ dict('abcd') }}",
+    "dictionary update sequence element #0 has length 1; 2 is required"
+)]
+#[case::mapping_of_one_key(
+    "{{ dict([{'a': 1}]) }}",
+    "dictionary update sequence element #0 has length 1; 2 is required"
+)]
+#[case::element_not_a_sequence(
+    "{{ dict([1]) }}",
+    "cannot convert dictionary update sequence element #0 to a sequence"
+)]
+#[case::unhashable_list("{{ dict([[[1], 2]]) }}", "unhashable type: 'list'")]
+#[case::unhashable_mapping("{{ dict([[{'a': 1}, 2]]) }}", "unhashable type: 'dict'")]
+#[case::number("{{ dict(5) }}", "'int' object is not iterable")]
+#[case::float("{{ dict(1.5) }}", "'float' object is not iterable")]
+#[case::boolean("{{ dict(true) }}", "'bool' object is not iterable")]
+#[case::none("{{ dict(none) }}", "'NoneType' object is not iterable")]
+#[case::none_key(
+    "{{ dict([[none, 1]]) | to_json }}",
+    "a dict key of type 'NoneType' is not supported"
+)]
+#[case::fractional_key(
+    "{{ dict([[1.5, 1]]) }}",
+    "a dict key of type 'float' is not supported"
+)]
+#[case::infinite_key(
+    "{{ dict([[1e400, 1]]) }}",
+    "a dict key of type 'float' is not supported"
+)]
+#[case::endless_iterable(
+    "{{ dict(range(1000000000000)) }}",
+    "cannot convert dictionary update sequence element #0 to a sequence"
+)]
+#[case::endless_element(
+    "{{ dict([range(1000000000000)]) }}",
+    "dictionary update sequence element #0 has length 1000000000000; 2 is required"
+)]
+#[case::two_arguments("{{ dict([], []) }}", "dict expected at most 1 argument, got 2")]
+fn dict_refuses_in_the_words_of_python(#[case] text: &str, #[case] want: &str) {
+    let err = templar().render(text, &Map::new()).unwrap_err();
+    assert!(err.0.contains(want), "{text}: {err}");
+}
+
+#[test]
+fn dict_of_an_undefined_value_is_an_undefined_read() {
+    let t = templar();
+    assert!(
+        t.render("{{ dict(nope) }}", &Map::new())
+            .unwrap_err()
+            .is_undefined()
+    );
+    assert!(
+        t.render("{{ dict([nope]) }}", &Map::new())
+            .unwrap_err()
+            .is_undefined()
+    );
+}
+
+/// Integers beyond 64 bits are separate keys, and one that is the same number as another spelled
+/// differently is not: `1`, `1.0` and `true` are one key.
+#[test]
+fn dict_keeps_integer_keys_beyond_64_bits_apart() {
+    let t = templar();
+    let length = |text: &str| t.render(text, &Map::new()).unwrap();
+    assert_eq!(
+        length("{{ dict([[18446744073709551616, 'a'], [18446744073709551617, 'b']]) | length }}"),
+        json!(2)
+    );
+    assert_eq!(
+        length("{{ dict([[18446744073709551616, 'a'], [18446744073709551616, 'b']]) | length }}"),
+        json!(1)
+    );
+    assert_eq!(
+        length("{{ dict([[1, 'a'], [1.0, 'b'], [true, 'c']]) | length }}"),
+        json!(1)
+    );
+}
+
+/// An iterable longer than the limit is refused, and one at the limit is not.
+#[test]
+fn dict_takes_a_bounded_number_of_pairs_from_one_iterable() {
+    let pairs = |n: i64| -> minijinja::Value {
+        minijinja::Value::from_iter((0..n).map(|i| minijinja::Value::from_iter([i, i])))
+    };
+    let at_limit = globals::build(vec![pairs(3)], 3).unwrap();
+    assert_eq!(at_limit.len(), Some(3));
+    let err = globals::build(vec![pairs(4)], 3).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("dict() takes at most 3 pairs from one iterable"),
+        "{err}"
+    );
+}
+
+/// A `raw` block or a string constant writes text the reference renders once. Rows of
+/// `(template, result)`, rendered as written and then as the value of a variable.
+#[test]
+fn a_raw_block_is_emitted_once() {
+    let x = json!({"x": "val"});
+    let rows = [
+        ("{% raw %}{{ x }}{% endraw %}", "{{ x }}"),
+        ("a{% raw %}{{ x }}{% endraw %}b{{ x }}", "a{{ x }}bval"),
+        ("{%- raw -%} {{ x }} {%- endraw -%}", "{{ x }}"),
+        ("{% raw %}{% if x %}{% endraw %}", "{% if x %}"),
+        ("{% raw %}{# c #}{% endraw %}", "{# c #}"),
+        ("{{ '{{ x }}' }}", "{{ x }}"),
+        ("{{ '{{' }} x {{ '}}' }}", "{{ x }}"),
+    ];
+    for (text, want) in rows {
+        let t = templar();
+        let map = vars(x.clone());
+        assert_eq!(t.render(text, &map), Ok(json!(want)), "{text}");
+        assert_eq!(
+            t.render_value(&json!({"k": [text]}), &map),
+            Ok(json!({"k": [want]})),
+            "{text} in a mapping"
+        );
+        // A variable holding it, resolved once and then again, as every task and every loop item
+        // does with the map it is given.
+        let mut map = vars(json!({"x": "val", "v": text, "w": "{{ v }}"}));
+        let mut data = BTreeSet::new();
+        for pass in 0..3 {
+            let (resolved, untrusted) = t.resolve_vars_tainted(Vars {
+                untrusted: Some(&data),
+                ..Vars::from(&map)
+            });
+            map = resolved;
+            data = untrusted;
+            assert_eq!(map["v"], json!(want), "{text}, resolution {pass}");
+            assert_eq!(
+                t.render(
+                    "{{ v }}",
+                    Vars {
+                        untrusted: Some(&data),
+                        ..Vars::from(&map)
+                    }
+                ),
+                Ok(json!(want)),
+                "{text} read through a variable, resolution {pass}"
+            );
+        }
+        assert_eq!(map["w"], json!(want), "{text} read by another variable");
+    }
+    // A tag a string constant writes is text too, which a chain of variables cannot tell apart.
+    let t = templar();
+    let map = vars(json!({"x": "val"}));
+    assert_eq!(
+        t.render("{{ '{% raw %}' }}{{ x }}{{ '{% endraw %}' }}", &map),
+        Ok(json!("{% raw %}val{% endraw %}"))
+    );
+    // A list an expression builds keeps the text of its members.
+    let none = Map::new();
+    let list = "{{ ['{% raw %}{{ x }}{% endraw %}'] }}";
+    let (items, data) = t.render_value_tainted(&json!(list), &none).unwrap();
+    assert_eq!(items, json!(["{% raw %}{{ x }}{% endraw %}"]));
+    assert!(data, "the items are not rendered again");
+    // A variable that chains to a variable holding it is still read to its end.
+    let map = vars(json!({"x": "val", "a": "{{ b }}", "b": "{% raw %}{{ x }}{% endraw %}"}));
+    assert_eq!(t.render("{{ a }}", &map), Ok(json!("{{ x }}")));
+}
+
+/// A raw block does not make text from a managed host evaluate: a name that holds text from a
+/// host is read as it is, wrapped in a raw block or not, and its text is never rendered.
+#[test]
+fn a_raw_block_in_text_from_a_host_is_never_rendered() {
+    let t = templar();
+    let payload = "{% raw %}{{ lookup('pipe', 'false') }}{% endraw %}{{ lookup('pipe', 'false') }}";
+    let map = vars(json!({"r": payload, "x": "val"}));
+    let host = BTreeSet::from(["r".to_string()]);
+    let with = Vars {
+        untrusted: Some(&host),
+        ..Vars::from(&map)
+    };
+    for text in [
+        "{{ r }}",
+        "{% raw %}{{ r }}{% endraw %}{{ r }}",
+        "{{ '{% raw %}' }}{{ r }}",
+    ] {
+        let want = if text.starts_with("{% raw") {
+            format!("{{{{ r }}}}{payload}")
+        } else if text.starts_with("{{ '{%") {
+            format!("{{% raw %}}{payload}")
+        } else {
+            payload.to_string()
+        };
+        assert_eq!(t.render(text, with), Ok(json!(want)), "{text}");
+    }
+    let (resolved, data) = t.resolve_vars_tainted(Vars {
+        map: &vars(json!({"r": payload, "a": "{{ r }}", "b": "{% raw %}{{ r }}{% endraw %}"})),
+        untrusted: Some(&host),
+        ..Vars::from(&map)
+    });
+    assert_eq!(resolved["r"], json!(payload));
+    assert_eq!(resolved["a"], json!(payload));
+    assert!(
+        data.contains("a"),
+        "a name built from a host's text is data"
+    );
+}
+
+/// A variable whose value is a template is rendered when a template reads it, so a filter or an
+/// operator sees the final value, in play vars, mappings and lists alike, as in ansible-core.
+#[rstest::rstest]
+#[case::arithmetic(json!({"c": 7, "b": "{{ c }}", "s": "{{ b | int + 1 }}"}), "{{ s }}", json!(8))]
+#[case::int_filter(json!({"c": 7, "b": "{{ c }}"}), "{{ b | int }}", json!(7))]
+#[case::plain_read(json!({"c": 7, "b": "{{ c }}"}), "{{ b }}", json!(7))]
+#[case::depth_three(
+    json!({"c": 7, "d1": "{{ c }}", "d2": "{{ d1 }}", "d3": "{{ d2 | int * 2 }}"}),
+    "{{ d3 }}",
+    json!(14)
+)]
+#[case::length(
+    json!({"host": "example.org", "url": "http://{{ host }}:8080/x"}),
+    "{{ url | length }}",
+    json!(25)
+)]
+#[case::regex_replace(
+    json!({"host": "example.org", "url": "http://{{ host }}:8080/x"}),
+    "{{ url | regex_replace('example', 'zz') }}",
+    json!("http://zz.org:8080/x")
+)]
+#[case::b64encode(
+    json!({"host": "example.org", "url": "http://{{ host }}:8080/x"}),
+    "{{ url | b64encode }}",
+    json!("aHR0cDovL2V4YW1wbGUub3JnOjgwODAveA==")
+)]
+#[case::list_member(
+    json!({"host": "example.org", "l": ["{{ host }}"]}),
+    "{{ l | map('upper') | list }}",
+    json!(["EXAMPLE.ORG"])
+)]
+#[case::list_sum(
+    json!({"c": 7, "l": ["{{ c }}", "{{ c | int + 1 }}"]}),
+    "{{ l | map('int') | sum }}",
+    json!(15)
+)]
+#[case::dict_member(
+    json!({"c": 7, "d": {"k": "{{ c }}", "n": {"m": "{{ c }}"}}}),
+    "{{ d.k | int + d.n.m | int }}",
+    json!(14)
+)]
+#[case::dict_through_a_variable(
+    json!({"c": 7, "d": {"k": "{{ c }}"}, "e": "{{ d }}"}),
+    "{{ e.k | int + 1 }}",
+    json!(8)
+)]
+#[case::member_nothing_reads(
+    json!({"d": {"bad": "{{ missing }}", "ok": 1}}),
+    "{{ d.ok }}",
+    json!(1)
+)]
+#[case::default_on_a_nested_undefined(
+    json!({"u": "{{ missing }}"}),
+    "{{ u | default('dflt') }}",
+    json!("dflt")
+)]
+#[case::defined_on_a_nested_undefined(json!({"u": "{{ missing }}"}), "{{ u is defined }}", json!(false))]
+#[case::default_omit(
+    json!({"omit": "__omit__", "u": "{{ missing | default(omit) }}"}),
+    "{{ u == omit }}",
+    json!(true)
+)]
+#[case::text_around(
+    json!({"c": 7, "b": "{{ c }}", "t": "x-{{ b }}-y"}),
+    "{{ t | upper }}",
+    json!("X-7-Y")
+)]
+#[case::in_a_statement(
+    json!({"c": 7, "b": "{{ c }}"}),
+    "{% if b | int > 5 %}big{% else %}small{% endif %}",
+    json!("big")
+)]
+#[case::each_read_alike(
+    json!({"c": 7, "b": "{{ c }}"}),
+    "{{ b | int }}-{{ b | int + 1 }}-{{ b }}",
+    json!("7-8-7")
+)]
+fn a_variable_holding_a_template_is_rendered_when_it_is_read(
+    #[case] map: Value,
+    #[case] text: &str,
+    #[case] want: Value,
+) {
+    let t = templar();
+    assert_eq!(t.render(text, &vars(map)), Ok(want), "{text}");
+}
+
+/// The same variables through the pass that resolves a map ahead of a task, and through the
+/// condition a task asks.
+#[test]
+fn a_map_resolves_in_dependency_order_and_a_condition_reads_it() {
+    let t = templar();
+    let map = vars(json!({
+        "s": "{{ b | int + 1 }}", "b": "{{ c }}", "c": 7,
+        "cond": "{{ port | int > 8000 }}", "port": "{{ 8080 }}",
+    }));
+    let (resolved, untrusted) = t.resolve_vars_tainted(&map);
+    assert_eq!(resolved["s"], json!(8));
+    assert_eq!(resolved["cond"], json!(true));
+    assert!(untrusted.is_empty());
+    assert_eq!(t.condition("cond", &map), Ok(true));
+    assert_eq!(t.condition("{{ b | int == 7 }}", &map), Ok(true));
+    assert_eq!(
+        t.render_file("{{ s }}", &map, &FileRender::default()),
+        Ok("8".to_string())
+    );
+}
+
+/// A variable that reads itself, directly or through others, fails as the reference's does, even
+/// behind `default`; a template that fails for another reason fails the read that needs it.
+#[rstest::rstest]
+#[case::itself(json!({"a": "{{ a }}"}), "{{ a }}", RECURSION)]
+#[case::through_another(json!({"a": "{{ b }}", "b": "{{ a }}"}), "{{ a }}", RECURSION)]
+#[case::through_a_filter(
+    json!({"a": "{{ b | int + 1 }}", "b": "{{ a | int + 1 }}"}),
+    "{{ a | length }}",
+    RECURSION
+)]
+#[case::behind_default(json!({"a": "{{ a | default('x') }}"}), "{{ a }}", RECURSION)]
+#[case::behind_default_at_the_read(json!({"a": "{{ a }}"}), "{{ a | default('x') }}", RECURSION)]
+#[case::a_failure_that_is_not_undefined(
+    json!({"a": "{{ 1 | nosuchfilter }}"}),
+    "{{ a | default('x') }}",
+    "nosuchfilter"
+)]
+fn a_variable_that_cannot_render_fails_the_read_that_needs_it(
+    #[case] map: Value,
+    #[case] text: &str,
+    #[case] error: &str,
+) {
+    let t = templar();
+    let err = t.render(text, &vars(map)).unwrap_err();
+    assert!(err.0.contains(error), "{text}: {err}");
+    assert!(!err.is_undefined(), "{text}: {err}");
+}
+
+#[test]
+fn an_undefined_nested_variable_is_an_undefined_read_when_used() {
+    let t = templar();
+    let map = vars(json!({"u": "{{ missing }}", "v": "{{ u }}"}));
+    for text in ["{{ u }}", "{{ v | upper }}", "{{ u | length }}"] {
+        let err = t.render(text, &map).unwrap_err();
+        assert!(err.is_undefined(), "{text}: {err}");
+    }
+}
+
+/// What came from a managed host is data wherever it is read: through a variable, through two,
+/// through a filter, and on a second read of the same name.
+#[test]
+fn text_from_a_host_is_data_through_a_nested_variable() {
+    let t = templar();
+    let untrusted: BTreeSet<String> = ["reg".to_string()].into();
+    let map = vars(json!({
+        "c": 7, "reg": "{{ c }}",
+        "d": "{{ reg }}", "e": "{{ d | upper }}",
+        "l": ["{{ reg }}"], "m": {"k": "{{ reg }}"},
+    }));
+    let vars = || Vars {
+        map: &map,
+        hostvars: None,
+        shared: None,
+        facts: None,
+        untrusted: Some(&untrusted),
+        untrusted_hosts: None,
+        base: None,
+    };
+    for (text, want) in [
+        ("{{ reg | length }}", json!(7)),
+        ("{{ d | length }}", json!(7)),
+        ("{{ d | upper }}", json!("{{ C }}")),
+        ("{{ e }}", json!("{{ C }}")),
+        ("{{ e | length }}", json!(7)),
+        ("{{ l | map('length') | list }}", json!([7])),
+        ("{{ m.k | length }}", json!(7)),
+        // The second read comes from the cache and still marks the render as data.
+        ("{{ (d | length) ~ (d | upper) }}", json!("7{{ C }}")),
+        ("{{ (e | length) ~ (e | upper) }}", json!("7{{ C }}")),
+    ] {
+        assert_eq!(t.render(text, vars()), Ok(want), "{text}");
+    }
+    assert_eq!(t.condition("d | length == 7", vars()), Ok(true));
+    let (resolved, soiled) = t.resolve_vars_tainted(vars());
+    assert_eq!(resolved["e"], json!("{{ C }}"));
+    for name in ["reg", "d", "e", "l", "m"] {
+        assert!(soiled.contains(name), "{name}");
+    }
+    assert!(!soiled.contains("c"));
+}
+
+/// `!unsafe` text stays text through a variable that reads it, and a gathered fact is never
+/// rendered when a variable reads it.
+#[test]
+fn unsafe_text_and_facts_are_data_through_a_nested_variable() {
+    let t = templar();
+    let map = vars(json!({
+        "c": 7,
+        "u": crate::yaml::unsafe_data(json!("{{ c }}")),
+        "v": "{{ u }}",
+        "w": "{{ f }}",
+    }));
+    let facts = Arc::new(vars(json!({"f": "{{ c }}"})));
+    let untrusted: BTreeSet<String> = ["f".to_string()].into();
+    let vars = Vars {
+        map: &map,
+        hostvars: None,
+        shared: None,
+        facts: Some(&facts),
+        untrusted: Some(&untrusted),
+        untrusted_hosts: None,
+        base: None,
+    };
+    for (text, want) in [
+        ("{{ u | length }}", json!(7)),
+        ("{{ v | length }}", json!(7)),
+        ("{{ v | upper }}", json!("{{ C }}")),
+        ("{{ f | length }}", json!(7)),
+        ("{{ w | length }}", json!(7)),
+    ] {
+        assert_eq!(t.render(text, vars), Ok(want), "{text}");
+    }
+}
+
+/// A read renders a variable only when all it reads is author-written: a chain over inventory
+/// names, shared lists, `hostvars` or a lookup by text stays as written, at any depth.
+#[test]
+fn a_nested_read_renders_only_variables_that_read_author_text() {
+    let t = templar();
+    let map = vars(json!({
+        "__volant_with_terms": ["{{ 1 + 1 }}"],
+        "gn": "{{ groups }}",
+        "gk": "{{ gn | list }}",
+        "gl": "{{ gk | last }}",
+        "ph": "{{ ansible_play_hosts_all }}",
+        "pl": "{{ ph | list | last }}",
+        "lk": "{{ lookup('vars', 'gn') }}",
+        "lp": "{{ lk | length }}",
+        "la": "{% set f = lookup %}{{ f('vars', 'gn') }}",
+        "lb": "{{ la | length }}",
+        "dir": "/srv/{{ inventory_hostname }}",
+        "inventory_hostname": "h1",
+        "c": 7,
+        "b": "{{ c }}",
+        "s": "{{ b | int + 1 }}",
+    }));
+    let shared = Arc::new(vars(json!({
+        "groups": {"all": ["h1"], "{{ 1 + 1 }}": ["h2"]},
+        "ansible_play_hosts_all": ["h1", "{{ 1 + 1 }}"],
+    })));
+    let untrusted = BTreeSet::new();
+    let vars = || Vars {
+        map: &map,
+        hostvars: None,
+        shared: Some(&shared),
+        facts: None,
+        untrusted: Some(&untrusted),
+        untrusted_hosts: None,
+        base: None,
+    };
+    assert_eq!(
+        t.render("{{ __volant_with_terms[0] | length }}", vars()),
+        Ok(json!(11))
+    );
+    // Left as written, so a filter reads the text of the variable and nothing is evaluated.
+    for (text, raw) in [
+        ("{{ gk | length }}", "{{ gn | list }}"),
+        ("{{ gl | length }}", "{{ gk | last }}"),
+        ("{{ pl | length }}", "{{ ph | list | last }}"),
+        ("{{ lp | length }}", "{{ lk | length }}"),
+        ("{{ lb | length }}", "{{ la | length }}"),
+    ] {
+        assert_eq!(t.render(text, vars()), Ok(json!(raw.len())), "{text}");
+    }
+    let (resolved, _) = t.resolve_vars_tainted(vars());
+    for name in ["gk", "gl", "pl"] {
+        assert_ne!(resolved[name], json!(2), "{name}");
+    }
+    // Author-written names still chain, and a path built from the host's name is the playbook's.
+    assert_eq!(resolved["s"], json!(8));
+    assert_eq!(t.render("{{ s }}", vars()), Ok(json!(8)));
+    assert_eq!(resolved["dir"], json!("/srv/h1"));
 }

@@ -1,0 +1,4 @@
+# with_filetree walks a directory tree and gives a mapping for each entry. The tree has one entry
+# for each level, because the plugin does not sort the entries of a directory.
+args: [play.yml]
+needs: ["ansible-core"]

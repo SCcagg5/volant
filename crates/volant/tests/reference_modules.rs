@@ -827,6 +827,7 @@ fn every_bridge_case_matches_the_reference() {
             facts: None,
             untrusted: None,
             untrusted_hosts: None,
+            base: None,
         };
         let text = case["template"].as_str().expect("template is a string");
         let ours = templar.render(text, vars).map_err(|e| e.to_string());

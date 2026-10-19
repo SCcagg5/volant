@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use serde_json::Value;
+use volant_protocol::shape::MAX_VALUES;
 use volant_protocol::{Task, TaskResult};
 
 use crate::stats::Outcome;
@@ -44,15 +45,53 @@ pub(crate) fn drop_internal_keys(result: &mut TaskResult) {
     });
 }
 
+/// Whether a result carries the `_ansible_no_log` an action sets when it read what must not be
+/// shown (`include_vars` of a vaulted file): every line that prints the result then prints the
+/// censored body, a retry line included.
+pub(in crate::executor) fn asks_to_be_hidden(result: &TaskResult) -> bool {
+    result.0.get("_ansible_no_log") == Some(&Value::Bool(true))
+}
+
+/// The output a line of `stdout` or `stderr` stands for past [`MAX_VALUES`] lines. A command may
+/// print millions of ordinary lines, which ansible-core splits whole; what the bound stops is a
+/// frame of near-empty lines, two bytes each on the wire. At 32 bytes a line, the most a 64 MiB
+/// frame may split into is about two million lines, the same order of memory as the frame's own
+/// text.
+const BYTES_PER_LINE: usize = 32;
+
+/// The lines of `stdout` and `stderr` are values like any other: a line of a few bytes costs a
+/// few hundred bytes of memory as one. Together they may hold [`MAX_VALUES`] lines, or one line
+/// for every [`BYTES_PER_LINE`] bytes of output when that is more, and a host over that gets a
+/// failed result in place of its own.
 pub(super) fn add_output_lines(result: &mut TaskResult) {
-    for (key, lines) in [("stdout", "stdout_lines"), ("stderr", "stderr_lines")] {
+    const SPLIT: [(&str, &str); 2] = [("stdout", "stdout_lines"), ("stderr", "stderr_lines")];
+    let bytes: usize = SPLIT
+        .iter()
+        .filter(|(_, lines)| !result.0.contains_key(*lines))
+        .filter_map(|(key, _)| result.0.get(*key)?.as_str())
+        .map(str::len)
+        .sum();
+    let limit = MAX_VALUES.max(bytes / BYTES_PER_LINE);
+    let mut room = limit;
+    for (key, lines) in SPLIT {
         if result.0.contains_key(lines) {
             continue;
         }
         // `data.get('stdout') or ''` in the reference: a value Python reads as false splits as
         // an empty string. Any other value that is not a string is left alone.
         let split = match result.0.get(key) {
-            Some(Value::String(text)) => splitlines(text).into_iter().map(Value::from).collect(),
+            Some(Value::String(text)) => {
+                let Some(split) = splitlines(text, room) else {
+                    *result = TaskResult::failed_with(format!(
+                        "the output of the host is refused: {key} of {} bytes has more lines \
+                         than the limit of {limit} for stdout and stderr together",
+                        text.len()
+                    ));
+                    return;
+                };
+                room -= split.len();
+                split.into_iter().map(Value::from).collect()
+            }
             Some(value) if python_falsy(value) => Vec::new(),
             _ => continue,
         };
@@ -125,8 +164,8 @@ pub(super) fn python_falsy(value: &Value) -> bool {
 }
 
 /// Python's `str.splitlines()`: every line boundary Python knows, `\r\n` counted as one, and no
-/// empty line after a final boundary.
-fn splitlines(text: &str) -> Vec<&str> {
+/// empty line after a final boundary. `None` once there are more than `limit` lines.
+fn splitlines(text: &str, limit: usize) -> Option<Vec<&str>> {
     let boundary = |c: char| {
         matches!(
             c,
@@ -144,6 +183,9 @@ fn splitlines(text: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut rest = text;
     while let Some(at) = rest.find(boundary) {
+        if out.len() == limit {
+            return None;
+        }
         out.push(&rest[..at]);
         let width = if rest[at..].starts_with("\r\n") {
             2
@@ -153,9 +195,12 @@ fn splitlines(text: &str) -> Vec<&str> {
         rest = &rest[at + width..];
     }
     if !rest.is_empty() {
+        if out.len() == limit {
+            return None;
+        }
         out.push(rest);
     }
-    out
+    Some(out)
 }
 
 pub(in crate::executor) fn classify(

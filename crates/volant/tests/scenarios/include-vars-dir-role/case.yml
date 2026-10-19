@@ -1,0 +1,2 @@
+# include_vars of a directory inside a role, an included task file and the playbook.
+args: [-i, inv.ini, play.yml]

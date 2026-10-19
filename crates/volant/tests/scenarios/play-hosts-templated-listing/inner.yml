@@ -1,0 +1,6 @@
+- name: Inner
+  hosts: "{{ pick }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }}"

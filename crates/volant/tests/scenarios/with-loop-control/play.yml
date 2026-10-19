@@ -1,0 +1,212 @@
+- hosts: localhost
+  gather_facts: false
+  vars:
+    v: tv
+    one: 1
+    two: [a, b]
+    probe_a: 1
+    probe_b: 2
+    names: [n1, n2]
+    people:
+      - {name: ann, tags: [x, y]}
+      - {name: bob, tags: [z]}
+  tasks:
+    - name: with_items
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_items: [[1, 2], [3]]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_list
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_list: [q, r]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_dict
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_dict: {a: 1, b: 2}
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_together
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_together: [[1, 2], [a, b]]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_nested
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_nested: [[1, 2], [a]]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_subelements
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_subelements: ["{{ people }}", tags]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_sequence
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_sequence: "start=1 end=3"
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_random_choice
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_random_choice: [only]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_lines
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_lines: ["cat files/data.txt"]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_indexed_items
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_indexed_items: "{{ names }}"
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_flattened
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_flattened: [[a, [b]], c]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_cartesian
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_cartesian: [[a, b], [1]]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_fileglob
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_fileglob: ["files/a1*.txt"]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_first_found
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_first_found: [nope.txt, a.txt]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_inventory_hostnames
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_inventory_hostnames: all
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_ini
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_ini: ["name section=main file=f.ini"]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_csvfile
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_csvfile: ["bob file=users.csv delimiter=, col=1"]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_env
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_env: [VOLANT_WITH_ENV]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_file
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_file: [data.txt]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_pipe
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_pipe: "echo hi"
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_template
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_template: [t.j2]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_vars
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_vars: [one, two]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_varnames
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_varnames: "^probe_"
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_config
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_config: [DEFAULT_TIMEOUT]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i
+
+    - name: with_unvault
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_unvault: [data.txt]
+      loop_control:
+        label: "L{{ i }}"
+        index_var: i

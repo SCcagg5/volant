@@ -17,6 +17,8 @@ Volant reads the same `ansible.cfg` as `ansible-playbook`, and stops at the firs
 
 </Steps>
 
+Volant skips `./ansible.cfg` when the working directory is writable by other users (mode bit `o+w`), as `ansible-playbook` does. Another local user could have put the file there. The sticky bit and the owner of the directory change nothing. Volant prints `[WARNING]: Ansible is being run in a world writable directory (...), ignoring it as an ansible.cfg source.` on standard error and continues with the next file. A file named by `ANSIBLE_CONFIG` is read whatever the mode of the working directory.
+
 For each setting, the environment variable beats the file, and the command-line option beats both. Keys Volant does not use are ignored, as Ansible ignores the ones it does not use.
 
 A file that exists but cannot be read is skipped, and the run continues with the defaults. Volant prints a warning first, which Ansible does not: a file you wrote that the process cannot open deserves a line, and a warning does not change the exit code.
@@ -57,6 +59,10 @@ A file that exists but cannot be read is skipped, and the run continues with the
 
 <Option name="enable_task_debugger" id="defaults-enable-task-debugger" default="false" env="ANSIBLE_ENABLE_TASK_DEBUGGER">
   Open the [debugger](/playbooks/how-a-play-runs/#other-strategies) after every failed or unreachable task.
+</Option>
+
+<Option name="localhost_warning" id="defaults-localhost-warning" default="true" env="ANSIBLE_LOCALHOST_WARNING">
+  Warn when the inventory holds no host, so that only the implicit `localhost` is left. `all` does not match that host.
 </Option>
 
 <Option name="force_handlers" id="defaults-force-handlers" default="false" flag="--force-handlers" env="ANSIBLE_FORCE_HANDLERS">
@@ -163,4 +169,8 @@ Ansible ignores this section, so one `ansible.cfg` can carry it and still drive 
 
 <Option name="ssh_control_master" id="volant-ssh-control-master" default="true" env="VOLANT_SSH_CONTROL_MASTER">
   Share one OpenSSH connection between all the `ssh` runs of an inventory host. With `false`, each link and probe opens its own connection. See [One connection per host](/hosts/connections/#one-connection-per-host).
+</Option>
+
+<Option name="host_named_paths" id="volant-host-named-paths" default="allow" env="VOLANT_HOST_NAMED_PATHS">
+  What `template`, `copy`, `script`, `unarchive` and `assemble` do with a controller `src` that a managed host named, through a gathered fact or a registered result. `allow` reads the file as ansible-core does: a managed host can choose which readable controller file a task sends to it. `contained` reads it only when the file is in the `files` or `templates` directory of the role, the playbook or the task's own directory, and fails the task for any other name. Key names are matched exactly and a key Volant does not know is ignored, as in the rest of this section, so a misspelled `host_named_paths` leaves the default `allow`. `refuse` fails the task for every such name. Any other word stops the run with exit code 5. A `fetch` whose `dest` a host named is refused in every mode. See [A source file a managed host named](/reference/action-plugins/#a-source-file-a-managed-host-named).
 </Option>

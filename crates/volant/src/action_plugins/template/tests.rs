@@ -7,6 +7,7 @@ use volant_protocol::encoding::b64_decode;
 
 use super::*;
 use crate::action_plugins::{Step, Sub};
+use crate::config::HostNamedPaths;
 use crate::testing::{scratch, write};
 
 struct Scratch(tempfile::TempDir);
@@ -47,6 +48,28 @@ fn a_dest_a_host_named_stays_the_host_s_value() {
     );
 }
 
+/// A `src` whose render read a managed host makes `template_path` and `template_fullpath` that
+/// host's values, as a `dest` does for `template_destpath`.
+#[test]
+fn a_src_a_host_named_stays_the_host_s_value() {
+    let item = HostVars::default();
+    let untrusted: BTreeSet<String> = ["src".to_string()].into();
+    let vars = template_vars(&item, &untrusted, "t.j2", "/pb/templates/t.j2", "/tmp/x");
+    let names: Vec<&str> = vars.untrusted.iter().map(String::as_str).collect();
+    assert_eq!(names, ["template_fullpath", "template_path"]);
+    assert_eq!(vars.get("template_path"), Some(&json!("t.j2")));
+    assert_eq!(
+        vars.get("template_fullpath"),
+        Some(&json!("/pb/templates/t.j2"))
+    );
+    assert!(
+        template_vars(&item, &BTreeSet::new(), "t.j2", "/pb/templates/t.j2", "/x")
+            .untrusted
+            .is_empty(),
+        "a `src` the playbook wrote is the author's"
+    );
+}
+
 fn map(value: Value) -> Map<String, Value> {
     let Value::Object(map) = value else {
         unreachable!()
@@ -61,6 +84,17 @@ fn start_in(
     untrusted: &BTreeSet<String>,
     item_vars: &HostVars,
 ) -> Box<dyn Plugin> {
+    start_mode(HostNamedPaths::Refuse, dir, args, untrusted, item_vars)
+}
+
+/// [`start_in`] under the `host_named_paths` mode `mode`.
+fn start_mode(
+    mode: HostNamedPaths,
+    dir: &Path,
+    args: Value,
+    untrusted: &BTreeSet<String>,
+    item_vars: &HostVars,
+) -> Box<dyn Plugin> {
     let args = map(args);
     let running = HostVars::default();
     let templar = crate::template::Templar::new(dir.to_path_buf());
@@ -70,6 +104,7 @@ fn start_in(
     };
     let mut warnings = Vec::new();
     start(Context {
+        link: &crate::action_plugins::LinkFacts::default(),
         args: &args,
         args_untrusted: untrusted,
         running_vars: &running,
@@ -80,6 +115,7 @@ fn start_in(
         templar: &templar,
         origin: &origin,
         playbook_dir: dir,
+        host_named_paths: mode,
         warnings: &mut warnings,
 
         environment: None,
@@ -180,6 +216,110 @@ fn a_template_a_host_named_is_never_read() {
             named.display()
         );
     }
+}
+
+/// A `src` a managed host named is read as the mode says.
+#[rstest::rstest]
+#[case::allow(HostNamedPaths::Allow, true)]
+#[case::contained(HostNamedPaths::Contained, true)]
+#[case::refuse(HostNamedPaths::Refuse, false)]
+fn a_template_a_host_named_is_read_as_the_mode_says(
+    #[case] mode: HostNamedPaths,
+    #[case] read: bool,
+) {
+    let dir = with_template("motd.j2", "path={{ template_path }}\n");
+    let untrusted: BTreeSet<String> = ["src".to_string()].into();
+    let args = json!({"src": "motd.j2", "dest": "/tmp/x"});
+    let mut plugin = start_mode(mode, &dir, args, &untrusted, &HostVars::default());
+    if read {
+        assert_eq!(staged(&sent(plugin.as_mut())), "path=motd.j2\n");
+    } else {
+        assert!(refused(plugin.as_mut()).contains("named by a managed host"));
+    }
+}
+
+/// Under `contained`, a template that leaves the playbook's directories is refused.
+#[test]
+fn a_template_a_host_named_outside_the_directories_is_refused_when_contained() {
+    let dir = with_template("in.j2", "in\n");
+    let outside = scratch();
+    write(outside.path(), "out.j2", "out\n");
+    let untrusted: BTreeSet<String> = ["src".to_string()].into();
+    let named = outside.path().join("out.j2").display().to_string();
+    for src in [named.as_str(), "../out.j2"] {
+        let args = json!({"src": src, "dest": "/tmp/x"});
+        let mut plugin = start_mode(
+            HostNamedPaths::Contained,
+            &dir,
+            args,
+            &untrusted,
+            &HostVars::default(),
+        );
+        assert_eq!(
+            refused(plugin.as_mut()),
+            format!(
+                "the 'src' of this task was named by a managed host, and '{src}' is not inside the files or templates directories of the playbook or the role (host_named_paths = contained)"
+            )
+        );
+    }
+}
+
+/// What a managed host chose never moves the delimiters: not a delimiter option it named, and
+/// not the `#jinja2:` line of a file it named, unless the file is in the author's directories.
+#[rstest::rstest]
+#[case::delimiter_option(
+    "x {{ 1 }}
+",
+    json!({"src": "t.j2", "dest": "/tmp/x", "variable_start_string": "[["}),
+    "variable_start_string",
+    HostNamedPaths::Allow,
+    "the 'variable_start_string' of this task was named by a managed host, and a delimiter a host chose is never used"
+)]
+#[case::header_when_allowed(
+    "#jinja2: trim_blocks: False
+x
+",
+    json!({"src": "t.j2", "dest": "/tmp/x"}),
+    "src",
+    HostNamedPaths::Allow,
+    "t.j2 starts with a '#jinja2:' line, which a host-named file may not use"
+)]
+fn a_host_never_moves_the_delimiters(
+    #[case] text: &str,
+    #[case] args: Value,
+    #[case] untrusted: &str,
+    #[case] mode: HostNamedPaths,
+    #[case] refusal: &str,
+) {
+    let dir = with_template("t.j2", text);
+    let untrusted: BTreeSet<String> = [untrusted.to_string()].into();
+    let mut plugin = start_mode(mode, &dir, args, &untrusted, &HostVars::default());
+    assert!(refused(plugin.as_mut()).contains(refusal));
+}
+
+/// The same file, named by a host, is read under `contained`: it lies in the author's directory.
+#[test]
+fn a_header_in_the_author_s_directory_is_read_when_contained() {
+    let dir = with_template(
+        "t.j2",
+        "#jinja2: trim_blocks: False
+x
+",
+    );
+    let untrusted: BTreeSet<String> = ["src".to_string()].into();
+    let args = json!({"src": "t.j2", "dest": "/tmp/x"});
+    let mut plugin = start_mode(
+        HostNamedPaths::Contained,
+        &dir,
+        args,
+        &untrusted,
+        &HostVars::default(),
+    );
+    assert_eq!(
+        staged(&sent(plugin.as_mut())),
+        "x
+"
+    );
 }
 
 const OPTS: &str = "top\n  {% if true %}\n  in\n  {% endif %}\npath={{ template_path }} dest={{ template_destpath }}\nfull={{ template_fullpath }}\n";

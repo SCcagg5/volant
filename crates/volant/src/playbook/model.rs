@@ -25,6 +25,10 @@ pub struct Play {
     /// one per item for the list form. `--list-hosts` prints it as the Python list the
     /// reference prints, and `hosts: a,b` there is one pattern while `hosts: [a, b]` is two.
     pub host_patterns: Vec<String>,
+    /// Whether `hosts` was written as a list. A template inside a list renders to one string.
+    pub host_list: bool,
+    /// Set when `hosts` rendered to `none`: the play has no name, and its banner has no brackets.
+    pub nameless: bool,
     /// The play's own tags. Every task under it inherits them for the selection; the listing
     /// prints them on the play's own line.
     pub tags: Vec<String>,
@@ -34,6 +38,12 @@ pub struct Play {
     pub gather_written: bool,
     pub vars: Map<String, Value>,
     pub vars_files: Vec<String>,
+    /// The `when` of the `import_playbook` entries this play came through, outermost first. Every
+    /// task, role and block of the play carries them in front of its own; handlers do not.
+    pub import_when: Vec<String>,
+    /// The `when` of the outermost `import_playbook` entry that had one, which is the one the
+    /// reference puts on the play's `Gathering Facts` task.
+    pub gather_when: Vec<String>,
     pub tasks: Vec<TaskOrBlock>,
     pub pre_tasks: Vec<TaskOrBlock>,
     pub post_tasks: Vec<TaskOrBlock>,

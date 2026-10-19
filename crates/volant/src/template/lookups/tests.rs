@@ -106,6 +106,7 @@ fn what_a_template_lookup_rendered_is_never_rendered_again() {
         facts: None,
         untrusted: Some(&untrusted),
         untrusted_hosts: None,
+        base: None,
     };
     assert_eq!(
         t.render("{{ via_lookup }}", vars).unwrap(),
@@ -506,6 +507,7 @@ fn a_template_lookup_reads_a_chained_variable_resolved() {
         facts: None,
         untrusted: Some(&from_host),
         untrusted_hosts: None,
+        base: None,
     };
     assert_eq!(
         t.render("{{ lookup('template', 'chain.j2') }}", vars)

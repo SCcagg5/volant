@@ -9,7 +9,7 @@ use std::borrow::Cow;
 use minijinja::machinery::WhitespaceConfig;
 use minijinja::syntax::SyntaxConfig;
 
-use super::{Templar, TemplateError, Vars, context_of, convert_error, render_str};
+use super::{Templar, TemplateError, Vars, context_of, convert_error, render_str, take_failure};
 
 mod overrides;
 
@@ -220,10 +220,13 @@ impl Templar {
             trim_blocks: effective.trim_blocks,
         };
         let normalized = body.replace("\r\n", "\n").replace('\r', "\n");
-        let (ctx, _tainted) = context_of(vars.into());
+        let (ctx, _tainted) = context_of(self, vars.into());
         let name = options.name.as_deref().unwrap_or("<string>");
-        let mut rendered =
-            render_str(self, name, &normalized, &ctx, ws, syntax).map_err(convert_error)?;
+        let rendered = render_str(self, name, &normalized, &ctx, ws, syntax).map_err(convert_error);
+        let mut rendered = match take_failure(&ctx) {
+            Some(error) => return Err(error),
+            None => rendered?,
+        };
         if effective.newline_sequence != "\n" {
             rendered = rendered.replace('\n', &effective.newline_sequence);
         }

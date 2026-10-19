@@ -771,6 +771,13 @@ def call(request):
         # Whether the plugin exists, for a call the controller does not make because a value it
         # would be given is undefined: ansible-core resolves the name before it looks at those.
         if resolve_only:
+            # What `Task.preprocess_data` asks of a `with_<name>` key: `name in lookup_loader`,
+            # which follows the collections' redirects and the `lookup_plugins/` directories.
+            if kind == "lookup":
+                from ansible.plugins.loader import lookup_loader
+
+                if name not in lookup_loader:
+                    return {"error": missing}
             return {"value": None}
         value = templar.evaluate_expression(
             trust_as_template(expression),
@@ -856,7 +863,7 @@ def shim():
         module_implementation_preferences = (".py", "")
         _remote_is_local = False
 
-        def __init__(self, ident, shell, play_context):
+        def __init__(self, ident, shell, play_context, ssh_options=None):
             self._ident = ident
             self._shell = shell
             self._play_context = play_context
@@ -867,6 +874,13 @@ def shim():
                 "remote_addr": play_context.remote_addr,
                 "remote_user": play_context.remote_user,
             }
+            if play_context.connection == "ssh":
+                # What an ssh connection answers for the arguments a plugin hands to its own
+                # `ssh`: the host's own, and ansible-core's default for `ssh_args`.
+                options = ssh_options or {}
+                self._options["ssh_args"] = "-C -o ControlMaster=auto -o ControlPersist=60s"
+                self._options["ssh_common_args"] = options.get("ssh_common_args")
+                self._options["ssh_extra_args"] = options.get("ssh_extra_args")
 
         def __getattr__(self, name):
             if name.startswith("__"):
@@ -992,9 +1006,24 @@ def shim():
         else:
             self._connection._shell.tmpdir = None
 
-    ActionBase._execute_module = execute_module
-    ActionBase._make_tmp_path = make_tmp_path
-    ActionBase._remove_tmp_path = remove_tmp_path
+    # A plugin that makes a connection of its own (`synchronize` runs rsync on the controller
+    # through a `local` one) gets ansible-core's own methods: only the stand-in carries `_ident`
+    # and answers to the controller.
+    original = (
+        ActionBase._execute_module, ActionBase._make_tmp_path, ActionBase._remove_tmp_path
+    )
+
+    def toward_link(shimmed, kept):
+        def method(self, *args, **kwargs):
+            if isinstance(self._connection, Link):
+                return shimmed(self, *args, **kwargs)
+            return kept(self, *args, **kwargs)
+
+        return method
+
+    ActionBase._execute_module = toward_link(execute_module, original[0])
+    ActionBase._make_tmp_path = toward_link(make_tmp_path, original[1])
+    ActionBase._remove_tmp_path = toward_link(remove_tmp_path, original[2])
     SHIM.update(Link=Link, Unsupported=Unsupported)
     return SHIM
 
@@ -1055,6 +1084,7 @@ def run_action(ident, request):
         return {"error": {"kind": "not_found", "message": "the handler '%s' was not found" % name}}
     task_vars = dict(request.get("task_vars") or {})
     search_path = task_vars.pop("_volant_search_path", None)
+    ssh_options = task_vars.pop("_volant_ssh_options", None) or {}
     task = None
     try:
         context = PlayContext()
@@ -1067,6 +1097,8 @@ def run_action(ident, request):
         if shell is None:
             raise AnsibleError("the shell plugin %s is not supported yet" % shell_type)
         shell.set_options(var_options=task_vars)
+        # What ansible-core's own `_execute_module` reads to build a module that runs here.
+        task_vars.setdefault("ansible_playbook_python", sys.executable)
         groups = task_vars.get("groups")
         names = groups.get("all", []) if isinstance(groups, dict) else []
         known = task_vars.get("hostvars")
@@ -1091,7 +1123,7 @@ def run_action(ident, request):
         action = plugin_loader.action_loader.get(
             name,
             task=task,
-            connection=parts["Link"](ident, shell, context),
+            connection=parts["Link"](ident, shell, context, ssh_options),
             play_context=context,
             loader=loader,
             templar=templar,

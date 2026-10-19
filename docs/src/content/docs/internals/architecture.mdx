@@ -51,6 +51,8 @@ The agent, `crates/volant-agent`, is a static binary of a few hundred kilobytes,
 
 `crates/volant-protocol` defines the frames and messages both programs share. The controller starts the agent over `ssh` and speaks the protocol over that process's standard input and output for the rest of the run. Frames are JSON, except that a blob of modules or a staged file follows its announcement as raw bytes, compressed with deflate, since protocol version 6. Changing a message means bumping `PROTOCOL_VERSION`, and the agent's version is part of its cache path, so a controller never talks to an agent from another release.
 
+A frame is at most 64 MiB, because `slurp` and `fetch` send a file as one string inside a result. A result is bounded by what it holds as well as by its size. It may hold at most 500,000 values (strings, numbers, arrays, objects and object keys) and 64 levels of nesting, and `stdout` and `stderr` may split into at most 500,000 lines together, or one line for every 32 bytes of output when that is more. A result over a bound fails that task for that host alone, with a message that gives the limit and the count. A message that is not a result may be 1 MiB at most.
+
 ## A run, end to end
 
 ```mermaid
