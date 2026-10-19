@@ -5037,6 +5037,62 @@ fn a_fact_carrying_a_result_cannot_name_a_variable() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A `delegate_to` built from text a managed host returned names a host of that text: it stays
+/// text in the delegate's variables, `hostvars` and output, and nothing of it runs here.
+#[rstest]
+#[case::run_once("delegate-run-once.yml", "UNREACHABLE")]
+#[case::loop_("delegate-loop.yml", "UNREACHABLE")]
+#[case::each_item_names_one("delegate-loop-item.yml", "")]
+#[case::facts_written_on_it("delegate-facts.yml", "changed: [h1 -> {{ lookup('pipe', 'touch ")]
+#[case::its_name_in_a_variable(
+    "delegate-name-in-vars.yml",
+    "changed: [h1 -> {{ lookup('pipe', 'touch "
+)]
+#[case::braces_built_in_a_loop("delegate-braces-loop.yml", "UNREACHABLE")]
+#[case::braces_built_in_a_handler("delegate-braces-handler.yml", "UNREACHABLE")]
+#[case::a_host_add_host_made("delegate-added-host.yml", "changed: [h1 -> lookup('pipe', 'touch ")]
+#[case::a_host_the_playbook_made(
+    "delegate-added-host-by-author.yml",
+    "changed: [h1 -> made-by-the-playbook]"
+)]
+fn a_delegate_named_by_a_result_stays_text(#[case] playbook: &str, #[case] shown: &str) {
+    let (dir, marker) = trust_dir(
+        &format!("delegate-{}", playbook.trim_end_matches(".yml")),
+        "h1 ansible_connection=local\n",
+    );
+    // `add_host` is the controller's ansible-core action: without it the row has nothing to say.
+    let python = python::reference_python().map(|p| p.display().to_string());
+    if playbook.contains("added-host") && python.is_none() {
+        return;
+    }
+    let envs: Vec<(&str, &str)> = python
+        .iter()
+        .map(|p| ("VOLANT_PYTHON", p.as_str()))
+        .collect();
+    let out = volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            "-e",
+            &format!("payload={}", dir.join("payload.txt").display()),
+            "-e",
+            &format!("bare={}", dir.join("bare.txt").display()),
+            &fixture(&format!("trust/{playbook}")),
+        ],
+        std::time::Duration::from_secs(30),
+        &envs,
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !marker.exists(),
+        "the text a host returned ran on the controller:\n{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains(shown), "{playbook}:\n{stdout}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Text a managed host printed is text, whatever raw tags it holds: a raw block around an
 /// expression, or tags that close one the author wrote, never makes the expression run.
 #[test]

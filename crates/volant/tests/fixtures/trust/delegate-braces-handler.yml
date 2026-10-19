@@ -1,0 +1,17 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: Read a file whose text is part of a template
+      command: cat {{ bare }}
+      register: r
+    - name: Notify the handler
+      command: 'true'
+      notify: delegated
+  handlers:
+    - name: delegated
+      command: id
+      delegate_to: "{{ r.stdout }}"
+      ignore_unreachable: true
+      vars:
+        where: "{{ '{{ ' ~ inventory_hostname ~ ' }}' }}"
+        again: "{{ where }}"

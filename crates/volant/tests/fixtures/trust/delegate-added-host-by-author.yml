@@ -1,0 +1,16 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: Make a host out of text the playbook wrote
+      add_host:
+        name: made-by-the-playbook
+        groups: [mine]
+        ansible_connection: local
+    - name: Delegate to it
+      command: id
+      delegate_to: "{{ groups['mine'][0] }}"
+      vars:
+        where: "{{ inventory_hostname }}"
+    - name: Read its variables through hostvars
+      debug:
+        msg: "{{ hostvars['made-by-the-playbook'].ansible_connection }}"
