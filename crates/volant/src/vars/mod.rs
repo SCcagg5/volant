@@ -4,6 +4,7 @@
 
 mod facts;
 mod host_vars;
+mod include_dir;
 mod layers;
 mod load;
 mod magic;
@@ -13,7 +14,10 @@ mod store;
 
 pub(crate) use host_vars::PENDING_PYTHON;
 pub use host_vars::{HostSettings, HostVars, host_setting, omit_token, settled, settled_all};
-pub use load::{VaultFile, include_vars_paths, load_vars_file, parse_extra_vars};
+pub use include_dir::{Chain, Failure, Scan, include_dir, join_path, read_failure};
+pub use load::{
+    VaultFile, include_vars_paths, load_vars_file, parse_extra_vars, read_vars_document,
+};
 pub use magic::ansible_version;
 pub(crate) use play_view::PlayView;
 

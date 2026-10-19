@@ -13,10 +13,11 @@ use crate::compile::Step;
 use crate::executor::prepare::Item;
 use crate::playbook::PlayTask;
 use crate::template::Templar;
-use crate::vars::{VarStore, load_vars_file};
+use crate::vars::VarStore;
 
 use super::argspec::{action_name, unchanged_failure, unknown_args, validate_argument_spec};
 use super::controller::{assert_module, pause};
+use super::include_vars::run_include_vars;
 use super::output::summarise_exception;
 
 /// What a `debug: var:` naming a value that came from a managed host reports. The reference's
@@ -27,106 +28,6 @@ const UNTRUSTED_VAR: &str = "Task failed: Error while resolving `var` expression
 
 /// The help the reference's error block gives under that refusal's last cause.
 const UNTRUSTED_HELP: &str = "Templates and expressions must be defined by trusted sources such as playbooks or roles, not untrusted sources such as module results.";
-
-/// `include_vars`, run where every other controller-side module runs.
-///
-/// Measured on ansible-core 2.19.12: a file that is there sets each of its keys as a fact and
-/// answers `{"ansible_facts": {...}, "ansible_included_var_files": ["<abs>"], "changed": false}`,
-/// a `name:` puts the whole mapping under that one key, and a file that is nowhere fails the task
-/// with the paths it looked in spelled out one per line.
-///
-/// A deliberate divergence, recorded rather than hidden: these land as facts, which is precedence
-/// 20 here against the reference's own rank 19 for `include_vars`. The two differ only for a name
-/// a host variable also carries. They land once the task is judged, through
-/// [`super::record::record_local_facts`].
-fn run_include_vars(item: &Item, step: &Step, store: &Mutex<VarStore>) -> TaskResult {
-    let Some(name) = item
-        .args
-        .get("file")
-        .or_else(|| item.args.get("_raw_params"))
-        .and_then(Value::as_str)
-    else {
-        return TaskResult::failed_with("Task failed: 'include_vars' takes a file name");
-    };
-    let playbook_dir = store
-        .lock()
-        .expect("vars lock")
-        .playbook_dir()
-        .to_path_buf();
-    let searched = crate::vars::include_vars_paths(
-        &step.origin.file_dir,
-        step.origin.role_dir.as_deref(),
-        &playbook_dir,
-        name,
-    );
-    let Some(path) = searched.iter().find(|p| p.is_file()) else {
-        // The reference's own wording and its own shape, measured: `ansible_facts` and
-        // `ansible_included_var_files` are both present and empty, the paths are listed one per
-        // tab-indented line, and `msg` carries the sentence a task that died rather than failed
-        // gets.
-        let mut body = Map::new();
-        body.insert("ansible_facts".into(), json!({}));
-        body.insert("ansible_included_var_files".into(), json!([]));
-        body.insert("changed".into(), json!(false));
-        body.insert(
-            "message".into(),
-            json!(format!(
-                "Could not find or access '{name}'\nSearched in:\n{} on the Ansible Controller.\nIf you are using a module and expect the file to exist on the remote, see the remote_src option",
-                searched
-                    .iter()
-                    .map(|p| format!("\t{}", p.display()))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            )),
-        );
-        body.insert(
-            "msg".into(),
-            json!("Task failed: Action failed: Unknown error."),
-        );
-        body.insert("failed".into(), json!(true));
-        return TaskResult(body);
-    };
-    let loaded = match load_vars_file(path) {
-        Ok(map) => map,
-        // Measured: the reason travels as `message`, and `msg` is the sentence of a task that
-        // died, with the facts and the file list empty.
-        Err(err) => {
-            if let Some(vault) = err.downcast_ref::<crate::vars::VaultFile>() {
-                return TaskResult(
-                    json!({
-                        "ansible_facts": {},
-                        "ansible_included_var_files": [],
-                        "changed": false,
-                        "failed": true,
-                        "message": vault.reason,
-                        "msg": "Task failed: Action failed: Unknown error.",
-                    })
-                    .as_object()
-                    .cloned()
-                    .unwrap_or_default(),
-                );
-            }
-            return TaskResult::failed_with(format!("Task failed: {err:#}"));
-        }
-    };
-    let facts = match item.args.get("name").and_then(Value::as_str) {
-        Some(under) => {
-            let mut one = Map::new();
-            one.insert(under.to_string(), Value::Object(loaded));
-            one
-        }
-        None => loaded,
-    };
-    let mut r = Map::new();
-    r.insert("ansible_facts".into(), Value::Object(facts));
-    r.insert(
-        "ansible_included_var_files".into(),
-        json!([path.display().to_string()]),
-    );
-    r.insert("changed".into(), json!(false));
-    r.insert("failed".into(), json!(false));
-    TaskResult(r)
-}
 
 /// The modules in `LOCAL_MODULES` never leave the controller. `stop` is the run's interruption,
 /// which a `pause` waits on beside its timer: `None` is a pause the run's stop ended, which the

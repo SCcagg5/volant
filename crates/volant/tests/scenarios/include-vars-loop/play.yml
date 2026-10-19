@@ -1,0 +1,44 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: a loop over directories, each result under its own name
+      include_vars:
+        dir: "dirs/{{ item }}"
+        name: "set_{{ item }}"
+      loop: [one, two]
+      register: r
+    - debug: var=r
+    - debug:
+        msg: "{{ set_one.from }} {{ set_two.from }} {{ set_one.only_one }} {{ set_two.only_two }}"
+
+    - name: a loop over files with the free-form path
+      include_vars: "{{ item }}"
+      loop: [first.yml, second.yaml]
+      loop_control: {label: "{{ item }}"}
+    - debug:
+        msg: "{{ listed }} {{ second }}"
+
+    - name: with_first_found looks in vars next to the playbook
+      include_vars: "{{ item }}"
+      with_first_found: [nope.yml, found.yml]
+      register: first
+    - debug: var=first.results[0].ansible_included_var_files
+
+    - name: a loop item that fails does not stop the others
+      include_vars: {dir: "{{ item }}"}
+      loop: [dirs/one, dirs/missing, dirs/two]
+      register: mixed
+      ignore_errors: true
+    - debug:
+        msg: "{{ mixed.results | map(attribute='failed') | list }}"
+
+    - name: skipped when the condition is false
+      include_vars: {dir: dirs/one}
+      when: 1 == 2
+      register: skipped
+    - debug: var=skipped
+
+    - name: a directory read in check mode is read all the same
+      include_vars: {dir: dirs/two, name: checked}
+      check_mode: true
+    - debug: var=checked.only_two

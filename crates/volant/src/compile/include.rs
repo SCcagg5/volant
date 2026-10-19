@@ -299,28 +299,22 @@ pub(super) fn include_options(statement: &str, args: &Map<String, Value>) -> any
     )
 }
 
-/// Everything an `include_vars` can be told, and the seven it can be told that this release
-/// cannot honour.
-///
-/// `dir:` is measured to work in the reference, reading every file of a directory in name order,
-/// and the other six narrow which of those files are read or how their values are merged. Refused
-/// by their own names rather than read and dropped: a run that silently loaded none of a
-/// directory's variables would go on to apply a playbook against defaults nobody wrote.
-///
-/// Checked here, where the statement becomes a step, rather than in the module: that puts the
-/// refusal before the first connection for a playbook's own `include_vars` and inside the failing
-/// host's own task for one an include brought in, which is where each belongs.
+/// Everything an `include_vars` can be told. A name outside this list is refused before the first
+/// connection, for a playbook's own `include_vars` and inside the failing host's own task for one
+/// an include brought in, which is where each belongs. What the options mean together is the
+/// module's to say when it runs.
 pub(crate) fn include_vars_options(args: &Map<String, Value>) -> anyhow::Result<()> {
-    const SEARCHES: &[&str] = &[
+    const KNOWN: &[&str] = &[
+        "_raw_params",
+        "file",
+        "name",
+        "hash_behaviour",
         "dir",
         "depth",
         "extensions",
         "files_matching",
         "ignore_files",
         "ignore_unknown_extensions",
-        "hash_behaviour",
     ];
-    let mut known = vec!["_raw_params", "file", "name"];
-    known.extend_from_slice(SEARCHES);
-    unknown_options("include_vars", args, &known, SEARCHES)
+    unknown_options("include_vars", args, KNOWN, &[])
 }

@@ -228,6 +228,11 @@ pub fn shorten(text: &str, width: usize) -> String {
 /// `Origin: ...`, a blank line, then the task's line and the two before it, numbered, with a
 /// marker under the column: `SourceContext.from_origin` and its `__str__`.
 pub(crate) fn source_context(origin: &crate::playbook::Origin) -> String {
+    // A file with no position: the reference names a vaulted file that could not be opened by its
+    // path alone.
+    if origin.line == 0 {
+        return format!("Origin: {}", origin.path);
+    }
     let mut out = format!("Origin: {}:{}:{}", origin.path, origin.line, origin.col);
     let annotated = annotated_lines(origin);
     if !annotated.is_empty() {

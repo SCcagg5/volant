@@ -5342,3 +5342,177 @@ fn a_name_from_a_hosts_text_is_data_whatever_it_holds() {
         );
     }
 }
+
+/// What an `include_vars` writes keeps the trust of what it is made from: a value merged over
+/// host data is data too, and a value that replaces a variable takes the new value's status.
+#[cfg(unix)]
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    clippy::type_complexity,
+    reason = "one table of shapes, each row a file and what it must leave"
+)]
+async fn an_include_vars_merge_keeps_the_trust_of_both_sides() {
+    let tmp = scratch();
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("dir")).unwrap();
+    std::fs::write(root.join("r.yml"), "r: {extra: 1}\n").unwrap();
+    std::fs::write(root.join("held.yml"), "extra: 1\n").unwrap();
+    std::fs::write(root.join("dir/h.yml"), "h: {nested: {other: 1}}\n").unwrap();
+    std::fs::write(
+        root.join("nested.yml"),
+        "h: {nested: {other: 1}, more: [1]}\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("fresh.yml"), "r: {fresh: '{{ 40 + 2 }}'}\n").unwrap();
+    std::fs::write(root.join("scalar.yml"), "r: 5\n").unwrap();
+    std::fs::write(root.join("plain.yml"), "plain: {note: '{{ 40 + 2 }}'}\n").unwrap();
+    let path = |name: &str| root.join(name).display().to_string();
+    let host_dict = json!({"stdout": "{{ 1 + 1 }}", "nested": {"deep": "{{ 1 + 1 }}"}, "list": ["{{ 1 + 1 }}"]});
+    let table: Vec<(&str, Value, Vec<&str>, Vec<(&str, &str)>)> = vec![
+        // The file form, merged over a variable of a managed host.
+        (
+            "file",
+            json!({"file": path("r.yml"), "hash_behaviour": "merge"}),
+            vec!["r"],
+            vec![("r", "/stdout")],
+        ),
+        // Under a name.
+        (
+            "name",
+            json!({"file": path("held.yml"), "name": "r", "hash_behaviour": "merge"}),
+            vec!["r"],
+            vec![("r", "/stdout")],
+        ),
+        // A directory, every merged leaf of a nested mapping and a list.
+        (
+            "dir",
+            json!({"dir": path("dir"), "hash_behaviour": "merge"}),
+            vec!["h"],
+            vec![("h", "/stdout"), ("h", "/nested/deep"), ("h", "/list/0")],
+        ),
+        (
+            "nested",
+            json!({"file": path("nested.yml"), "hash_behaviour": "merge"}),
+            vec!["h"],
+            vec![("h", "/nested/deep"), ("h", "/list/0")],
+        ),
+        // Nothing mixes, and the new value is author text.
+        (
+            "replace",
+            json!({"file": path("fresh.yml"), "hash_behaviour": "replace"}),
+            vec![],
+            vec![],
+        ),
+        (
+            "default",
+            json!({"file": path("fresh.yml")}),
+            vec![],
+            vec![],
+        ),
+        // Author text laid over author text is still author text.
+        (
+            "author",
+            json!({"file": path("plain.yml"), "hash_behaviour": "merge"}),
+            vec![],
+            vec![],
+        ),
+        (
+            "a scalar replaces",
+            json!({"file": path("scalar.yml"), "hash_behaviour": "merge"}),
+            vec![],
+            vec![],
+        ),
+    ];
+    for (shape, args, data, kept) in table {
+        let templar = Templar::new(PathBuf::from("."));
+        let mut host_vars = HostVars::default();
+        for name in ["r", "h"] {
+            host_vars.map.insert(name.into(), host_dict.clone());
+            host_vars.untrusted.insert(name.into());
+        }
+        host_vars.map.insert("plain".into(), json!({"a": 1}));
+        let mut written = task("include_vars");
+        written.args = vars(args);
+        let item = Item {
+            args: written.args.clone(),
+            vars: host_vars,
+            ..local_item(json!({}))
+        };
+        let store = Mutex::new(one_host_store());
+        let step = Step {
+            kind: StepKind::Task,
+            task: PlayTask::empty(),
+            block: None,
+            section: crate::compile::Section::Body,
+            role: None,
+            origin: Arc::new(crate::compile::Origin::default()),
+            include_params: None,
+            hosts: None,
+        };
+        let result = run_local(
+            &written,
+            &item,
+            &step,
+            &templar,
+            &store,
+            0,
+            &mut watch::channel(false).1,
+        )
+        .await
+        .expect("nothing stops this run");
+        assert!(!result.failed(), "{shape}: {:?}", result.0);
+        let mut store = store.into_inner().unwrap();
+        record_local_facts(
+            &mut store,
+            &written,
+            std::slice::from_ref(&item),
+            &["h1".to_string()],
+            &[(None, result.clone())],
+            &templar,
+        );
+        let untrusted = store.untrusted_of("h1", &crate::vars::Scope::default());
+        for name in ["r", "h"] {
+            assert_eq!(
+                untrusted.contains(name),
+                data.contains(&name),
+                "{shape}: {name}"
+            );
+        }
+        let facts = result.0["ansible_facts"].as_object().unwrap();
+        for (name, leaf) in kept {
+            assert_eq!(
+                facts[name].pointer(leaf),
+                host_dict.pointer(leaf),
+                "{shape}: {name}{leaf} is kept as it was"
+            );
+        }
+    }
+}
+
+/// The `FAILED - RETRYING` line of an attempt that asks to be hidden is censored, whether the
+/// attempt is a task's own or a poll's, as the task's `no_log` censors it.
+#[tokio::test]
+async fn a_retry_line_follows_the_censoring_of_the_other_output() {
+    use super::async_job::announce_retry;
+    use crate::executor::coordinator::Event;
+    for (no_log, hides, expected) in [
+        (false, false, false),
+        (false, true, true),
+        (true, false, true),
+        (true, true, true),
+    ] {
+        let mut t = task("include_vars");
+        t.no_log = no_log.then_some(true);
+        let mut attempt = TaskResult(vars(json!({"changed": false, "token": "visible"})));
+        if hides {
+            attempt.0.insert("_ansible_no_log".into(), json!(true));
+        }
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        announce_retry(&tx, "h1", 0, "t".into(), &t, 1, attempt).await;
+        let Some(Event::Retrying { censored, .. }) = rx.recv().await else {
+            panic!("a retry line is sent");
+        };
+        assert_eq!(censored, expected, "no_log {no_log}, hides {hides}");
+    }
+}

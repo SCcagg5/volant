@@ -1,0 +1,116 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: a directory that is not there
+      include_vars: {dir: nowhere}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: a directory that is a file
+      include_vars: {dir: files/plain.yml}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: a file without a valid extension stops the directory and keeps what the directories before it gave
+      include_vars: {dir: mixed}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: the variables of a failed task are not set
+      debug:
+        msg: "{{ first | default('undef') }} {{ second | default('undef') }}"
+    - name: the same under a name
+      include_vars: {dir: mixed, name: held}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: a file that is not a mapping
+      include_vars: {dir: lists}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: a directory with nothing to read
+      include_vars: {dir: nothing, ignore_unknown_extensions: true}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: file and dir options together
+      include_vars: {dir: lists, file: files/plain.yml}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: depth is a dir option
+      include_vars: {file: files/plain.yml, depth: 1}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: extensions is a list or a string
+      include_vars: {dir: lists, extensions: 5}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: an ignore_files pattern that is no regular expression
+      include_vars: {dir: lists, ignore_files: ['(']}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: a files_matching pattern that is no regular expression
+      include_vars: {dir: lists, files_matching: '('}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: a files_matching pattern with an unclosed set
+      include_vars: {dir: lists, files_matching: '[ab'}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: a files_matching pattern with nothing to repeat
+      include_vars: {dir: lists, files_matching: '*a'}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: a depth that is not a number
+      include_vars: {dir: lists, depth: '2'}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: a name that is not hashable
+      include_vars: {dir: lists, name: [x]}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: a file that is not a mapping
+      include_vars: {file: files/list.yml}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: a file with a scalar
+      include_vars: {file: files/scalar.yml}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: an empty file
+      include_vars: {file: files/empty.yml}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: a file that is a directory
+      include_vars: {file: files/adir.yml}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: a missing file under a name keeps the name
+      include_vars: {file: nowhere.yml, name: held}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: no file at all
+      include_vars: {}
+      register: r
+      ignore_errors: true
+    - debug: var=r
+    - name: an empty file name
+      include_vars: {file: ''}
+      register: r
+      ignore_errors: true
+    - debug: var=r
