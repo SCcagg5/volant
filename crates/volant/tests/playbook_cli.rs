@@ -4972,6 +4972,44 @@ fn a_fact_carrying_a_result_cannot_name_a_variable() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A `delegate_to` built from text a managed host returned names a host of that text. Whatever it
+/// holds stays text in the delegate's own variables, in `hostvars` and in the output, and nothing
+/// of it runs on the controller. The reference prints the text and fails to connect to it.
+#[rstest]
+#[case::run_once("delegate-run-once.yml", "UNREACHABLE")]
+#[case::loop_("delegate-loop.yml", "UNREACHABLE")]
+#[case::each_item_names_one("delegate-loop-item.yml", "")]
+#[case::facts_written_on_it("delegate-facts.yml", "changed: [h1 -> {{ lookup('pipe', 'touch ")]
+#[case::its_name_in_a_variable(
+    "delegate-name-in-vars.yml",
+    "changed: [h1 -> {{ lookup('pipe', 'touch "
+)]
+fn a_delegate_named_by_a_result_stays_text(#[case] playbook: &str, #[case] shown: &str) {
+    let (dir, marker) = trust_dir(
+        &format!("delegate-{}", playbook.trim_end_matches(".yml")),
+        "h1 ansible_connection=local\n",
+    );
+    let out = volant_within(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            "-e",
+            &format!("payload={}", dir.join("payload.txt").display()),
+            &fixture(&format!("trust/{playbook}")),
+        ],
+        std::time::Duration::from_secs(30),
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !marker.exists(),
+        "the text a host returned ran on the controller:\n{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains(shown), "{playbook}:\n{stdout}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A directory holding one executable `ssh` that writes `marker` and exits 255, first on `PATH`,
 /// beside an inventory file holding `inventory`. Nothing here reaches the network: the fake is
 /// what a run opening an ssh connection finds, and the marker is what it leaves behind.
