@@ -38,6 +38,7 @@ fn a_missing_file_gives_no_answer() {
     );
 }
 
+#[cfg(unix)]
 /// The process number is the first field after the prefix, a real one.
 #[rstest::rstest]
 #[case::a_run("volant-askpass-4242-aB3xYz", Some(4242))]
@@ -50,6 +51,7 @@ fn the_process_number_is_read_from_the_name(#[case] name: &str, #[case] want: Op
     assert_eq!(owner_pid(name), want);
 }
 
+#[cfg(unix)]
 /// A process that has ended, so its number is free.
 fn dead_pid() -> i32 {
     let mut child = std::process::Command::new("true").spawn().unwrap();
@@ -58,6 +60,7 @@ fn dead_pid() -> i32 {
     pid
 }
 
+#[cfg(unix)]
 fn make_dir(path: &Path, mode: u32) {
     use std::os::unix::fs::PermissionsExt as _;
     std::fs::create_dir(path).unwrap();
@@ -65,6 +68,7 @@ fn make_dir(path: &Path, mode: u32) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
 }
 
+#[cfg(unix)]
 /// What a start removes: the private directory of a process that is gone, and nothing else.
 #[rstest::rstest]
 #[case::a_dead_run("dead", true)]
@@ -113,6 +117,7 @@ fn a_start_removes_only_what_a_dead_run_left(#[case] kind: &str, #[case] removed
     }
 }
 
+#[cfg(unix)]
 /// A directory whose lock another run holds is that run's own, whatever its name says; one whose
 /// holder is gone is stale.
 #[test]

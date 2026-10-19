@@ -4,11 +4,11 @@ use std::sync::Arc;
 
 use crate::executor::Abort;
 
-/// Ctrl-C, SIGTERM and SIGHUP all request a clean stop: running batches are cancelled, the
-/// recap is printed, and the process exits with ansible-playbook's code 99. A hang-up is what a
-/// closed terminal sends; it ends the run the way the other two do, so what the run holds, the
-/// password file among it, is released. A run started with SIGHUP ignored, as `nohup` does,
-/// keeps ignoring it.
+/// Ctrl-C and SIGTERM both request a clean stop: running batches are cancelled, the recap is
+/// printed, and the process exits with ansible-playbook's code 99. SIGHUP, which ansible-playbook
+/// does not catch, still ends the process at once by the signal itself (code 129, no recap), but
+/// only once the connection password's directory is removed. A run started with SIGHUP ignored,
+/// as `nohup` does, keeps ignoring it.
 pub(super) fn spawn_signal_watcher(stop: Arc<Abort>) {
     #[cfg(unix)]
     {
@@ -27,15 +27,24 @@ pub(super) fn spawn_signal_watcher(stop: Arc<Abort>) {
             signal(SignalKind::hangup()).ok()
         };
         tokio::spawn(async move {
-            tokio::select! {
-                _ = int.recv() => {}
-                _ = term.recv() => {}
+            let hung_up = tokio::select! {
+                _ = int.recv() => false,
+                _ = term.recv() => false,
                 _ = async {
                     match hup.as_mut() {
                         Some(hup) => hup.recv().await,
                         None => std::future::pending().await,
                     }
-                } => {}
+                } => true,
+            };
+            if hung_up {
+                crate::askpass::remove_now();
+                // SAFETY: the default action back in place, the signal raised again ends the
+                // process the way it would have without the handler.
+                unsafe {
+                    libc::signal(libc::SIGHUP, libc::SIG_DFL);
+                    libc::raise(libc::SIGHUP);
+                }
             }
             stop.interrupt();
         });

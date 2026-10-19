@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The program as `ssh` runs it for `SSH_ASKPASS`: the password on stdout for a password
 //! prompt, nothing and a failure for any other question.
+#![cfg(unix)]
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -153,10 +154,10 @@ impl Sandbox {
     }
 }
 
-fn finish(mut child: std::process::Child) -> Option<i32> {
+fn finish(mut child: std::process::Child) -> std::process::ExitStatus {
     for _ in 0..1200 {
         if let Some(status) = child.try_wait().unwrap() {
-            return status.code();
+            return status;
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
@@ -173,14 +174,19 @@ fn send(signal: &str, pid: u32) {
     assert!(sent.success());
 }
 
-/// The run that is stopped at a point where `ssh` has the password leaves nothing behind, and the
-/// file it had was in a private directory under the runtime directory.
+/// A run stopped while `ssh` has the password leaves nothing behind, and the file was in a private
+/// directory under the runtime directory. SIGHUP kills it, as it kills ansible-playbook.
 #[rstest::rstest]
-#[case::interrupt("INT")]
-#[case::terminate("TERM")]
-#[case::hang_up("HUP")]
-fn a_stopped_run_removes_its_password_file(#[case] signal: &str) {
+#[case::interrupt("INT", Some(99), None)]
+#[case::terminate("TERM", Some(99), None)]
+#[case::hang_up("HUP", None, Some(libc::SIGHUP))]
+fn a_stopped_run_removes_its_password_file(
+    #[case] signal: &str,
+    #[case] code: Option<i32>,
+    #[case] by_signal: Option<i32>,
+) {
     use std::os::unix::fs::MetadataExt as _;
+    use std::os::unix::process::ExitStatusExt as _;
     let sandbox = Sandbox::new();
     let child = sandbox.start("play.yml", "hang");
     sandbox.wait_for("pid");
@@ -209,7 +215,8 @@ fn a_stopped_run_removes_its_password_file(#[case] signal: &str) {
     );
     assert_eq!(files[0].metadata().unwrap().mode() & 0o7777, 0o600);
     send(signal, child.id());
-    assert_eq!(finish(child), Some(99));
+    let status = finish(child);
+    assert_eq!((status.code(), status.signal()), (code, by_signal));
     assert_eq!(sandbox.left(), Vec::<String>::new());
     let survivor = std::fs::read_to_string(sandbox.path("pid")).unwrap();
     let _ = Command::new("kill").arg(survivor.trim()).status();
@@ -220,7 +227,7 @@ fn a_stopped_run_removes_its_password_file(#[case] signal: &str) {
 fn an_unreachable_host_leaves_no_password_file() {
     let sandbox = Sandbox::new();
     let child = sandbox.start("play.yml", "unreachable");
-    assert_eq!(finish(child), Some(4));
+    assert_eq!(finish(child).code(), Some(4));
     assert!(sandbox.path("answer").exists(), "ssh was answered once");
     assert_eq!(sandbox.left(), Vec::<String>::new());
 }
@@ -230,7 +237,7 @@ fn an_unreachable_host_leaves_no_password_file() {
 fn a_finished_run_leaves_no_password_file() {
     let sandbox = Sandbox::new();
     let child = sandbox.start("local.yml", "hang");
-    assert_eq!(finish(child), Some(0));
+    assert_eq!(finish(child).code(), Some(0));
     assert_eq!(sandbox.left(), Vec::<String>::new());
 }
 
@@ -261,7 +268,7 @@ fn a_killed_run_leaves_a_private_directory_the_next_run_removes() {
         0o700
     );
     let next = sandbox.start("local.yml", "hang");
-    assert_eq!(finish(next), Some(0));
+    assert_eq!(finish(next).code(), Some(0));
     assert_eq!(sandbox.left(), Vec::<String>::new());
 }
 
@@ -278,6 +285,6 @@ fn an_ignored_hang_up_does_not_stop_the_run() {
         child.try_wait().unwrap().is_none(),
         "the run ended on a signal it was told to ignore"
     );
-    let code = finish(child);
+    let code = finish(child).code();
     assert!(code.is_some() && code != Some(99), "{code:?}");
 }

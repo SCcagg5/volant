@@ -7,12 +7,13 @@
 //! `ssh` closes every descriptor above 2 before it starts its askpass, so a descriptor the run
 //! holds cannot carry the password and a path has to. The file sits in a directory of its own,
 //! mode 0700, named after the process. The run removes the directory when it ends, when it
-//! unwinds from a panic and when it stops on SIGINT, SIGTERM or SIGHUP. A kill by SIGKILL, or by
-//! the out-of-memory killer, cannot run any code: the directory stays, and the next run of the
-//! same user removes it, because the process in its name is gone and no run holds the lock
-//! that the directory's owner took on it.
+//! unwinds from a panic, when it stops on SIGINT or SIGTERM, and before it dies of SIGHUP. A
+//! kill by SIGKILL, or by the out-of-memory killer, cannot run any code: the directory stays,
+//! and the next run of the same user removes it, because the process in its name is gone and
+//! no run holds the lock that the directory's owner took on it.
 
 use std::ffi::OsString;
+#[cfg(unix)]
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -51,20 +52,31 @@ pub fn install(password: &str) -> std::io::Result<Installed> {
 /// The directories a run's own directory can sit in: the user's runtime directory when it is
 /// private, then the temporary directory.
 fn bases() -> Vec<PathBuf> {
-    let uid = effective_uid();
-    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .filter(|dir| dir.is_absolute())
-        .filter(|dir| {
-            std::fs::symlink_metadata(dir)
-                .is_ok_and(|m| m.is_dir() && m.uid() == uid && m.mode() & 0o077 == 0)
-        });
+    #[cfg(unix)]
+    let runtime = {
+        let uid = effective_uid();
+        std::env::var_os("XDG_RUNTIME_DIR")
+            .map(PathBuf::from)
+            .filter(|dir| dir.is_absolute())
+            .filter(|dir| {
+                std::fs::symlink_metadata(dir)
+                    .is_ok_and(|m| m.is_dir() && m.uid() == uid && m.mode() & 0o077 == 0)
+            })
+    };
+    #[cfg(not(unix))]
+    let runtime: Option<PathBuf> = None;
     runtime.into_iter().chain([std::env::temp_dir()]).collect()
 }
 
+#[cfg(unix)]
 fn effective_uid() -> u32 {
     // SAFETY: `geteuid` takes no argument and cannot fail.
     unsafe { libc::geteuid() }
+}
+
+#[cfg(not(unix))]
+fn effective_uid() -> u32 {
+    0
 }
 
 /// A new directory, mode 0700 and named after this process, in the first base that takes it, and
@@ -74,11 +86,12 @@ fn private_dir() -> std::io::Result<(tempfile::TempDir, std::fs::File)> {
     let prefix = format!("{DIR_PREFIX}{}-", std::process::id());
     let mut last = std::io::Error::other("no directory to keep the password file in");
     for base in bases() {
+        let mut builder = tempfile::Builder::new();
+        builder.prefix(&prefix);
         // Mode 0700 from the `mkdir` itself: the default is the umask's, 0755 on most accounts.
-        let made = tempfile::Builder::new()
-            .prefix(&prefix)
-            .permissions(std::fs::Permissions::from_mode(0o700))
-            .tempdir_in(base);
+        #[cfg(unix)]
+        builder.permissions(std::fs::Permissions::from_mode(0o700));
+        let made = builder.tempdir_in(base);
         match made {
             Ok(dir) => {
                 let lock = std::fs::File::open(dir.path())?;
@@ -115,26 +128,45 @@ fn remove_stale_in(base: &Path, uid: u32) {
             continue;
         }
         let path = entry.path();
-        if is_stale(&path, uid) {
+        // The lock stays held while the directory goes, so no other sweep judges it meanwhile.
+        if let Some(_held) = claim_stale(&path, uid) {
             let _ = std::fs::remove_dir_all(&path);
         }
     }
 }
 
-/// Whether `path` is a real directory of `uid`, mode 0700, that no run holds the lock of. It is
-/// opened without following a link, and judged by what the descriptor says.
-fn is_stale(path: &Path, uid: u32) -> bool {
+/// The open, locked directory at `path` when it is a real directory of `uid`, mode 0700, that no
+/// run holds the lock of. It is opened without following a link, and judged by what the
+/// descriptor says.
+#[cfg(unix)]
+fn claim_stale(path: &Path, uid: u32) -> Option<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt as _;
     let Ok(dir) = std::fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
         .open(path)
     else {
-        return false;
+        return None;
     };
-    dir.metadata()
-        .is_ok_and(|m| m.is_dir() && m.uid() == uid && m.mode() & 0o7777 == 0o700)
-        && !matches!(dir.try_lock(), Err(std::fs::TryLockError::WouldBlock))
+    let mine = dir
+        .metadata()
+        .is_ok_and(|m| m.is_dir() && m.uid() == uid && m.mode() & 0o7777 == 0o700);
+    // A file system with no locks leaves the judgement to the process number alone.
+    (mine && !matches!(dir.try_lock(), Err(std::fs::TryLockError::WouldBlock))).then_some(dir)
+}
+
+/// Without owners and modes to judge by, nothing is swept.
+#[cfg(not(unix))]
+fn claim_stale(_: &Path, _: u32) -> Option<std::fs::File> {
+    None
+}
+
+/// Removes the run's password directory at once. For a stop that runs no destructor: the
+/// process is about to die of a signal.
+pub fn remove_now() {
+    if let Some(dir) = FILE.get().and_then(|file| file.parent()) {
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 /// The process number in the name of a run's directory.
