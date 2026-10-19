@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
-use minijinja::machinery::{Instruction, Instructions, WhitespaceConfig};
+use minijinja::machinery::{Instruction, Instructions};
 use minijinja::{Environment, ErrorKind};
 use serde_json::{Map, Value};
 
@@ -17,8 +17,7 @@ use super::context::{Vars, begin, context_of, is_literal, reads, take_failure};
 use super::env::{environment, holds_undefined, truthy, type_name};
 use super::filters;
 use super::vm::{
-    TemplateReads, convert_error, eval_expr, keep_literal, render_str, single_expression,
-    template_reads,
+    TemplateReads, convert_error, eval_expr, keep_literal, single_expression, template_reads,
 };
 use super::{RESOLVING, Tainted, TemplateError};
 
@@ -242,27 +241,6 @@ impl Templar {
         Ok(value)
     }
 
-    fn render_once(&self, text: &str, ctx: &minijinja::Value) -> Result<Value, TemplateError> {
-        if !Self::is_template(text) {
-            return Ok(Value::String(text.to_string()));
-        }
-        // Whitespace around the expression, a final newline included, is text: the reference
-        // keeps it, so the result is a string.
-        if text.trim() == text
-            && let Some(expr) = single_expression(text)
-        {
-            return self.evaluate_in(expr, ctx);
-        }
-        let ws = WhitespaceConfig {
-            keep_trailing_newline: true,
-            ..WhitespaceConfig::default()
-        };
-        let rendered = render_str(self, "<string>", text, ctx, ws)
-            .map(Value::String)
-            .map_err(convert_error);
-        take_failure(ctx).map_or(rendered, Err)
-    }
-
     /// `render`, one pass: a result that is itself a template is not rendered again, which is how
     /// the reference templates a play's `vars_prompt` before it asks.
     pub(crate) fn render_one_pass<'a>(
@@ -394,7 +372,11 @@ impl Templar {
         Ok((value, tainted.load(Ordering::Relaxed)))
     }
 
-    fn evaluate_in(&self, expr: &str, ctx: &minijinja::Value) -> Result<Value, TemplateError> {
+    pub(super) fn evaluate_in(
+        &self,
+        expr: &str,
+        ctx: &minijinja::Value,
+    ) -> Result<Value, TemplateError> {
         let value = eval_expr(self, expr, ctx).map_err(convert_error);
         // A variable the expression read failed to render: that is the error, whatever the
         // undefined value it was read as did to the expression.

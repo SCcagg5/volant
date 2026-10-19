@@ -101,6 +101,16 @@ The file's own trailing newline survives the render. [Action plugins](/reference
 - In a template file, `{% include %}` and `{% import %}` fail: nothing loads a second file during a render.
 - The six delimiter options (`variable_start_string` and its five relatives) and an `output_encoding` other than UTF-8 are not supported yet.
 
+## Limits on YAML
+
+Volant refuses a YAML text that it cannot load without risk. The error names the limit. A playbook, a variable file, an inventory and the text a `from_yaml` filter reads all follow the same limits.
+
+- A document nests collections at most 489 levels deep. ansible-core loads a file down to 489 levels and stops it at 490 with `maximum recursion depth exceeded`, and Volant gives the same message. An alias counts as the levels of the node it names. A flow collection stops earlier, at 255 levels, because the scanner counts them in a `u8`. ansible-core loads a flow collection down to 489, so a flow-heavy file between 256 and 489 levels still differs.
+- A text holds one document, as in ansible-core: a second `---` stops the load. The limits below count the whole text.
+- The anchors and aliases of one text copy at most 1,000,000 nodes and 64 MiB of scalar text. A copy is made at each anchor and at each alias. ansible-core shares a node and copies nothing, so it loads a text that stands for billions of nodes and fails only when a task walks the value. For example, 5,100 hosts that share a mapping of 100 keys by alias go over the node limit.
+- A `from_yaml` text over a limit fails the task that reads it, and the other hosts go on. A file over a limit stops the run before it starts, as a syntax error does.
+- A fact nested deeper than the YAML limit is not written to the `jsonfile` fact cache: a `set_fact` with `cacheable: true` prints a warning and keeps the fact for the run only. The file holds two levels of JSON for each level of the value.
+
 ## Performance on large inventories
 
 Resolving variables costs more than linear time in the number of hosts. Two changes have removed most of that cost: every host reads one shared `hostvars` map, and inventory-wide values such as `groups` are built once per batch instead of once per host and task. Nothing in a playbook, an inventory or `ansible.cfg` changes this cost.

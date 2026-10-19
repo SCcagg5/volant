@@ -1,0 +1,6 @@
+# A play whose `hosts` is a template still gathers facts from the hosts it found, and one named by
+# a group `add_host` made runs: both modules need the reference's Python.
+runs:
+  - args: [-i, inventory.ini, gather.yml]
+  - args: [-i, inventory.ini, added.yml]
+needs: ["ansible-core"]

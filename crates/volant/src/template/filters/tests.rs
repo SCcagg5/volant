@@ -158,10 +158,19 @@ fn the_filters_print_what_the_reference_printed() {
         );
     }
     {
-        let vars = serde_json::json!({"doc": "a: 1\nb: [x, y]", "bad": "a: [1"});
+        let vars = serde_json::json!({
+            "doc": "a: 1\nb: [x, y]",
+            "bad": "a: [1",
+            "two": "a: 1\n---\nb: 2\n",
+        });
         assert_eq!(
             render("{{ doc | from_yaml }}", vars.clone()).unwrap(),
             serde_json::json!({"a": 1, "b": ["x", "y"]})
+        );
+        assert!(
+            render("{{ two | from_yaml }}", vars.clone())
+                .unwrap_err()
+                .contains("from_yaml: expected a single document in the stream"),
         );
         assert!(
             render("{{ bad | from_yaml }}", vars)

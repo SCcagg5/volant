@@ -10,8 +10,10 @@ mod coordinator;
 mod debugger;
 mod driver;
 mod free;
+mod hosts_vars;
 mod include;
 mod play_checks;
+mod play_hosts;
 mod prepare;
 mod report;
 mod run;
@@ -39,6 +41,7 @@ use coordinator::run_batch;
 pub(crate) use driver::{expressions, strings, task_strings};
 pub(crate) use play_checks::as_bool_value;
 use play_checks::{check_gather_keywords, load_play_vars_files, max_fail_percentage, play_flags};
+pub(crate) use play_hosts::{Context as HostsContext, is_templated, render_hosts};
 pub use state::{Abort, LinkKey, PlayEnd, Reboots, RunState};
 
 /// Ansible's default `timeout`: seconds to establish a connection.
@@ -103,7 +106,7 @@ pub async fn run_play(
     // A pattern that matched nothing is the one case with no batch at all: the reference prints
     // the banner and says so, and the play keyword that would have cut the batches is never read.
     if hosts.is_empty() {
-        out.play(&play.name);
+        out.play_of(play);
         out.no_hosts();
         return Ok(PlayEnd { stop_run: false });
     }
@@ -180,7 +183,7 @@ pub async fn run_play(
         // One banner per batch, measured - and it prints even when the batch has nothing left to
         // run, which is the shape a play gets when every host it resolved has already failed.
         if live.is_empty() {
-            out.play(&play.name);
+            out.play_of(play);
             continue;
         }
         // Read here, once per batch about to run and not once for the whole play: see
@@ -207,7 +210,7 @@ pub async fn run_play(
         // After the `vars_files`: measured on ansible-core 2.19.12, an entry that renders to a
         // number or does not render at all stops the run before the banner, with nothing on
         // stdout.
-        out.play(&play.name);
+        out.play_of(play);
         // A cache file the run could not read stops it here, after the banner: warning, error,
         // exit 1, no recap.
         let failure = state.vars.lock().expect("vars lock").take_cache_failure();
