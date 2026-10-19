@@ -126,6 +126,15 @@ pub(super) fn resolve_include(
             Ok(request) => match crate::compile::expand_include(compiled, step, &request).and_then(
                 |mut expanded| {
                     crate::preflight::check_built(&expanded, plan.python.as_deref())?;
+                    // The lookups of its `with_` loops, which the reference resolves when it
+                    // loads the file: a name that is none fails the include, not a task of it.
+                    plan.steps()
+                        .resolved
+                        .ensure(
+                            crate::collection::tasks_of(&expanded).collect::<Vec<_>>(),
+                            templar.bridge().map(|bridge| &**bridge),
+                        )
+                        .map_err(|e| anyhow::anyhow!(e))?;
                     if plan.strategy.free() {
                         warnings.extend(super::free::loosen(&mut expanded));
                     }
