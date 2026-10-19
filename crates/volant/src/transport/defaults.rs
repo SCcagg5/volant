@@ -76,6 +76,14 @@ impl BecomeMethod {
             _ => None,
         }
     }
+
+    /// The name a playbook gives it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Sudo => "sudo",
+            Self::Su => "su",
+        }
+    }
 }
 
 /// Privilege escalation for one link: run the agent as `user` through `sudo` or `su`.
@@ -171,9 +179,12 @@ impl std::fmt::Debug for Secret {
     }
 }
 
-/// The settings of a host that only its own variables give.
+/// The settings of a host kept apart from the rest of an [`SshTarget`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HostOwn {
+    /// `ssh -i`: `ansible_ssh_private_key_file` or `ansible_private_key_file`, else the
+    /// command line's or `ansible.cfg`'s.
+    pub private_key: Option<PathBuf>,
     /// The connection password a host variable gave. `None` leaves the one of the command line,
     /// if any; an empty one offers no password at all.
     pub password: Option<Secret>,
@@ -186,9 +197,8 @@ pub struct SshTarget {
     pub address: String,
     pub port: Option<u16>,
     pub user: Option<String>,
-    pub private_key: Option<PathBuf>,
-    /// What the host's own variables add to the command line's: its password and its `ssh`.
-    /// Boxed so the two variants of a `Transport` stay close in size.
+    /// The key file, the password and the `ssh` program. Boxed so the two variants of a
+    /// `Transport` stay close in size.
     pub own: Box<HostOwn>,
     pub common_args: Vec<String>,
     pub extra_args: Vec<String>,

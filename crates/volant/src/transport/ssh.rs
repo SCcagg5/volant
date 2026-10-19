@@ -102,7 +102,7 @@ impl SshTarget {
         if let Some(port) = self.port {
             argv.extend(["-p".into(), port.to_string()]);
         }
-        if let Some(key) = &self.private_key {
+        if let Some(key) = &self.own.private_key {
             argv.extend(["-i".into(), key.display().to_string()]);
         }
         argv.extend(self.common_args.iter().cloned());

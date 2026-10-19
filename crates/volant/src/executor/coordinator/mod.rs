@@ -28,7 +28,7 @@ mod meta;
 mod publish;
 mod types;
 
-use display::{header, header_for, report_result, switch_header};
+use display::{arrived, header, header_for, report_result, switch_header};
 use events::{
     Held, answer, book, debug_ask, debugging, show_now, shows_a_line, unreachable_ask,
     unreachable_left,
@@ -390,7 +390,7 @@ pub(super) async fn run_batch(
                             waiting.hold(event, lost, sank)
                         } else {
                             book!((&key.0, key.1), lost, sank);
-                            event
+                            arrived(event, stats)
                         };
                         if free {
                             let asks = debug_ask(&event, &plan);
@@ -835,7 +835,7 @@ pub(super) async fn run_batch(
             | Event::Warning { .. }
             | Event::Display { .. }
             | Event::UnreachableIgnored { .. }) => {
-                report_result(event, stats, out);
+                report_result(arrived(event, stats), stats, out);
             }
         }
     }

@@ -9,7 +9,7 @@ use volant_protocol::modules::short_name;
 use crate::keywords::BLOCK_SECTIONS;
 use crate::yaml::{field, to_json};
 
-use super::keywords::is_free_form;
+use super::keywords::{is_command_line, is_free_form};
 use super::model::{HandlerTask, Throttle};
 use super::origin::{Origin, value_origin};
 use super::task::parse_task;
@@ -235,12 +235,10 @@ pub(super) fn module_args(module: &str, value: &Yaml) -> anyhow::Result<Map<Stri
                 args = map;
             }
         }
-        // `script`'s line is the reference's `parse_kv` with `check_raw`: its options come out,
-        // the rest is the script and its arguments.
-        Yaml::Value(Scalar::String(s))
-            if crate::action_plugins::kind(module)
-                == Some(crate::action_plugins::Kind::Bridged("script")) =>
-        {
+        // The line of `command`, `shell`, `raw` and `script` is the reference's `parse_kv` with
+        // `check_raw`: the command options come out, the rest is the command or the script and
+        // its arguments, and a `key=value` word that is not an option stays in it.
+        Yaml::Value(Scalar::String(s)) if is_command_line(module) => {
             let (options, raw) = crate::splitter::parse_kv_raw(s)?;
             for (k, v) in options {
                 args.insert(k, Value::String(v));

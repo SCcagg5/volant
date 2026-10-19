@@ -734,6 +734,7 @@ fn every_layer_keeps_its_trust_through_the_layered_view() {
             facts: Some(facts),
             untrusted: Some(&untrusted),
             untrusted_hosts: Some(&untrusted_hosts),
+            base: None,
         });
         let names = [
             "d", "i", "g", "gp", "p", "f", "rv", "t", "sf", "su", "rp", "e", "built", "groups",
@@ -752,6 +753,7 @@ fn every_layer_keeps_its_trust_through_the_layered_view() {
                             facts: Some(facts),
                             untrusted: Some(&soiled),
                             untrusted_hosts: Some(&untrusted_hosts),
+                            base: None,
                         },
                     )
                     .unwrap()
@@ -829,6 +831,7 @@ fn a_gathered_fact_reaches_a_template_lookup() {
                     facts: Some(facts),
                     untrusted: Some(&untrusted),
                     untrusted_hosts: None,
+                    base: None,
                 },
             )
             .unwrap()
@@ -1164,4 +1167,43 @@ fn a_role_default_loses_to_the_controller_python_of_the_implicit_localhost() {
         .clone();
     let v = store.for_host("localhost", &sc);
     assert_eq!(v["ansible_python_interpreter"], json!("/ctl/python3"));
+}
+
+/// The variables the items of a loop share leave the templates in the map, keep the text of a
+/// managed host as data, and still answer every read the whole map did.
+#[test]
+fn the_variables_items_share_keep_templates_apart_and_stay_readable() {
+    let mut vars = HostVars::default();
+    vars.map.insert("plain".into(), json!(1));
+    vars.map.insert("built".into(), json!("{{ item }}"));
+    vars.map.insert("printed".into(), json!("{{ 7 * 6 }}"));
+    vars.untrusted.insert("printed".into());
+    let mut vars = vars.shared_by_items();
+    assert!(vars.map.contains_key("built") && vars.map.len() == 1);
+    assert_eq!(vars.get("plain"), Some(&json!(1)));
+    assert_eq!(vars.get("printed"), Some(&json!("{{ 7 * 6 }}")));
+    assert!(vars.untrusted.contains("printed"));
+    assert_eq!(vars.own_variables().len(), 3);
+    // A write lands over the shared value and leaves the share alone.
+    vars.insert("plain".into(), json!(2));
+    assert_eq!(vars.get("plain"), Some(&json!(2)));
+    assert_eq!(vars.base.get("plain"), Some(&json!(1)));
+    let templar = Templar::new(std::env::temp_dir());
+    assert_eq!(
+        templar.render("{{ plain }}-{{ printed }}", &vars).unwrap(),
+        json!("2-{{ 7 * 6 }}")
+    );
+    // A template left in the map that reads the host's text from the share renders it as data
+    // once the item is bound, and is data itself from then on.
+    vars.insert("item".into(), json!("a"));
+    vars.insert("echo".into(), json!("{{ printed }}-{{ item }}"));
+    let (map, untrusted) = templar.resolve_vars_tainted(&vars);
+    assert_eq!(map["built"], json!("a"));
+    assert!(untrusted.contains("echo") && !untrusted.contains("built"));
+    vars.map = map;
+    vars.untrusted = untrusted;
+    assert_eq!(
+        templar.render("{{ echo }}", &vars).unwrap(),
+        json!("{{ 7 * 6 }}-a")
+    );
 }

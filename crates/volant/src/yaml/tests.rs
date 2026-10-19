@@ -183,6 +183,86 @@ fn unsafe_text_escapes_and_reads_back_whatever_it_holds() {
     }
 }
 
+/// The lookup this module used before it had a table: it walks the text from the start.
+fn char_to_byte_by_walking(text: &str, chars: usize) -> usize {
+    text.char_indices()
+        .nth(chars)
+        .map_or(text.len(), |(i, _)| i)
+}
+
+/// The offset table gives the offset a walk from the start gives, at every character of a text
+/// and past both ends of it.
+#[test]
+fn the_offset_table_matches_a_walk_from_the_start() {
+    let long_ascii = "key: value\n".repeat(500);
+    let long_mixed = "clé: «valeur» 日本語 😀\r\n".repeat(200);
+    for text in [
+        "",
+        "a",
+        "\n",
+        "\r\n",
+        "a: 1\r\nb: 2\r\n",
+        "plain ascii: yes\n",
+        "é",
+        "é: 1\n",
+        "x: é\n",
+        "日本語: 日本語\n",
+        "emoji: 😀😀 end\n",
+        "😀",
+        "a\u{0}b\u{7f}c",
+        "tab\there \u{a0} nbsp \u{feff}bom",
+        long_ascii.as_str(),
+        long_mixed.as_str(),
+    ] {
+        let offsets = Offsets::new(text);
+        let count = text.chars().count();
+        for chars in (0..=count + 3).chain([usize::MAX]) {
+            assert_eq!(
+                offsets.byte(chars),
+                char_to_byte_by_walking(text, chars),
+                "{text:?} at character {chars}"
+            );
+        }
+    }
+}
+
+/// Scalars after multi-byte characters keep the typing their source text gives them.
+#[test]
+fn scalars_after_multibyte_text_are_typed_from_their_own_source() {
+    let docs = load(
+        "# é 😀\nnom: «é»\nflag: yes\nmode: 010\nbig: 1_000\n",
+        "t.yml",
+    )
+    .unwrap();
+    assert_eq!(
+        to_json(&docs[0]).unwrap(),
+        json!({"nom": "«é»", "flag": true, "mode": 8, "big": 1000})
+    );
+}
+
+/// A document of 20000 mappings loads in time that grows with its size. The bound is far above
+/// what a linear load takes, and far below what a quadratic one takes.
+#[test]
+fn a_document_of_twenty_thousand_mappings_loads() {
+    let mut text = String::from("---\n");
+    for i in 0..20_000 {
+        let port = 8000 + i % 1000;
+        writeln!(
+            text,
+            "service_{i}:\n  name: web-{i}\n  port: {port}\n  enabled: yes"
+        )
+        .unwrap();
+        writeln!(text, "  tags: [a, \"b {i}\"]").unwrap();
+    }
+    let started = std::time::Instant::now();
+    let docs = load(&text, "t.yml").unwrap();
+    let took = started.elapsed();
+    let value = to_json(&docs[0]).unwrap();
+    assert_eq!(value.as_object().unwrap().len(), 20_000);
+    assert_eq!(value["service_19999"]["enabled"], json!(true));
+    assert!(took < std::time::Duration::from_secs(60), "took {took:?}");
+}
+
 #[test]
 fn syntax_errors_name_the_source() {
     let err = load("a: [1, 2\n", "broken.yml").unwrap_err();

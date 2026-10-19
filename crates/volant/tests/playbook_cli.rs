@@ -1016,6 +1016,71 @@ fn an_unreadable_ansible_cfg_is_ignored_with_a_warning() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// A planted `ansible.cfg` in a world-writable directory (sticky bit or not) is ignored with the
+/// reference's warning on stderr; a directory without the world-write bit is read as before.
+#[rstest]
+#[case::world_writable(0o777, false)]
+#[case::sticky_and_world_writable(0o1777, false)]
+#[case::only_the_world_bit(0o757, false)]
+#[case::group_writable(0o770, true)]
+#[case::owner_only(0o755, true)]
+fn an_ansible_cfg_in_a_world_writable_directory_is_ignored_with_a_warning(
+    #[case] mode: u32,
+    #[case] read: bool,
+) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let work = dir.path();
+    std::fs::write(
+        work.join("ansible.cfg"),
+        "[defaults]\nvault_password_file = ./pw.sh\n",
+    )
+    .unwrap();
+    std::fs::write(work.join("pw.sh"), "#!/bin/sh\ntouch PLANTED\necho pw\n").unwrap();
+    std::fs::set_permissions(work.join("pw.sh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        work.join("inventory.ini"),
+        "[all]\nh1 ansible_connection=local\n",
+    )
+    .unwrap();
+    std::fs::write(
+        work.join("playbook.yml"),
+        "- hosts: h1\n  gather_facts: false\n  tasks:\n    - debug:\n        msg: hi\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(work, std::fs::Permissions::from_mode(mode)).unwrap();
+    let out = volant_within_full(
+        &["playbook", "-i", "inventory.ini", "playbook.yml"],
+        DEFAULT_DEADLINE,
+        None,
+        None,
+        Some(work),
+        None,
+        &[("HOME", &home.path().display().to_string())],
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{text}\n{err}");
+    assert!(
+        text.contains("\"msg\": \"hi\""),
+        "the play still runs: {text}\n{err}"
+    );
+    assert_eq!(work.join("PLANTED").exists(), read, "{text}\n{err}");
+    let warning = format!(
+        "[WARNING]: Ansible is being run in a world writable directory ({}), ignoring it as an \
+         ansible.cfg source. For more information see \
+         https://docs.ansible.com/ansible/devel/reference_appendices/config.html#cfg-in-world-writable-dir\n",
+        work.canonicalize().unwrap().display()
+    );
+    assert_eq!(err.contains(&warning), !read, "{err}");
+    assert!(
+        !text.contains("world writable"),
+        "the warning is on stderr: {text}"
+    );
+    std::fs::set_permissions(work, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
 #[test]
 fn the_agent_connection_survives_across_plays() {
     let out = volant(&["playbook", &fixture("reuse.yml")]);
@@ -5109,6 +5174,48 @@ fn a_fact_carrying_a_result_cannot_name_a_variable() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Text a managed host printed is text, whatever raw tags it holds: a raw block around an
+/// expression, or tags that close one the author wrote, never makes the expression run.
+#[test]
+fn host_text_holding_raw_tags_is_never_rendered() {
+    let (dir, marker) = trust_dir("raw-wrapped", "h1 ansible_connection=local\n");
+    let call = format!("{{{{ lookup('pipe', 'touch {}') }}}}", marker.display());
+    let payloads = [
+        ("wrapped", format!("{{% raw %}}{call}{{% endraw %}}")),
+        ("split", format!("{{% endraw %}}{call}{{% raw %}}")),
+        ("opened", format!("{{% raw %}}{{% endraw %}}{call}")),
+    ];
+    for (name, text) in payloads {
+        let payload = dir.join(format!("{name}.txt"));
+        std::fs::write(&payload, &text).expect("the payload");
+        let out = volant_within(
+            &[
+                "playbook",
+                "-i",
+                dir.join("inv.ini").to_str().expect("a path"),
+                "-e",
+                &format!("payload={}", payload.display()),
+                &fixture("trust/raw-wrapped-host-text.yml"),
+            ],
+            std::time::Duration::from_secs(30),
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            !marker.exists(),
+            "{name}: text from a host ran on the controller:\n{stdout}"
+        );
+        assert_eq!(out.status.code(), Some(0), "{name}: {stdout}");
+        let shown = text.replace('"', "\\\"");
+        assert!(
+            stdout.contains(&format!(
+                "\"msg\": \"{shown}|{{{{ r.stdout }}}}|{{{{ r.stdout }}}}|{shown}\""
+            )),
+            "{name}: the text is shown as it came:\n{stdout}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A directory holding one executable `ssh` that writes `marker` and exits 255, first on `PATH`,
 /// beside an inventory file holding `inventory`. Nothing here reaches the network: the fake is
 /// what a run opening an ssh connection finds, and the marker is what it leaves behind.
@@ -5455,7 +5562,7 @@ fn fake_python_answering(dir: &Path, answers: &[&[u8]]) -> std::path::PathBuf {
         &script,
         format!(
             "#!/bin/sh\n\
-             if [ \"$2\" = 'import ansible' ]; then exit 0; fi\n\
+             for word in \"$@\"; do if [ \"$word\" = 'import ansible' ]; then exit 0; fi; done\n\
              echo start >> '{dir}/starts.log'\n\
              cat '{dir}/answer.bin'\n\
              cat > /dev/null\n",

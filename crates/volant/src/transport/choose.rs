@@ -23,6 +23,26 @@ use super::escalation::{local_argv, preamble};
 use super::names::{self, first_set, secret_text};
 use super::shell::validate_remote_tmp;
 
+/// The destination `ssh` gets for a host: `ansible_ssh_host` or `ansible_host`, given with the
+/// name that set it, or the inventory name when neither is set. Both can come from data the playbook reads, and the address sits in the argument list
+/// where `ssh` reads options, so a value that starts with `-` would be taken as one and the
+/// remote command as the host. A value with whitespace or a control character is no address
+/// either. ansible-core 2.19.12 passes the value on unchecked, so this is stricter than the
+/// reference on purpose. `user@host` and IPv6 literals pass.
+fn ssh_address(host_name: &str, ansible_host: Option<(&str, String)>) -> anyhow::Result<String> {
+    let (variable, address) = match ansible_host {
+        Some(set) => set,
+        None => ("inventory_hostname", host_name.to_string()),
+    };
+    if address.starts_with('-') || address.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        bail!(
+            "host '{host_name}': {variable} must be a host name or address, found '{}'",
+            address.escape_debug()
+        );
+    }
+    Ok(address)
+}
+
 impl Transport {
     /// The connection one host uses, read from its effective variables: the merged view under
     /// the full precedence rather than the inventory object. `ansible_connection` and its
@@ -57,21 +77,28 @@ impl Transport {
                 .and_then(Value::as_str)
                 .map(str::to_string)
         };
+        // The same, with the name that set it, for a message that has to name it.
+        let first_named = |names: &[&'static str]| {
+            names
+                .iter()
+                .find(|name| first_set(vars, &[name]).is_some())
+                .and_then(|name| setting_text(name).map(|text| (*name, text)))
+        };
         let connection = setting_text("ansible_connection")
             .or_else(|| keywords.connection.clone())
             .or_else(|| defaults.connection.clone());
         match connection.as_deref().unwrap_or("ssh") {
             "local" => Ok(Transport::Local),
             "ssh" => Ok(Transport::Ssh(SshTarget {
-                address: first_text(&names::HOST).unwrap_or_else(|| host_name.to_string()),
+                address: ssh_address(host_name, first_named(&names::HOST))?,
                 port: port_of(vars).or(keywords.port),
                 user: first_text(&names::USER)
                     .or_else(|| keywords.user.clone())
                     .or_else(|| defaults.remote_user.clone()),
-                private_key: first_text(&names::PRIVATE_KEY)
-                    .map(PathBuf::from)
-                    .or_else(|| defaults.private_key.clone()),
                 own: Box::new(HostOwn {
+                    private_key: first_text(&names::PRIVATE_KEY)
+                        .map(PathBuf::from)
+                        .or_else(|| defaults.private_key.clone()),
                     password: first_set(vars, &names::PASSWORD)
                         .map(|value| {
                             secret_text(value).map(Secret::new).ok_or_else(|| {

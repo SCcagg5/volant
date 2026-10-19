@@ -33,6 +33,13 @@ pub(super) fn refusal_for(tried: &str) -> String {
     )
 }
 
+/// The interpreter's arguments for the helper: its source is the program text, and everything the
+/// controller sends comes over the pipes. The helper imports the standard library as its first
+/// act, so the working directory stays off its module path.
+pub(super) fn helper_args() -> [&'static str; 3] {
+    [resolve::NO_CWD_IMPORTS, "-c", HELPER]
+}
+
 /// A helper process and the two pipes a request travels over.
 pub struct PythonBuilder {
     pub(super) child: Child,
@@ -78,7 +85,7 @@ impl PythonBuilder {
         {
             env.push(("ANSIBLE_COLLECTIONS_PATH", paths));
         }
-        PythonBuilder::spawn(python, &["-c", HELPER], &env)
+        PythonBuilder::spawn(python, &helper_args(), &env)
     }
 
     pub(crate) fn spawn(

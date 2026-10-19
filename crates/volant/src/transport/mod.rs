@@ -25,6 +25,7 @@ pub use defaults::{
 pub(crate) use names::all as connection_variables;
 pub(crate) use names::{first_set, secret_text};
 pub(crate) use shell::validate_remote_tmp;
+pub(crate) use trace::shell_quote;
 
 #[cfg(test)]
 mod tests;

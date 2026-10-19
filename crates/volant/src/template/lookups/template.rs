@@ -82,7 +82,7 @@ pub(super) fn render_template_at(
     let ctx = root
         .as_ref()
         .and_then(|r| r.downcast_object_ref::<Context>());
-    let mut map = ctx.map(|c| c.vars.clone()).unwrap_or_default();
+    let mut map = ctx.map(Context::flat_vars).unwrap_or_default();
     let mut untrusted: BTreeSet<String> = ctx.map(|c| c.untrusted.clone()).unwrap_or_default();
     let hostvars = ctx.and_then(|c| c.hostvars.as_ref());
     let shared = ctx.and_then(|c| c.shared.as_ref());
@@ -107,6 +107,7 @@ pub(super) fn render_template_at(
                 facts,
                 untrusted: Some(&untrusted),
                 untrusted_hosts,
+                base: None,
             },
         );
         // Lenient, like `resolve_vars_tainted`: the name may sit in a branch that never runs, or
@@ -153,6 +154,7 @@ pub(super) fn render_template_at(
         facts: facts.as_ref(),
         untrusted: Some(&untrusted),
         untrusted_hosts,
+        base: None,
     };
     templar.render_file(text, vars, &FileRender::default())
 }

@@ -1081,7 +1081,7 @@ fn the_legacy_names_of_the_connection_settings_win_as_they_do_in_the_reference(
     assert_eq!(target.address, address);
     assert_eq!(target.port, port);
     assert_eq!(target.user.as_deref(), user);
-    assert_eq!(target.private_key.as_deref(), key.map(Path::new));
+    assert_eq!(target.own.private_key.as_deref(), key.map(Path::new));
 }
 
 /// The connection password of a host: the three names, the order among them, a number, and the
@@ -1319,6 +1319,79 @@ fn a_host_that_cannot_be_reached_is_refused_by_name(
     assert!(text.contains(key) || key == "ansible_connection", "{text}");
     assert!(text.contains(quoted), "{text}");
 }
+
+/// An ssh address that starts with `-`, or holds whitespace or a control character, is refused
+/// naming host, variable and value (stricter than ansible-core 2.19.12, which passes it on).
+#[rstest]
+#[case::name("web1.example.com", true)]
+#[case::short_name("db_1", true)]
+#[case::ipv4("10.0.0.5", true)]
+#[case::ipv6("fe80::1", true)]
+#[case::ipv6_scoped("fe80::1%eth0", true)]
+#[case::ipv6_bracketed("[::1]", true)]
+#[case::user_at_host("deploy@web1", true)]
+#[case::dash_inside("web-1", true)]
+#[case::leading_dash("-oProxyCommand=touch /tmp/x", false)]
+#[case::leading_dash_name("-web1", false)]
+#[case::lone_dash("-", false)]
+#[case::double_dash("--", false)]
+#[case::space("web 1", false)]
+#[case::trailing_space("web1 ", false)]
+#[case::tab("web1\t", false)]
+#[case::newline("web1\nx", false)]
+#[case::escape("web1\u{1b}[0m", false)]
+#[case::nul("web1\u{0}", false)]
+#[case::unicode_space("web1\u{a0}x", false)]
+fn an_ssh_address_is_a_name_not_an_option(#[case] address: &str, #[case] accepted: bool) {
+    let from_variable = Transport::for_vars(
+        "web1",
+        json!({ "ansible_host": address }).as_object().unwrap(),
+        &defaults(),
+    );
+    let named = Transport::for_vars(address, &Map::new(), &defaults());
+    if accepted {
+        let Transport::Ssh(target) = from_variable.unwrap() else {
+            panic!("expected ssh")
+        };
+        assert_eq!(target.address, address);
+        let argv = target.ssh_argv("true");
+        assert_eq!(argv[argv.len() - 2], "--");
+        assert_eq!(argv[argv.len() - 3], address);
+        assert!(named.is_ok());
+    } else {
+        let text = format!("{:#}", from_variable.unwrap_err());
+        assert!(text.contains("host 'web1'"), "{text}");
+        assert!(text.contains("ansible_host"), "{text}");
+        assert!(text.contains(&address.escape_debug().to_string()), "{text}");
+        // With no `ansible_host`, the inventory name is the address and is held to the same rule.
+        let text = format!("{:#}", named.unwrap_err());
+        assert!(text.contains("inventory_hostname"), "{text}");
+        assert!(text.contains(&address.escape_debug().to_string()), "{text}");
+    }
+}
+
+/// A user name that starts with `-` is accepted, as ansible-core does, and stays the value of
+/// `-l`, which `ssh` never reads as an option.
+#[rstest]
+#[case("deploy")]
+#[case("-oProxyCommand=touch")]
+#[case("-x")]
+#[case("deploy@web1")]
+fn a_user_beginning_with_a_dash_stays_the_value_of_l(#[case] user: &str) {
+    let Transport::Ssh(target) = Transport::for_vars(
+        "web1",
+        json!({ "ansible_user": user }).as_object().unwrap(),
+        &defaults(),
+    )
+    .unwrap() else {
+        panic!("expected ssh")
+    };
+    let argv = target.ssh_argv("true");
+    let at = argv.iter().position(|word| word == "-l").expect("-l");
+    assert_eq!(argv[at + 1], user);
+    assert!(at + 1 < argv.len() - 3, "before the address: {argv:?}");
+}
+
 /// Two ssh identities of one name are two links.
 #[test]
 fn two_ports_of_one_host_are_two_keys() {

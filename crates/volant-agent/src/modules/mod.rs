@@ -47,6 +47,15 @@ pub struct Context {
     pub check_mode: bool,
 }
 
+impl Context {
+    /// The moment the task's `timeout` ends, counted from now. `None` for a task with no
+    /// `timeout`, and for one too long for the clock to count to: that never expires.
+    pub fn deadline(&self) -> Option<std::time::Instant> {
+        self.timeout
+            .and_then(|timeout| std::time::Instant::now().checked_add(timeout))
+    }
+}
+
 /// The function signature every native module implements.
 type ModuleFn = fn(&Map<String, Value>, &Context, &dyn Fn() -> bool) -> Run;
 
