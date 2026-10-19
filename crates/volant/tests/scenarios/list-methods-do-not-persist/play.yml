@@ -25,7 +25,7 @@
     - debug:
         msg: "{{ z }} {{ x }} {{ y }}"
     - debug:
-        msg: "{{ d.update({'q': 1}) }}{{ d }}"
+        msg: ">{{ d.update({'q': 1}) }}{{ d }}"
     - debug:
         msg: "{{ d }}"
     - debug:
