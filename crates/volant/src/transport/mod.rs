@@ -8,6 +8,7 @@ mod choose;
 mod control;
 mod defaults;
 mod escalation;
+mod names;
 mod session;
 mod shell;
 mod ssh;
@@ -20,6 +21,7 @@ pub use defaults::{
     Escalation, EscalationProgram, INCORRECT_SU_PASSWORD, INCORRECT_SUDO_PASSWORD,
     MISSING_SUDO_PASSWORD, SshTarget, Transport,
 };
+pub(crate) use names::{first_set, secret_text};
 pub(crate) use shell::validate_remote_tmp;
 
 #[cfg(test)]

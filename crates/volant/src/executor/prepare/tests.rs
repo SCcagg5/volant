@@ -841,7 +841,7 @@ type Program<'a> = (BecomeMethod, Vec<&'a str>, Option<Vec<&'a str>>);
 #[case::keywords(json!({}), (Some("su"), Some("/bin/su"), Some("- -m")), Ok((BecomeMethod::Su, vec!["/bin/su"], Some(vec!["-", "-m"]))))]
 #[case::host_over_keyword(json!({"ansible_become_method": "sudo", "ansible_become_exe": "/opt/sudo", "ansible_become_flags": "-E"}), (Some("su"), Some("/bin/su"), Some("-")), Ok((BecomeMethod::Sudo, vec!["/opt/sudo"], Some(vec!["-E"]))))]
 #[case::sudo_own_vars(json!({"ansible_sudo_exe": "/opt/sudo", "ansible_sudo_flags": "-E"}), (None, None, None), Ok((BecomeMethod::Sudo, vec!["/opt/sudo"], Some(vec!["-E"]))))]
-#[case::become_var_over_own(json!({"ansible_become_exe": "/a", "ansible_sudo_exe": "/b"}), (None, None, None), Ok((BecomeMethod::Sudo, vec!["/a"], None)))]
+#[case::own_var_over_become_var(json!({"ansible_become_exe": "/a", "ansible_sudo_exe": "/b", "ansible_become_flags": "-E", "ansible_sudo_flags": "-P"}), (None, None, None), Ok((BecomeMethod::Sudo, vec!["/b"], Some(vec!["-P"]))))]
 #[case::su_own_vars(json!({"ansible_su_exe": "/opt/su", "ansible_sudo_exe": "/ignored"}), (Some("su"), None, None), Ok((BecomeMethod::Su, vec!["/opt/su"], None)))]
 #[case::bad_l10n(json!({"ansible_su_prompt_l10n": "Passwort"}), (Some("su"), None, None), Err("must be a list of strings"))]
 #[case::templated(json!({"tool": "/usr/bin/sudo -E"}), (None, Some("{{ tool }}"), None), Ok((BecomeMethod::Sudo, vec!["/usr/bin/sudo", "-E"], None)))]
@@ -871,6 +871,39 @@ fn the_escalation_program_comes_from_the_variable_the_keyword_or_the_defaults(
         (Err(err), Err(says)) => assert!(err.0.contains(says), "{}", err.0),
         (got, want) => panic!("got {got:?}, wanted {want:?}"),
     }
+}
+
+/// The user and the password of an escalation, from the names ansible-core 2.19.12 reads. When a
+/// host sets several, the method's own name wins over `ansible_become_pass`, which wins over
+/// `ansible_become_password`; each case was run against the reference with a right and a wrong
+/// value. A number is a password, another shape is not, and a null is not set.
+#[rstest::rstest]
+#[case::password(json!({"ansible_become_password": "a"}), None, "a", "root")]
+#[case::pass_over_password(json!({"ansible_become_password": "a", "ansible_become_pass": "b"}), None, "b", "root")]
+#[case::sudo_pass_over_both(json!({"ansible_become_password": "a", "ansible_become_pass": "b", "ansible_sudo_pass": "c"}), None, "c", "root")]
+#[case::su_pass_for_su(json!({"ansible_become_pass": "b", "ansible_su_pass": "d", "ansible_sudo_pass": "c"}), Some("su"), "d", "root")]
+#[case::sudo_pass_ignored_by_su(json!({"ansible_sudo_pass": "c"}), Some("su"), "from the defaults", "root")]
+#[case::number(json!({"ansible_become_password": 1234}), None, "1234", "root")]
+#[case::null_is_not_set(json!({"ansible_become_password": null, "ansible_sudo_pass": "c"}), None, "c", "root")]
+#[case::list_is_no_password(json!({"ansible_become_password": ["a"]}), None, "from the defaults", "root")]
+#[case::user(json!({"ansible_become_user": "a", "ansible_sudo_user": "b"}), None, "from the defaults", "b")]
+#[case::su_user(json!({"ansible_become_user": "a", "ansible_su_user": "b", "ansible_sudo_user": "c"}), Some("su"), "from the defaults", "b")]
+fn the_escalation_user_and_password_follow_the_alias_order_of_the_reference(
+    #[case] vars: Value,
+    #[case] method: Option<&str>,
+    #[case] password: &str,
+    #[case] user: &str,
+) {
+    let mut t = task("command");
+    t.r#become = Some(true);
+    t.connect.become_method = method.map(str::to_string);
+    let mut d = defaults();
+    d.become_password = Some("from the defaults".into());
+    let e = become_for(&t, &plan(), &hvars(vars), &d, &templar())
+        .unwrap()
+        .unwrap();
+    assert_eq!(e.password.as_deref(), Some(password));
+    assert_eq!(e.user, user);
 }
 
 /// The password never has to be quoted, logged or formatted, so the one place it could still
