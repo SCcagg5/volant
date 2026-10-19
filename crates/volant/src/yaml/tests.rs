@@ -331,9 +331,8 @@ fn an_integer_wider_than_a_word_keeps_every_digit() {
     assert_loads_as(&borrowed);
 }
 
-/// Python 3.11 and later refuse an integer of more than 4300 decimal digits, and PyYAML's
-/// conversion stops there. A hexadecimal number of any size would cost the square of its length
-/// to turn into digits, so it is refused at the same limit without the work.
+/// Python 3.11 and later refuse more than 4300 decimal digits. A hexadecimal number would cost
+/// the square of its length to convert, so it stops at the same limit before any work.
 #[test]
 fn an_integer_past_pythons_digit_limit_is_refused() {
     for text in [
