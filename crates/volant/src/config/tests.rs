@@ -440,10 +440,9 @@ fn volant_runtime_in_the_environment_sets_the_mode() {
     assert_eq!(Config::load().unwrap().runtime, crate::runtime::Mode::Auto);
 }
 
-/// `find` against `find_ini_config_file` of ansible-core 2.19.12: the working directory is a
-/// source unless its mode has the world-write bit, whatever the sticky bit and the owner say;
-/// the skipped file is reported unless `ANSIBLE_CONFIG` named a file; every other candidate is
-/// read whatever the mode of the working directory.
+/// `find` against `find_ini_config_file` of ansible-core 2.19.12: only the world-write bit of
+/// the working directory skips it, and the warning is dropped when `ANSIBLE_CONFIG` named a file.
+#[cfg(unix)]
 #[rstest::rstest]
 #[case::plain_directory(0o755, "file", "none", true, true, "cwd", false)]
 #[case::group_writable(0o770, "file", "none", true, true, "cwd", false)]

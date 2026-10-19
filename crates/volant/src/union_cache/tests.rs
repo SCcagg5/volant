@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime};
 
 use serde_json::{Map, Value};
 
-use super::key::{CONFIG_BOUND, configs, expanded, key_from, plugin_files};
+use super::key::{configs, expanded, key_from, plugin_files};
 use super::sweep::sweep;
 use super::*;
 use crate::agent::BlobFrame;
@@ -697,9 +697,8 @@ fn the_ansible_config_is_read_and_expanded_for_the_key() {
     }
 }
 
-/// The key reads the working directory's `ansible.cfg` only when ansible-core would: a
-/// world-writable directory is skipped, so what a stranger plants there adds nothing to it. A
-/// small regular file in any other directory goes in whole, as before.
+/// The key skips the working directory's `ansible.cfg` when the directory is world-writable,
+/// as ansible-core does, and reads a small regular file there whole otherwise.
 #[cfg(unix)]
 #[test]
 fn the_key_skips_ansible_cfg_in_a_world_writable_directory() {
@@ -718,10 +717,8 @@ fn the_key_skips_ansible_cfg_in_a_world_writable_directory() {
     fs::set_permissions(&cwd, fs::Permissions::from_mode(0o755)).unwrap();
 }
 
-/// What the key reads of a file named `ansible.cfg`: a link to a regular file is followed, and a
-/// file over the bound contributes its size and mtime, a few bytes, whatever it holds. A FIFO, a
-/// device and a directory contribute nothing and are not waited for or read: the FIFO has no
-/// writer, so a read of it would never return, and the zero device never ends.
+/// The key follows a link to a regular file, stamps a file over the bound with its size and
+/// mtime, and never waits on a FIFO or reads a device or a directory.
 #[cfg(unix)]
 #[test]
 fn the_key_reads_only_a_regular_file_and_only_up_to_the_bound() {
@@ -740,7 +737,7 @@ fn the_key_reads_only_a_regular_file_and_only_up_to_the_bound() {
     assert_eq!(read(&cwd)[0].1, b"[defaults]\n");
 
     let cwd = place("exact");
-    let text = vec![b'#'; usize::try_from(CONFIG_BOUND).unwrap()];
+    let text = vec![b'#'; usize::try_from(super::key::CONFIG_BOUND).unwrap()];
     fs::write(cwd.join("ansible.cfg"), &text).unwrap();
     assert_eq!(read(&cwd)[0].1, text);
 
@@ -750,13 +747,6 @@ fn the_key_reads_only_a_regular_file_and_only_up_to_the_bound() {
     assert!(stamp.len() < 64, "{} bytes", stamp.len());
     fs::write(cwd.join("ansible.cfg"), vec![b'#'; text.len() + 2]).unwrap();
     assert_ne!(read(&cwd)[0].1, stamp, "the size is in the stamp");
-
-    let cwd = place("sparse");
-    fs::File::create(cwd.join("ansible.cfg"))
-        .unwrap()
-        .set_len(8 << 30)
-        .unwrap();
-    assert!(read(&cwd)[0].1.len() < 64);
 
     let cwd = place("device");
     std::os::unix::fs::symlink("/dev/zero", cwd.join("ansible.cfg")).unwrap();

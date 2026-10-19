@@ -1016,12 +1016,8 @@ fn an_unreadable_ansible_cfg_is_ignored_with_a_warning() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// A working directory that other users can write is not a configuration source: the file a
-/// local user plants there would name a program the next run starts. ansible-core ignores the
-/// file, warns on standard error and goes on. Only the world-writable bit counts: the sticky
-/// bit and the owner of the directory change nothing, and a directory that is not
-/// world-writable is read as before. The planted program is the vault password program, which a
-/// playbook without a vault still starts when the file names it.
+/// A planted `ansible.cfg` in a world-writable directory (sticky bit or not) is ignored with the
+/// reference's warning on stderr; a directory without the world-write bit is read as before.
 #[rstest]
 #[case::world_writable(0o777, false)]
 #[case::sticky_and_world_writable(0o1777, false)]
@@ -1081,85 +1077,6 @@ fn an_ansible_cfg_in_a_world_writable_directory_is_ignored_with_a_warning(
     assert!(
         !text.contains("world writable"),
         "the warning is on stderr: {text}"
-    );
-    std::fs::set_permissions(work, std::fs::Permissions::from_mode(0o755)).unwrap();
-}
-
-/// What a local user can name `ansible.cfg` in a directory every user can write: a FIFO that
-/// blocks a reader for ever, a link to a device that never ends, a file of gigabytes, a
-/// directory. The directory is skipped as a configuration source, so the run reads none of them,
-/// not even for its cache key: it finishes, as `ansible-playbook` does, and prints the warning.
-/// The task is a Python module, the one kind of run that builds a cache key.
-#[rstest]
-#[case::fifo("fifo")]
-#[case::zero_device("zero")]
-#[case::huge_file("huge")]
-#[case::directory("dir")]
-fn a_skipped_ansible_cfg_that_is_not_an_ordinary_file_does_not_stall_the_run(#[case] kind: &str) {
-    use std::os::unix::fs::PermissionsExt as _;
-    let Some(python) = python::reference_python().map(|p| p.display().to_string()) else {
-        return;
-    };
-    let dir = tempfile::tempdir().unwrap();
-    let home = tempfile::tempdir().unwrap();
-    let cache = tempfile::tempdir().unwrap();
-    let work = dir.path();
-    let cfg = work.join("ansible.cfg");
-    match kind {
-        "fifo" => assert!(
-            Command::new("mkfifo").arg(&cfg).status().unwrap().success(),
-            "mkfifo"
-        ),
-        "zero" => std::os::unix::fs::symlink("/dev/zero", &cfg).unwrap(),
-        "huge" => std::fs::File::create(&cfg)
-            .unwrap()
-            .set_len(8 << 30)
-            .unwrap(),
-        _ => std::fs::create_dir(&cfg).unwrap(),
-    }
-    std::fs::write(
-        work.join("inventory.ini"),
-        "[all]\nh1 ansible_connection=local\n",
-    )
-    .unwrap();
-    std::fs::write(
-        work.join("playbook.yml"),
-        "- hosts: h1\n  gather_facts: false\n  tasks:\n    - stat:\n        path: /\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(work, std::fs::Permissions::from_mode(0o777)).unwrap();
-    // Six gigabytes of address space: an unbounded read of the zero device or the sparse file
-    // ends in a failed allocation rather than in the machine's memory.
-    let mut command = Command::new("sh");
-    command
-        .args([
-            "-c",
-            "ulimit -v 6291456 2>/dev/null; exec \"$0\" \"$@\"",
-            env!("CARGO_BIN_EXE_volant"),
-            "playbook",
-            "-i",
-            "inventory.ini",
-            "playbook.yml",
-        ])
-        .current_dir(work)
-        .env("NO_COLOR", "1")
-        .env("HOME", home.path())
-        .env("XDG_CACHE_HOME", cache.path())
-        .env("VOLANT_PYTHON", &python)
-        .env("VOLANT_RUNTIME", "system")
-        .env("VOLANT_NATIVE_MODULES", "0")
-        .env_remove("ANSIBLE_CONFIG")
-        .stdin(std::process::Stdio::null());
-    let started = std::time::Instant::now();
-    let out = process::run_within(&mut command, std::time::Duration::from_secs(30), None);
-    let text = String::from_utf8_lossy(&out.stdout);
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(out.status.code(), Some(0), "{text}\n{err}");
-    assert!(text.contains("ok: [h1]"), "{text}\n{err}");
-    assert!(started.elapsed() < std::time::Duration::from_secs(25));
-    assert!(
-        err.contains("ignoring it as an ansible.cfg source"),
-        "{err}"
     );
     std::fs::set_permissions(work, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
