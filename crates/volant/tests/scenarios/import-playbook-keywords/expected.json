@@ -1,0 +1,30 @@
+[
+  {
+    "code": 2,
+    "stdout": "\nPLAY [sub play] ****************************************************************\n\nTASK [boom] ********************************************************************\n[ERROR]: Task failed: Action failed: boom\nOrigin: <golden-tmp>/sub.yml:5:7\n\n3   gather_facts: false\n4   tasks:\n5     - name: boom\n        ^ column 7\n\nfatal: [h1]: FAILED! => {\"changed\": false, \"msg\": \"boom\"}\n\nPLAY RECAP *********************************************************************\nh1                         : ok=0    changed=0    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0   \n\n"
+  },
+  {
+    "code": 0,
+    "stdout": "\nPLAY [env play] ****************************************************************\n\nTASK [env] *********************************************************************\nok: [h1] => {\n    \"msg\": \"unset\"\n}\n\nTASK [once] ********************************************************************\nok: [h1 -> localhost] => {\n    \"msg\": \"h1\"\n}\n\nPLAY RECAP *********************************************************************\nh1                         : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   \n\n"
+  },
+  {
+    "code": 2,
+    "stdout": "\nPLAY [sub play] ****************************************************************\n\nTASK [boom] ********************************************************************\n[ERROR]: Task failed: Action failed: boom\nOrigin: <golden-tmp>/sub.yml:5:7\n\n3   gather_facts: false\n4   tasks:\n5     - name: boom\n        ^ column 7\n\nfatal: [h1]: FAILED! => {\"changed\": false, \"msg\": \"boom\"}\n\nPLAY RECAP *********************************************************************\nh1                         : ok=0    changed=0    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0   \n\n"
+  },
+  {
+    "code": 4,
+    "stdout": ""
+  },
+  {
+    "code": 4,
+    "stdout": ""
+  },
+  {
+    "code": 4,
+    "stdout": ""
+  },
+  {
+    "code": 1,
+    "stdout": ""
+  }
+]

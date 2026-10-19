@@ -12,7 +12,8 @@
 //! The two lists are the reference's own, read out of `Task.fattributes` and
 //! `Play.fattributes` on ansible-core 2.19.12, plus the spellings the reference resolves
 //! before it builds those dictionaries: `action` and `local_action`, and one `with_*` name per
-//! lookup plugin `ansible.builtin` ships. The internal `async_val` and `loop_with` entries are
+//! lookup plugin `ansible.builtin` ships. Any other `with_*` name is a loop when the controller's
+//! ansible-core has a lookup of that name. The internal `async_val` and `loop_with` entries are
 //! not spellings a playbook can use and are left out.
 
 use std::fmt::Write as _;
@@ -151,10 +152,12 @@ pub const TASK_KEYWORDS: &[Keyword] = &[
     kw("until", Runs),
     kw("vars", Runs),
     kw("when", Runs),
-    // One row per lookup plugin `ansible.builtin` ships, because the reference accepts
-    // `with_<lookup>` for every one of them and refuses any other `with_*` name outright. A row
-    // runs once its lookup exists and its `with_` form has been measured: the loop walks what the
-    // lookup returns as a list. The loader and `prepare` read any `with_*` row that runs this way.
+    // One row per lookup plugin `ansible.builtin` ships. The reference accepts `with_<name>` for
+    // every name in its lookup loader, so a collection's lookup (`with_community.general.dependent`),
+    // a redirect (`with_flattened`) and one a `lookup_plugins/` directory holds run too: the loader
+    // reads any `with_*` key as a loop, and the controller's ansible-core says before the first
+    // connection whether the name is a lookup. A row marks a lookup that needs no asking. The loop
+    // walks what the lookup returns as a list.
     kw("with_config", Runs),
     kw("with_csvfile", Runs),
     kw("with_dict", Runs),

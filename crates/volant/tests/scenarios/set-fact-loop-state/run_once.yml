@@ -1,0 +1,11 @@
+- hosts: all
+  gather_facts: false
+  strategy: linear
+  vars:
+    x: []
+  tasks:
+    - set_fact:
+        x: "{{ x + [item] }}"
+      loop: [1, 2, 3]
+      run_once: true
+    - debug: {msg: "{{ inventory_hostname }} {{ x }}"}

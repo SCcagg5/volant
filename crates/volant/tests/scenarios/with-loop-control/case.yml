@@ -1,0 +1,5 @@
+# loop_control label and index_var on top of every with_ form: the label shows instead of the
+# item, and the index counts from 0.
+args: [-i, inv.ini, play.yml]
+env: {VOLANT_WITH_ENV: hello}
+needs: ["ansible-core"]

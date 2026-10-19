@@ -109,6 +109,9 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
                 statement = Some((k.name, value));
             }
             Some(_) => {}
+            // A `with_` key is a loop or an invalid attribute, never an action: the reference
+            // reads it below and the pre-flight settles which.
+            None if key.starts_with("with_") => {}
             // Whatever is left is the module, which is how the reference reads a task too: a
             // key it does not know is an action, and a second one is the conflict below rather
             // than an unknown-keyword error.
@@ -186,7 +189,7 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
         None => module,
     };
     let Some((module, value)) = module else {
-        bail!("task '{label}': no module given");
+        bail!("no module/action detected in task.");
     };
     // Arguments are read only for a module this release can run. The reference resolves the
     // action before it looks at what was handed to it, so a name it cannot resolve is refused
@@ -244,26 +247,43 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
         Some(Yaml::Value(Scalar::String(s))) => Some(s.to_string()),
         Some(_) => bail!("task '{label}': 'register' must be a variable name"),
     };
-    // Every loop keyword this release runs: `loop`, `with_items`, and each `with_<lookup>` whose
-    // row says it runs.
-    let mut loops = map.iter().filter_map(|(key, value)| {
-        let key = key.as_str()?;
-        let runs = key == "loop" || (key.starts_with("with_") && task_keyword(key).is_some());
-        runs.then_some((key, value))
-    });
-    let (loop_items, with_items, loop_with) = match (loops.next(), loops.next()) {
-        (Some((first, _)), Some((second, _))) => {
-            bail!("task '{label}': '{first}' and '{second}' cannot both be given")
+    // `loop` and every `with_<lookup>`, read in the order the reference's `preprocess_data` reads
+    // them. A `with_` key is a loop whatever follows the prefix: whether that is a lookup plugin
+    // is asked of the controller's ansible-core before the first connection, because collections
+    // and a `lookup_plugins/` directory add names no table here can hold.
+    let mut loop_items = None;
+    let mut loop_node = None;
+    let mut loop_with: Option<String> = None;
+    for (key, value) in map {
+        let Some(key) = key.as_str() else { continue };
+        if key == "loop" {
+            loop_items = Some(to_json(value).with_context(|| format!("task '{label}': {key}"))?);
+            loop_node = Some(value);
+        } else if let Some(lookup) = key.strip_prefix("with_") {
+            if loop_items.is_some() || loop_with.is_some() {
+                return Err(crate::stats::Refusal::at(
+                    1,
+                    format!("duplicate loop in task: {lookup}"),
+                ));
+            }
+            if matches!(value, Yaml::Value(Scalar::Null)) {
+                return Err(crate::stats::Refusal::at(
+                    1,
+                    format!("you must specify a value when using {key}"),
+                ));
+            }
+            loop_items = Some(to_json(value).with_context(|| format!("task '{label}': {key}"))?);
+            loop_node = Some(value);
+            loop_with = Some(lookup.to_string());
         }
-        (Some((key, v)), None) => (
-            Some(to_json(v).with_context(|| format!("task '{label}': {key}"))?),
-            key == "with_items",
-            key.strip_prefix("with_")
-                .filter(|lookup| *lookup != "items")
-                .map(str::to_string),
-        ),
-        (None, _) => (None, false, None),
-    };
+    }
+    // `with_items` flattens one level, and so does the `items` lookup under any of its names.
+    let with_items = loop_with
+        .as_deref()
+        .is_some_and(|lookup| crate::collection::canonical(lookup) == "items");
+    if with_items {
+        loop_with = None;
+    }
     let (r#become, become_user) = escalation(yaml, &context)?;
     let (delegate_facts, mut delegate_to) = delegation(yaml, &context)?;
     // `local_action` runs on the controller whatever `delegate_to` says: measured, the line reads
@@ -278,6 +298,7 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
         ("retries", field(yaml, "retries")),
         ("delay", field(yaml, "delay")),
         ("notify", field(yaml, "notify")),
+        ("loop", loop_node),
         ("var", var),
     ] {
         if let Some(origin) = node.and_then(value_origin) {
