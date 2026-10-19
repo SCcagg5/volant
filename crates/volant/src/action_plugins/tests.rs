@@ -111,9 +111,8 @@ fn async_is_supported_where_the_reference_supports_it(#[case] module: &str, #[ca
     assert_eq!(supports_async(module), ok, "{module}");
 }
 
-/// What a plugin reads of the link its module runs over: an ssh link carries its key, user and
-/// the `ssh` arguments (quoted as `shlex.quote` quotes), a `local` one carries none of them, and
-/// an escalation and a delegate are carried whatever the transport is.
+/// What a plugin reads of its link: an ssh link carries key, user and `ssh` arguments (quoted
+/// as `shlex.quote`), a `local` one none; escalation and delegate are carried on any transport.
 #[rstest::rstest]
 #[case::ssh(
     json!({"ansible_connection": "ssh", "ansible_user": "deploy", "ansible_ssh_private_key_file": "/k/id",

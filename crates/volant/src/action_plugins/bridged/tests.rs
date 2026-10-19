@@ -169,9 +169,8 @@ fn a_command_that_must_not_escalate_runs_over_the_task_link(
     );
 }
 
-/// The play context a plugin reads names the connection, the address and the user of the host the
-/// module runs on, and the key and the escalation of the link when it has them: `synchronize`
-/// builds its `rsync` command line from them.
+/// The play context a plugin reads names the connection, address and user of the host the module
+/// runs on, and the key and escalation of the link: `synchronize` builds `rsync` from them.
 #[rstest::rstest]
 #[case::ssh(
     json!({"ansible_host": "192.0.2.4", "ansible_user": "deploy"}),

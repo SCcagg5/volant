@@ -1387,9 +1387,8 @@ fn ssh_a_collection_module_runs_from_the_union() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// `ansible.posix.synchronize` over a real ssh link. The plugin makes a `local` connection of its
-/// own and runs rsync from the controller, with the host's key: push with `delete` and
-/// `rsync_opts`, pull, a second run that changes nothing, and a check run that writes nothing.
+/// `ansible.posix.synchronize` over a real ssh link, rsync run from the controller: push with
+/// `delete` and `rsync_opts`, pull, a second run that changes nothing, a check run that writes none.
 #[test]
 #[ignore = "needs sshd on localhost, rsync and the pinned collections, run through just ssh-test"]
 fn ssh_synchronize_runs_rsync_from_the_controller() {
