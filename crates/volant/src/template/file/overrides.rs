@@ -10,6 +10,13 @@ use super::FileRender;
 
 const HEADER: &str = "#jinja2:";
 
+/// The longest `#jinja2:` line read, in bytes. Every option fits in a small part of it; a line
+/// past the bound is refused before it is split.
+const MAX_LINE: usize = 16 * 1024;
+
+/// Python's tokenizer refuses a literal nested deeper than this.
+const MAX_DEPTH: usize = 200;
+
 /// A value `ast.literal_eval` returns, for the kinds an override can use or be refused for.
 #[derive(Debug, PartialEq)]
 enum Lit {
@@ -50,6 +57,11 @@ pub(super) fn split<'t>(
         return Err(fail(format!("Missing newline after '{HEADER}' override.")));
     };
     let (line, body) = (&rest[..eol], &rest[eol + 1..]);
+    if line.len() > MAX_LINE {
+        return Err(fail(format!(
+            "the '{HEADER}' line must not be longer than {MAX_LINE} bytes"
+        )));
+    }
     let mut given: Vec<(&str, Lit)> = Vec::new();
     for pair in line.split(',') {
         if pair.trim().is_empty() {
@@ -181,12 +193,20 @@ pub(crate) fn py_repr(s: &str) -> String {
 /// The literals an override can hold: strings (adjacent ones join), `True`, `False`, `None` and
 /// numbers, in parentheses or not. Anything else is what `ast.literal_eval` calls malformed.
 fn literal_eval(src: &str) -> Result<Lit, String> {
-    let src = src.trim();
-    if let Some(inner) = src.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
+    let mut src = src.trim();
+    // Parentheses around one literal, peeled one level at a time; a comma makes a tuple, which
+    // is not one literal. Iterative, so the depth cannot use the stack.
+    let tuple = src.contains(',');
+    let mut depth = 0;
+    while let Some(inner) = src.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
         && !inner.trim().is_empty()
-        && !inner.contains(',')
+        && !tuple
     {
-        return literal_eval(inner);
+        depth += 1;
+        if depth > MAX_DEPTH {
+            return Err("too many nested parentheses (<unknown>, line 1)".into());
+        }
+        src = inner.trim();
     }
     match src {
         "True" => return Ok(Lit::Bool(true)),

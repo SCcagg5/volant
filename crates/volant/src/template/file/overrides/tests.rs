@@ -164,13 +164,23 @@ fn parentheses_nest_to_the_reference_s_depth() {
         let (_, o) = parsed(&line(depth)).unwrap().unwrap();
         assert!(!o.trim_blocks, "depth {depth}");
     }
-    for depth in [201, 1000, 10_000, 200_000] {
-        assert_eq!(
-            parsed(&line(depth)),
-            Err("Syntax error in template: too many nested parentheses (<unknown>, line 1)".into()),
-            "depth {depth}"
-        );
+    let nested = Err(
+        "Syntax error in template: too many nested parentheses (<unknown>, line 1)".to_string(),
+    );
+    for depth in [201, 1000, 4000] {
+        assert_eq!(parsed(&line(depth)), nested, "depth {depth}");
     }
+    // Past the bound on the line the value is not read at all, and the value read on its own,
+    // as the 16 KiB bound allows no more than 8000 levels, never reaches the stack either.
+    for depth in [10_000, 200_000] {
+        let err = parsed(&line(depth)).unwrap_err();
+        assert!(err.contains("must not be longer than 16384 bytes"), "{err}");
+    }
+    let deep = format!("{}False{}", "(".repeat(500_000), ")".repeat(500_000));
+    assert_eq!(
+        literal_eval(&deep),
+        Err("too many nested parentheses (<unknown>, line 1)".to_string())
+    );
 }
 
 /// A first line longer than the bound is refused before it is read, whatever it holds.

@@ -298,6 +298,7 @@ fn copy_gets_the_template_s_name_and_none_of_its_options() {
 
 /// What is refused before any sub-task, each in the reference's words where it has some.
 #[test]
+#[expect(clippy::too_many_lines)]
 fn what_cannot_be_rendered_is_refused_before_the_host_is_asked() {
     let dir = with_template("t.j2", "x\n");
     std::fs::write(dir.join("templates/undefined.j2"), "{{ nope }}\n").unwrap();
@@ -377,6 +378,10 @@ fn what_cannot_be_rendered_is_refused_before_the_host_is_asked() {
             "Block, variable and comment start strings must be different.".into(),
         ));
     }
+    cases.push((
+        json!({"src": "t.j2", "dest": "/x", "variable_start_string": "@".repeat(65)}),
+        "could not render t.j2: Syntax error in template: variable_start_string must not be longer than 64 characters".into(),
+    ));
     cases.push((
         json!({"src": "t.j2", "dest": "/x", "variable_start_string": ["a"]}),
         "Invalid value provided for 'string': ['a']".into(),

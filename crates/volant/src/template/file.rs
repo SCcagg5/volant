@@ -43,6 +43,10 @@ impl Default for Syntax {
     }
 }
 
+/// The longest delimiter read, in characters. The lexer builds a table from the three start
+/// strings whose cost grows with the square of their length, and no real delimiter is near this.
+pub const MAX_DELIMITER: usize = 64;
+
 /// What the reference says when two of the three start strings are the same.
 pub const START_CLASH: &str = "Block, variable and comment start strings must be different.";
 
@@ -52,6 +56,25 @@ impl Syntax {
         let (b, v, c) = (&self.block_start, &self.variable_start, &self.comment_start);
         if b == v || v == c || c == b {
             return Err(START_CLASH);
+        }
+        Ok(())
+    }
+
+    /// The bound on the length of each delimiter. The error names the option.
+    pub fn check_lengths(&self) -> Result<(), String> {
+        for (name, value) in [
+            ("variable_start_string", &self.variable_start),
+            ("variable_end_string", &self.variable_end),
+            ("block_start_string", &self.block_start),
+            ("block_end_string", &self.block_end),
+            ("comment_start_string", &self.comment_start),
+            ("comment_end_string", &self.comment_end),
+        ] {
+            if value.chars().nth(MAX_DELIMITER).is_some() {
+                return Err(format!(
+                    "{name} must not be longer than {MAX_DELIMITER} characters"
+                ));
+            }
         }
         Ok(())
     }
@@ -69,6 +92,7 @@ impl Syntax {
         if self == &Self::default() {
             return Ok(SyntaxConfig::default());
         }
+        self.check_lengths()?;
         self.check_starts().map_err(str::to_string)?;
         let named = [
             ("variable_start_string", &self.variable_start),
@@ -175,6 +199,11 @@ impl Templar {
         vars: impl Into<Vars<'a>>,
         options: &FileRender,
     ) -> Result<String, TemplateError> {
+        // Before anything reads the text for a start string, so a long one costs nothing.
+        options
+            .syntax
+            .check_lengths()
+            .map_err(|msg| TemplateError(format!("Syntax error in template: {msg}")))?;
         let header = overrides::split(text, options).map_err(TemplateError)?;
         let (body, effective) = match &header {
             Some((body, effective)) => (*body, Cow::Borrowed(effective)),
