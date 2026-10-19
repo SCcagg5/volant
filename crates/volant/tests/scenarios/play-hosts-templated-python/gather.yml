@@ -1,0 +1,6 @@
+- hosts: "{{ groups['loners'] }}"
+  gather_facts: true
+  gather_subset: min
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ 'hostname' in ansible_facts }}"

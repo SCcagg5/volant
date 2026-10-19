@@ -45,6 +45,8 @@ fn start_vars(
         templar: &templar,
         origin: &origin,
         playbook_dir: &dir,
+        // A write on the controller is refused whatever the mode says about reads.
+        host_named_paths: crate::config::HostNamedPaths::Allow,
         warnings: &mut warnings,
 
         environment: None,

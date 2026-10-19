@@ -23,8 +23,13 @@ pub(super) fn loosen(c: &mut Compiled) -> Vec<String> {
     let mut warnings: Vec<String> = Vec::new();
     let tasks = c.steps.iter_mut().map(|s| &mut s.task);
     for task in tasks.chain(c.handlers.iter_mut().map(|h| &mut h.task)) {
-        let fatal = task.any_errors_fatal.take() == Some(true);
+        // A template is read as true for `any_errors_fatal`, as the strategy reads it, see
+        // `PlayTask::fails_all`. A `run_once` template is cleared without its warning: the
+        // reference warns for the hosts it renders to true, and nothing here can render it yet.
+        let fatal = task.any_errors_fatal.take() == Some(true)
+            || task.deferred.any_errors_fatal.take().is_some();
         let once = task.run_once.take() == Some(true);
+        task.deferred.run_once = None;
         for (hit, text) in [(fatal, FATAL), (once, RUN_ONCE)] {
             if hit && !warnings.iter().any(|w| w == text) {
                 warnings.push(text.to_string());

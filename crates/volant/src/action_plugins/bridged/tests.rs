@@ -2,6 +2,7 @@
 use super::helpers::{command_reply, plain_path};
 use super::*;
 use crate::action_plugins::LinkFacts;
+use crate::config::HostNamedPaths;
 
 /// A command's reply carries its return code and both streams, and one with none is an error.
 #[test]
@@ -33,20 +34,23 @@ fn a_temporary_directory_is_one_plain_absolute_path(#[case] path: &str, #[case] 
     assert_eq!(plain_path(path), ok);
 }
 
-/// The arguments of a free-form `script` and an `assemble` source are never a controller file
-/// a managed host named: the item fails before the helper is asked for anything.
-#[rstest::rstest]
-#[case::script("script", "_raw_params")]
-#[case::assemble("assemble", "src")]
-fn a_host_named_controller_file_is_refused(#[case] name: &'static str, #[case] arg: &str) {
-    let mut args = Map::new();
-    args.insert(arg.into(), json!("/etc/passwd"));
-    let untrusted = std::iter::once(arg.to_string()).collect();
+/// Starts the plugin `name` with `args`, of which the ones in `named` were named by a managed
+/// host, under the mode `mode` and in a playbook at `/pb`.
+fn start_naming(
+    mode: HostNamedPaths,
+    name: &'static str,
+    args: Value,
+    named: &[&str],
+) -> Box<dyn Plugin> {
+    let Value::Object(args) = args else {
+        unreachable!()
+    };
+    let untrusted = named.iter().map(ToString::to_string).collect();
     let running = crate::vars::HostVars::default();
     let templar = crate::template::Templar::new(std::path::PathBuf::from("."));
     let origin = crate::compile::Origin::default();
     let mut warnings = Vec::new();
-    let mut plugin = start(
+    start(
         name,
         &[],
         Context {
@@ -60,7 +64,8 @@ fn a_host_named_controller_file_is_refused(#[case] name: &'static str, #[case] a
             item_vars: &running,
             templar: &templar,
             origin: &origin,
-            playbook_dir: std::path::Path::new("."),
+            playbook_dir: std::path::Path::new("/pb"),
+            host_named_paths: mode,
             warnings: &mut warnings,
             environment: None,
             timeout: None,
@@ -68,16 +73,98 @@ fn a_host_named_controller_file_is_refused(#[case] name: &'static str, #[case] a
             diff: false,
             async_val: 0,
         },
-    );
+    )
+}
+
+/// The message of an item that fails at once.
+fn failure(mut plugin: Box<dyn Plugin>) -> String {
     let Step::Done(result) = plugin.next(None) else {
         panic!("the item should fail at once");
     };
     assert!(result.failed());
-    assert!(
-        result.0["msg"].as_str().unwrap().contains(arg),
-        "{:?}",
-        result.0
-    );
+    result.0["msg"].as_str().unwrap().to_string()
+}
+
+/// Under `refuse`, a host-named `script` line or `cmd`, `assemble` or `uri` source fails the
+/// item before the helper is asked for anything.
+#[rstest::rstest]
+#[case::script("script", json!({"_raw_params": "/etc/passwd"}), "_raw_params")]
+#[case::script_cmd("script", json!({"cmd": "/etc/passwd"}), "cmd")]
+#[case::assemble("assemble", json!({"src": "/etc/passwd", "remote_src": false}), "src")]
+#[case::uri("uri", json!({"src": "/etc/passwd"}), "src")]
+fn a_host_named_controller_file_is_refused(
+    #[case] name: &'static str,
+    #[case] args: Value,
+    #[case] arg: &str,
+) {
+    let msg = failure(start_naming(HostNamedPaths::Refuse, name, args, &[arg]));
+    assert!(msg.contains(&format!(
+        "the '{arg}' of this task was named by a managed host"
+    )));
+}
+
+/// A name the mode lets through reaches the plugin, which here fails for want of the helper;
+/// `contained` stops a name outside the files and templates directories.
+#[rstest::rstest]
+#[case::script_allowed("allow", "script", json!({"_raw_params": "/etc/passwd --flag"}), "_raw_params", None)]
+#[case::script_inside("contained", "script", json!({"_raw_params": "tool.sh --flag ../x"}), "_raw_params", None)]
+#[case::script_outside("contained", "script", json!({"_raw_params": "/etc/passwd --flag"}), "_raw_params", Some("'/etc/passwd' is not inside"))]
+#[case::script_quoted("contained", "script", json!({"_raw_params": "'../up.sh' arg"}), "_raw_params", Some("'../up.sh' is not inside"))]
+#[case::script_tilde("contained", "script", json!({"_raw_params": "~/hs.sh"}), "_raw_params", Some("'~/hs.sh' is not inside"))]
+#[case::script_cmd_outside("contained", "script", json!({"cmd": "/etc/passwd"}), "cmd", Some("'/etc/passwd' is not inside"))]
+#[case::script_cmd_inside("contained", "script", json!({"cmd": "tool.sh"}), "cmd", None)]
+#[case::assemble_local("contained", "assemble", json!({"src": "../parts", "remote_src": false}), "src", Some("'../parts' is not inside"))]
+#[case::assemble_local_tilde("contained", "assemble", json!({"src": "~/.ssh", "remote_src": "no"}), "src", Some("'~/.ssh' is not inside"))]
+#[case::assemble_on_the_host("contained", "assemble", json!({"src": "/etc/parts"}), "src", None)]
+#[case::assemble_on_the_host_said("contained", "assemble", json!({"src": "/etc/parts", "remote_src": "yes"}), "src", None)]
+#[case::copy_on_the_host("contained", "copy", json!({"src": "/etc/hosts", "remote_src": true}), "src", None)]
+#[case::copy_local("contained", "copy", json!({"src": "/etc/hosts", "remote_src": false}), "src", Some("'/etc/hosts' is not inside"))]
+#[case::template_tilde("contained", "template", json!({"src": "~/t.j2"}), "src", Some("'~/t.j2' is not inside"))]
+#[case::script_comment_word("contained", "script", json!({"_raw_params": "#dir/x.sh --flag"}), "_raw_params", Some("'#dir/x.sh' is not inside"))]
+#[case::script_cmd_comment_word("contained", "script", json!({"cmd": "  #x a"}), "cmd", Some("'#x' is not inside"))]
+#[case::script_quoted_hash("contained", "script", json!({"_raw_params": "'#x.sh' a"}), "_raw_params", None)]
+#[case::script_hash_inside("contained", "script", json!({"_raw_params": "a#b.sh"}), "_raw_params", None)]
+#[case::copy_on_the_host_y("contained", "copy", json!({"src": "/etc/hosts", "remote_src": "y"}), "src", None)]
+#[case::copy_on_the_host_capital_t("contained", "copy", json!({"src": "/etc/hosts", "remote_src": "T"}), "src", None)]
+#[case::copy_on_the_host_one("contained", "copy", json!({"src": "/etc/hosts", "remote_src": 1}), "src", None)]
+#[case::copy_on_the_host_one_point_zero("contained", "copy", json!({"src": "/etc/hosts", "remote_src": 1.0}), "src", None)]
+#[case::copy_on_the_host_string_one("contained", "copy", json!({"src": "/etc/hosts", "remote_src": " 1 "}), "src", None)]
+#[case::copy_on_the_host_on("contained", "copy", json!({"src": "/etc/hosts", "remote_src": "ON"}), "src", None)]
+#[case::copy_local_n("contained", "copy", json!({"src": "/etc/hosts", "remote_src": "n"}), "src", Some("is not inside"))]
+#[case::copy_local_string_one_point_zero("contained", "copy", json!({"src": "/etc/hosts", "remote_src": "1.0"}), "src", Some("is not inside"))]
+#[case::copy_local_two("contained", "copy", json!({"src": "/etc/hosts", "remote_src": 2}), "src", Some("is not inside"))]
+#[case::unarchive_copy_no("contained", "unarchive", json!({"src": "/etc/a.tgz", "copy": "no"}), "src", None)]
+#[case::unarchive_copy_n("contained", "unarchive", json!({"src": "/etc/a.tgz", "copy": "n"}), "src", None)]
+#[case::unarchive_copy_yes("contained", "unarchive", json!({"src": "/etc/a.tgz", "copy": "yes"}), "src", Some("is not inside"))]
+#[case::assemble_local_f("contained", "assemble", json!({"src": "/etc/parts", "remote_src": "F"}), "src", Some("is not inside"))]
+#[case::assemble_on_the_host_t("contained", "assemble", json!({"src": "/etc/parts", "remote_src": "t"}), "src", None)]
+#[case::uri_body("contained", "uri", json!({"body_format": "form-multipart", "body": {"f": {"filename": "~/.ssh/id_rsa"}}}), "body", Some("'~/.ssh/id_rsa' is not inside"))]
+#[case::uri_body_content("contained", "uri", json!({"body_format": "form-multipart", "body": {"f": {"filename": "~/x", "content": "text"}}}), "body", None)]
+#[case::uri_body_inside("contained", "uri", json!({"body_format": "form-multipart", "body": {"f": {"filename": "up.bin"}}}), "body", None)]
+#[case::uri_on_the_host("contained", "uri", json!({"src": "/etc/hosts", "remote_src": true}), "src", None)]
+#[case::template_ignores_remote_src("contained", "template", json!({"src": "/etc/hosts", "remote_src": true}), "src", Some("'/etc/hosts' is not inside"))]
+#[case::template_ignores_remote_src_refuse("refuse", "template", json!({"src": "/etc/hosts", "remote_src": true}), "src", Some("a controller file a host chose is never sent"))]
+#[case::collection_ignores_remote_src("contained", "ansible.posix.synchronize", json!({"src": "/etc/hosts", "remote_src": true}), "src", Some("'/etc/hosts' is not inside"))]
+#[case::fetch_reads_the_host("refuse", "fetch", json!({"src": "/etc/hosts", "dest": "out"}), "src", None)]
+fn a_host_named_controller_file_is_read_as_the_mode_says(
+    #[case] mode: &str,
+    #[case] name: &'static str,
+    #[case] args: Value,
+    #[case] arg: &str,
+    #[case] refused: Option<&str>,
+) {
+    let mode = HostNamedPaths::parse(mode).unwrap();
+    let msg = failure(start_naming(mode, name, args, &[arg]));
+    match refused {
+        Some(says) => assert!(
+            msg.contains("named by a managed host") && msg.contains(says),
+            "{msg}"
+        ),
+        None => assert!(
+            msg.contains("needs the controller's Python helper"),
+            "{msg}"
+        ),
+    }
 }
 
 /// A ping whose link went reaches the plugin as an error, and the next ping is asked over a
@@ -226,6 +313,7 @@ fn the_play_context_describes_the_link_the_module_runs_over(
         origin: &origin,
         playbook_dir: std::path::Path::new("."),
         warnings: &mut warnings,
+        host_named_paths: HostNamedPaths::Allow,
         environment: None,
         timeout: None,
         check_mode: false,

@@ -1,0 +1,10 @@
+- name: outside a role the name is read against the directory of the task file
+  include_vars: {dir: ../vars2}
+  register: r
+- debug: var=r.ansible_included_var_files
+
+- name: not against the playbook
+  include_vars: {dir: vars2}
+  register: r
+  ignore_errors: true
+- debug: var=r

@@ -8,6 +8,7 @@ use volant_protocol::modules::short_name;
 
 use crate::roles::RoleEntry;
 
+use super::deferred::Deferred;
 use super::fields::Debugger;
 use super::keywords::{Flag, META_ONCE, is_meta};
 use super::origin::Origin;
@@ -25,6 +26,10 @@ pub struct Play {
     /// one per item for the list form. `--list-hosts` prints it as the Python list the
     /// reference prints, and `hosts: a,b` there is one pattern while `hosts: [a, b]` is two.
     pub host_patterns: Vec<String>,
+    /// Whether `hosts` was written as a list. A template inside a list renders to one string.
+    pub host_list: bool,
+    /// Set when `hosts` rendered to `none`: the play has no name, and its banner has no brackets.
+    pub nameless: bool,
     /// The play's own tags. Every task under it inherits them for the selection; the listing
     /// prints them on the play's own line.
     pub tags: Vec<String>,
@@ -34,6 +39,12 @@ pub struct Play {
     pub gather_written: bool,
     pub vars: Map<String, Value>,
     pub vars_files: Vec<String>,
+    /// The `when` of the `import_playbook` entries this play came through, outermost first. Every
+    /// task, role and block of the play carries them in front of its own; handlers do not.
+    pub import_when: Vec<String>,
+    /// The `when` of the outermost `import_playbook` entry that had one, which is the one the
+    /// reference puts on the play's `Gathering Facts` task.
+    pub gather_when: Vec<String>,
     pub tasks: Vec<TaskOrBlock>,
     pub pre_tasks: Vec<TaskOrBlock>,
     pub post_tasks: Vec<TaskOrBlock>,
@@ -92,6 +103,9 @@ pub struct Play {
     pub any_errors_fatal: Option<bool>,
     pub ignore_errors: Option<Flag>,
     pub ignore_unreachable: Option<bool>,
+    /// The keywords above, and `become`, `gather_facts` and `force_handlers`, written as
+    /// templates: rendered when the task runs, or when the play starts for the last two.
+    pub deferred: Deferred,
     /// `max_fail_percentage`, as written: a number, or a template rendered when the play
     /// starts. Play-only - a task or a block carrying it is refused at load.
     pub max_fail_percentage: Option<Value>,
@@ -147,6 +161,20 @@ impl Default for PlayTask {
     fn default() -> Self {
         PlayTask::empty()
     }
+}
+
+/// What an include statement's `apply:` came to when it was read.
+///
+/// The keywords are checked against the attributes of a block, as the reference does, but a key
+/// it refuses is refused when the statement runs and not when the file loads: measured on
+/// ansible-core 2.19.12, `apply: {foo: 1}` prints the statement's banner and then stops the run
+/// at exit 4. So the sentence travels with the statement instead of ending the load.
+#[derive(Debug, Clone)]
+pub enum Apply {
+    /// The keywords every task the statement brings in inherits, in a module-less [`PlayTask`].
+    Keywords(std::sync::Arc<PlayTask>),
+    /// The sentence the reference refuses the keywords with.
+    Refused(std::sync::Arc<str>),
 }
 
 #[derive(Debug, Clone)]
@@ -254,8 +282,14 @@ pub struct PlayTask {
     /// it was written for. Kept as written because it is a template rendered per task.
     pub delegate_facts: Option<bool>,
     pub delegate_to: Option<String>,
+    /// The keywords of this task, its blocks, its role and its play that are templates, which
+    /// the executor renders for the host that runs it; see [`Deferred`].
+    pub deferred: Deferred,
     /// Where the task was written, for the `Origin:` of a failure's error block.
     pub origin: Option<Origin>,
+    /// The `apply:` of an `include_tasks` or `include_role` statement, read at load. Everything
+    /// else carries `None`.
+    pub apply: Option<Apply>,
     /// Where some of its values were written - `until`, `retries`, `delay` and a `debug`'s `var` -
     /// for the cause the reference points at when one of them fails.
     ///
@@ -325,7 +359,9 @@ impl PlayTask {
             ignore_unreachable: None,
             delegate_facts: None,
             delegate_to: None,
+            deferred: Deferred::default(),
             origin: None,
+            apply: None,
             value_origins: std::collections::BTreeMap::new(),
         }
     }
@@ -398,7 +434,8 @@ impl PlayTask {
     /// `keywords::tests::run_once_is_the_only_barrier_keyword`: a second row marked `barrier`
     /// would look declared and be ignored here, and that test refuses one.
     pub fn barrier(&self) -> bool {
-        (self.runs_once() && crate::keywords::is_barrier("run_once"))
+        ((self.runs_once() || self.deferred.run_once.is_some())
+            && crate::keywords::is_barrier("run_once"))
             || self.pauses()
             || self.adds_host()
             || self.fails_all()
@@ -407,8 +444,13 @@ impl PlayTask {
 
     /// Whether a failure of this task on one host fails the whole batch. A barrier too: the
     /// hosts meet in front of it and learn together how it ended.
+    ///
+    /// A template counts as true whatever it renders to. Measured on ansible-core 2.19.12: the
+    /// linear strategy reads the keyword before it is rendered, so `any_errors_fatal: "{{ x }}"`
+    /// takes the batch down with it for a false `x` too, and the task's own host then renders the
+    /// value and fails on one that is not a boolean.
     pub fn fails_all(&self) -> bool {
-        self.any_errors_fatal == Some(true)
+        self.any_errors_fatal == Some(true) || self.deferred.any_errors_fatal.is_some()
     }
 
     /// Whether an unreachable host stays in the play after this task.

@@ -1,0 +1,6 @@
+# A YAML merge key (`<<`) merges the mappings it names, in every file that holds variables: merged
+# pairs come first, explicit keys win, and an earlier entry of a list beats a later one.
+runs:
+  - {args: [-i, inventory.yml, -e, "@extra.yml", site.yml]}
+  - {args: [-i, inventory.yml, bad-list.yml]}
+  - {args: [-i, inventory.yml, bad-scalar.yml]}

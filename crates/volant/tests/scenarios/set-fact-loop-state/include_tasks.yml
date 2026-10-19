@@ -1,0 +1,8 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    x: []
+  tasks:
+    - include_tasks: inc.yml
+      loop: [1, 2, 3]
+    - debug: {var: x}

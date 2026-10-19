@@ -2,7 +2,7 @@
 //! Running compiled templates: the bytecode rewrite, one-expression detection and the
 //! conversion of minijinja's errors into [`TemplateError`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use minijinja::machinery::{
@@ -83,6 +83,48 @@ fn closes_only_what_it_opens(expr: &str) -> bool {
     true
 }
 
+/// What a template reads: the names it looks up, and whether it calls something that looks a
+/// name up by text (`lookup`, `query`, `q`).
+#[derive(Debug, Default)]
+pub(super) struct TemplateReads {
+    pub(super) names: BTreeSet<String>,
+    pub(super) dynamic: bool,
+}
+
+/// The names `source` looks up, read off the compiled code. `None` when it does not compile.
+/// Names a `set` or a loop binds inside the template are listed too, which only makes the
+/// answer more careful.
+pub(super) fn template_reads(source: &str) -> Option<TemplateReads> {
+    let config = TemplateConfig {
+        syntax_config: SyntaxConfig::default(),
+        ws_config: WhitespaceConfig::default(),
+        default_auto_escape: Arc::new(|_| AutoEscape::None),
+    };
+    let compiled = CompiledTemplate::new("<reads>", source, &config).ok()?;
+    let mut reads = TemplateReads::default();
+    for instructions in std::iter::once(&compiled.instructions).chain(compiled.blocks.values()) {
+        let mut idx = 0;
+        while let Some(op) = instructions.get(idx) {
+            match op {
+                // The function read as a value, then called under another name, is a lookup by
+                // text just the same.
+                Instruction::Lookup(name) if matches!(*name, "lookup" | "query" | "q") => {
+                    reads.dynamic = true;
+                }
+                Instruction::Lookup(name) => {
+                    reads.names.insert((*name).to_string());
+                }
+                Instruction::CallFunction(name, _) if matches!(*name, "lookup" | "query" | "q") => {
+                    reads.dynamic = true;
+                }
+                _ => {}
+            }
+            idx += 1;
+        }
+    }
+    Some(reads)
+}
+
 /// `a ~ b`. minijinja's own `~` only refuses an operand that is undefined itself and prints a
 /// list or mapping holding one as `[1, undefined]`; measured on ansible-core 2.19.12,
 /// `'x' ~ [1, nope]` and `'x' ~ {'k': nope}` are undefined reads, like `'x' ~ nope`.
@@ -150,8 +192,8 @@ pub(super) fn route_calls(instructions: &mut Instructions<'_>) {
 }
 
 /// `env.render_named_str`, with `~` routed through [`concat()`]. Compiled once per call, as
-/// `render_named_str` does, with the whitespace settings given. The only place that decides
-/// auto-escape and syntax. The environment is the templar's, with the filters and tests the
+/// `render_named_str` does, with the whitespace and syntax settings given. The only place that
+/// decides auto-escape. The environment is the templar's, with the filters and tests the
 /// compiled code calls that only the Python helper has ([`Templar::env_for`]).
 pub(super) fn render_str(
     templar: &Templar,
@@ -159,9 +201,10 @@ pub(super) fn render_str(
     source: &str,
     ctx: &minijinja::Value,
     ws_config: WhitespaceConfig,
+    syntax_config: SyntaxConfig,
 ) -> Result<String, minijinja::Error> {
     let config = TemplateConfig {
-        syntax_config: SyntaxConfig,
+        syntax_config,
         ws_config,
         // Never by file name: measured on ansible-core 2.19.12, `index.html.j2` holding
         // `{{ "<b>" }}` writes `<b>`.

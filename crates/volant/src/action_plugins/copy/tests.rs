@@ -7,10 +7,21 @@ use serde_json::{Map, Value, json};
 
 use super::*;
 use crate::action_plugins::{Context, Plugin, Step};
+use crate::config::HostNamedPaths;
 
 /// The plugin as the driver starts it, for arguments `prepare` rendered, the names among them
 /// whose render read a managed host, and a playbook in `playbook_dir`.
 fn start_in(
+    args: &Map<String, Value>,
+    untrusted: &BTreeSet<String>,
+    playbook_dir: &Path,
+) -> Box<dyn Plugin> {
+    start_mode(HostNamedPaths::Refuse, args, untrusted, playbook_dir)
+}
+
+/// [`start_in`] under the `host_named_paths` mode `mode`.
+fn start_mode(
+    mode: HostNamedPaths,
     args: &Map<String, Value>,
     untrusted: &BTreeSet<String>,
     playbook_dir: &Path,
@@ -35,6 +46,7 @@ fn start_in(
         templar: &templar,
         origin: &origin,
         playbook_dir,
+        host_named_paths: mode,
         warnings: &mut warnings,
 
         environment: None,
@@ -74,6 +86,78 @@ fn a_source_a_host_named_is_never_read() {
             "{}",
             named.display()
         );
+    }
+}
+
+/// A host-named `src` is read as the mode says; a file that is read ends in the first
+/// sub-task, the `stat` of the destination.
+#[rstest::rstest]
+#[case::allow_inside(HostNamedPaths::Allow, "hello.txt", true)]
+#[case::allow_outside(HostNamedPaths::Allow, "<outside>", true)]
+#[case::allow_climbing(HostNamedPaths::Allow, "../play/files/hello.txt", true)]
+#[case::contained_inside(HostNamedPaths::Contained, "hello.txt", true)]
+#[case::contained_outside(HostNamedPaths::Contained, "<outside>", false)]
+#[case::contained_climbing(HostNamedPaths::Contained, "../play/files/hello.txt", false)]
+#[case::refuse_inside(HostNamedPaths::Refuse, "hello.txt", false)]
+fn a_source_a_host_named_is_read_as_the_mode_says(
+    #[case] mode: HostNamedPaths,
+    #[case] name: &str,
+    #[case] read: bool,
+) {
+    let tmp = scratch();
+    let play = tmp.path().join("play");
+    std::fs::create_dir_all(play.join("files")).unwrap();
+    std::fs::write(play.join("files/hello.txt"), "hello\n").unwrap();
+    std::fs::write(tmp.path().join("secret.txt"), "secret\n").unwrap();
+    let named = name.replace(
+        "<outside>",
+        &tmp.path().join("secret.txt").display().to_string(),
+    );
+    let mut args = Map::new();
+    args.insert("src".into(), json!(named));
+    args.insert("dest".into(), json!("/tmp/v/hello.txt"));
+    let untrusted: BTreeSet<String> = ["src".to_string()].into();
+    let mut plugin = start_mode(mode, &args, &untrusted, &play);
+    match (plugin.next(None), read) {
+        (Step::Run(sub), true) => assert_eq!(sub.module, "stat"),
+        (Step::Done(result), false) => {
+            let msg = result.0["msg"].as_str().unwrap();
+            assert!(msg.contains("named by a managed host"), "{msg}");
+        }
+        (other, _) => panic!("{named}: read={read}, step {other:?}"),
+    }
+}
+
+/// A `remote_src` that ansible-core reads as true makes the `src` a file on the host: it is not
+/// held to the directories, and the module runs alone.
+#[rstest::rstest]
+#[case::y(json!("y"), true)]
+#[case::capital_t(json!("T"), true)]
+#[case::on(json!(" On "), true)]
+#[case::one(json!(1), true)]
+#[case::one_point_zero(json!(1.0), true)]
+#[case::string_one(json!("1"), true)]
+#[case::n(json!("n"), false)]
+#[case::string_one_point_zero(json!("1.0"), false)]
+#[case::two(json!(2), false)]
+fn a_remote_src_is_read_as_ansible_core_reads_it(#[case] remote_src: Value, #[case] remote: bool) {
+    let tmp = scratch();
+    let mut args = Map::new();
+    args.insert("src".into(), json!("/etc/hostname"));
+    args.insert("dest".into(), json!("/tmp/v/h"));
+    args.insert("remote_src".into(), remote_src);
+    let untrusted: BTreeSet<String> = ["src".to_string()].into();
+    let mut plugin = start_mode(HostNamedPaths::Contained, &args, &untrusted, tmp.path());
+    match (plugin.next(None), remote) {
+        (Step::Run(sub), true) => {
+            assert_eq!(sub.module, "copy");
+            assert!(sub.files.is_empty());
+        }
+        (Step::Done(result), false) => {
+            let msg = result.0["msg"].as_str().unwrap();
+            assert!(msg.contains("named by a managed host"), "{msg}");
+        }
+        (other, _) => panic!("remote={remote}, step {other:?}"),
     }
 }
 

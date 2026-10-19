@@ -4,14 +4,22 @@
 
 mod facts;
 mod host_vars;
+mod include_dir;
 mod layers;
 mod load;
 mod magic;
+mod play_view;
+mod shared;
 mod store;
 
-pub use host_vars::{HostSettings, HostVars, host_setting, omit_token};
-pub use load::{VaultFile, include_vars_paths, load_vars_file, parse_extra_vars};
+pub(crate) use host_vars::PENDING_PYTHON;
+pub use host_vars::{HostSettings, HostVars, host_setting, omit_token, settled, settled_all};
+pub use include_dir::{Chain, Failure, Scan, include_dir, join_path, read_failure};
+pub use load::{
+    VaultFile, include_vars_paths, load_vars_file, parse_extra_vars, read_vars_document,
+};
 pub use magic::ansible_version;
+pub(crate) use play_view::PlayView;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
@@ -126,6 +134,10 @@ pub struct VarStore {
     /// The same view completed with a host the inventory does not carry - an implicit
     /// `localhost` - one map per such host. There is normally at most one of them in a run.
     hostvars_with: BTreeMap<String, Arc<Map<String, Value>>>,
+    /// The spelling the implicit controller host answers to in `hostvars`: the first one a host
+    /// ran under, `localhost` until one has. The reference makes one such host and names it after
+    /// the first spelling asked for.
+    implicit_controller: Option<String>,
     /// The hosts that hold at least one untrusted name, built on demand and dropped by the same
     /// rule as `hostvars`: every write that can change it already goes through `set_fact`.
     untrusted_hosts: Option<Arc<BTreeSet<String>>>,

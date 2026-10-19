@@ -1,0 +1,2 @@
+- import_playbook: inner.yml
+  when: outer | default(true) | bool

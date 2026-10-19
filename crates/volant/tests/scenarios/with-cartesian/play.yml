@@ -1,0 +1,30 @@
+- hosts: localhost
+  gather_facts: false
+  vars:
+    l1: [x, y]
+    l2: [1, 2]
+  tasks:
+    - name: Pairs
+      debug:
+        msg: "{{ i }}:{{ item.0 }}{{ item.1 }}"
+      with_cartesian:
+        - "{{ l1 }}"
+        - "{{ l2 }}"
+      loop_control:
+        label: "L-{{ item.0 }}"
+        index_var: i
+
+    - name: Three lists
+      debug:
+        msg: "{{ item | join('-') }}"
+      with_cartesian: [[a, b], [1], [x, y]]
+
+    - name: One list is its own item
+      debug:
+        msg: "{{ item }}"
+      with_cartesian: [[1, 2]]
+
+    - name: An empty list empties the product
+      debug:
+        msg: never
+      with_cartesian: [[1, 2], []]

@@ -1,0 +1,30 @@
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Entries
+      debug:
+        msg: "{{ i }}:{{ item.path }} {{ item.state }}"
+      with_filetree: [tree1, tree2]
+      loop_control:
+        label: "L-{{ item.path }}"
+        index_var: i
+
+    - name: The keys of an entry
+      debug:
+        msg: "{{ item.state }}: {{ item.keys() | sort | list }}"
+      with_filetree: [tree1, tree2]
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Where a link points
+      debug:
+        msg: "{{ item.src }}"
+      with_filetree: [tree1, tree2]
+      when: item.state == 'link'
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: A tree that does not exist
+      debug:
+        msg: never
+      with_filetree: nosuchtree

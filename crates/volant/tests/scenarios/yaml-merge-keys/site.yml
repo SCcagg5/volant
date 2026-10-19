@@ -1,0 +1,56 @@
+- hosts: h1
+  gather_facts: false
+  vars_files: [vars.yml]
+  vars:
+    pv_base: &pv_base {a: 1, b: 2}
+    pv_derived: {c: 3, <<: *pv_base}
+    nested_inner: &nested_inner {p: 1}
+    nested_outer: &nested_outer {<<: *nested_inner, q: 2}
+    nested: {<<: *nested_outer, r: 3}
+    two_keys:
+      <<: {a: 1, b: 2}
+      <<: {b: 3, c: 4}
+    quoted: {'<<': {a: 1}, "<<": {b: 2}}
+    empty_source: {<<: {}, a: 1}
+    heredoc: |
+      cat <<EOF
+      EOF
+  tasks:
+    - include_vars: included.yml
+    - set_fact:
+        <<: {sf_a: 1}
+        sf_b: 2
+        sf_c: {<<: {x: 1}, y: 2}
+    - debug:
+        msg: "{{ item.key }} {{ item.value | to_json }}"
+      loop: "{{ vars_of | dict2items }}"
+      vars:
+        vars_of:
+          inv_derived: "{{ inv_derived }}"
+          host_derived: "{{ host_derived }}"
+          gv_derived: "{{ gv_derived }}"
+          hv_both: "{{ hv_both }}"
+          hv_reversed: "{{ hv_reversed }}"
+          vf_derived: "{{ vf_derived }}"
+          pv_derived: "{{ pv_derived }}"
+          nested: "{{ nested }}"
+          two_keys: "{{ two_keys }}"
+          quoted: "{{ quoted }}"
+          empty_source: "{{ empty_source }}"
+          inc_derived: "{{ inc_derived }}"
+          ev_derived: "{{ ev_derived }}"
+          sf_a: "{{ sf_a }}"
+          sf_b: "{{ sf_b }}"
+          sf_c: "{{ sf_c }}"
+      loop_control:
+        label: "{{ item.key }}"
+    - debug:
+        var: gv_derived
+    - debug:
+        msg: "{{ hv_both | to_nice_json }}"
+    - debug:
+        msg: "{{ ('d: {c: 3, <<: {a: 1, b: 2}}' | from_yaml) | to_json }}"
+    - debug:
+        msg: "{{ heredoc }}"
+    - debug:
+        <<: &args {msg: merged into the arguments}

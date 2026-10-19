@@ -37,15 +37,16 @@ The plugin finds the template under `templates/`, renders it once with the task'
 
 Four variables are set for the render, on top of the task's own: `ansible_managed` (unless the task already set it), `template_path` (`src` as the task wrote it), `template_fullpath` (the path found on the controller) and `template_destpath` (`dest` as rendered, see below). `template_host`, `template_uid`, `template_run_date` and `template_mtime`, which the reference also sets, are not.
 
-`trim_blocks` defaults on and `lstrip_blocks` defaults off, as in the reference, and the file's trailing newline is kept. `newline_sequence` takes `\n`, `\r` or `\r\n`, the escaped four-character spelling read the same as the literal one. The six delimiter options (`variable_start_string` and its five relatives) are not supported yet and are named rather than silently ignored, and so is an `output_encoding` other than UTF-8. A template that uses `{% include %}` or `{% import %}` fails: nothing here loads a second file mid-render.
+`trim_blocks` defaults on and `lstrip_blocks` defaults off, as in the reference, and the file's trailing newline is kept. `newline_sequence` takes `\n`, `\r` or `\r\n`, the escaped four-character spelling read the same as the literal one. The six delimiter options (`variable_start_string` and its five relatives) and a `#jinja2:` first line in the template file are read as the reference reads them, see [Rendering a template file](/variables/templating/#rendering-a-template-file). `output_encoding` writes UTF-8, UTF-8 with a signature, Latin-1, ASCII, cp1252, ISO 8859-15, UTF-16 and UTF-32, and names any other encoding as not supported yet. A template that uses `{% include %}` or `{% import %}` fails: nothing here loads a second file mid-render.
 
 Rejected before the host is asked anything:
 
 - `'state' cannot be specified on a template`
 - `src and dest are required`
 - `newline_sequence needs to be one of: \n, \r or \r\n`
-- `argument '<name>' is not supported yet on 'template'`, for a delimiter option
-- `output_encoding '<encoding>' is not supported yet on 'template': only utf-8 is`
+- `Block, variable and comment start strings must be different.`
+- `TemplateOverrides.<name> must be <class 'str'> instead of <class 'NoneType'>`, for a delimiter option that is empty or null
+- `output_encoding '<encoding>' is not supported yet on 'template': only utf-8, ... are`
 - A `src` that names nothing on the controller, in the reference's own words, with no `AnsibleActionFail` wrapper this time.
 - A render bigger than one frame is rejected, naming both sizes, before anything is staged.
 
@@ -125,7 +126,7 @@ Rejected before the host is asked anything: an argument outside the reference's 
 
 ## On the bridge
 
-`add_host`, `assemble`, `async_status`, `gather_facts`, `group_by`, `script`, `set_stats`, `uri` and `wait_for_connection` run ansible-core's own action plugin in the helper, and so does every action plugin a collection ships (the plugins that need a Windows host or another connection type excepted; the [parity](/reference/parity/) page counts them). `copy` and `unarchive` take the same road for the two shapes the Rust plugins refuse: `copy` of a directory, and `unarchive` with a `~` in `dest` or `creates`. A `src` a managed host named never takes it: the Rust plugin's refusal stands.
+`add_host`, `assemble`, `async_status`, `gather_facts`, `group_by`, `script`, `set_stats`, `uri` and `wait_for_connection` run ansible-core's own action plugin in the helper, and so does every action plugin a collection ships (the plugins that need a Windows host or another connection type excepted; the [parity](/reference/parity/) page counts them). `copy` and `unarchive` take the same road for the two shapes the Rust plugins refuse: `copy` of a directory, and `unarchive` with a `~` in `dest` or `creates`. Under `host_named_paths = refuse`, a `src` a managed host named never takes it: the Rust plugin's refusal stands.
 
 The plugin asks for what it needs and the controller answers: run this module, run this command, read a variable, make a temporary directory, put this file. Every answer is bounded by the task's `timeout:`. A plugin that never returns, or a helper that dies, fails that task and not the run; a temporary directory the plugin left on the host is removed. `add_host`, `group_by` and `set_stats` need no host and run without a connection. What they return is applied by the executor: new hosts and groups for the next tasks, and the custom stats printed after the recap. A value of `add_host` rendered from a fact stays data: it is kept as a fact of the new host, never as an inventory variable. So does a host name or a group name of `add_host` or `group_by` that was built from text a managed host wrote, or that still holds a template: `groups`, `hostvars`, `group_names`, the host lists of a play and `inventory_hostname` show it as text, as ansible-core does. Once one such name exists, every read of the lists that carry it is data. Reading one host through `hostvars[name]` is data only for that host, so a nested template of another host still renders.
 
@@ -149,7 +150,6 @@ The plugin reads the link's key and user (the host variable, `--private-key`, `-
 
 ### Known gaps
 
-- Template delimiters (`variable_start_string` and the five others) are not bridged; `template` still refuses them.
 - `wait_for_connection` on a host that is down from the first connection ends `UNREACHABLE` for a plugin item that never got a link; the reference reports `failed` with `timed out waiting for ping module test`.
 - A bridged result that is `unreachable` at the result level prints as `ok`.
 - A skipped bridged result carries `"failed": false`.
@@ -160,16 +160,46 @@ The plugin reads the link's key and user (the host variable, `--private-key`, `-
 
 ## A source file a managed host named
 
-`copy`, `template` and `unarchive` all reject the same thing, in the same words: a `src` whose render read a managed host is never looked up.
+A `src` is named by a managed host when its render read something a host contributed: a gathered fact, as in `src: "{{ ansible_os_family }}.j2"`, a registered result, or an item of `with_first_found` built from one. `[volant] host_named_paths` says what `copy`, `template`, `script`, `unarchive` and `assemble` do with it. It applies to the file read on the controller, and under `--check` and `--diff` too. For `template`, a delimiter option (`variable_start_string` and the five others) whose value a host contributed is used under `allow`, as ansible-core uses it, and refused under `contained` and `refuse`. A `#jinja2:` first line in an author's template is read in every mode.
+
+| Value | What the task does |
+|---|---|
+| `allow` (the default) | Looks the file up and sends it, as ansible-core does. |
+| `contained` | Reads the file only when it is in a `files` or `templates` directory that the task searches. |
+| `refuse` | Fails the task before any path is looked up. |
+
+`allow` means that a managed host can choose which readable controller file a `copy`, `template` or `script` task sends to it, exactly as in ansible-core 2.19.12. Measured there, a `src` that is a registered value, a command's `stdout` or a fact sends whatever file it names, `~/.ssh` included. Roles that pick a template by fact depend on this. `contained` and `refuse` exist to tighten it, for a run where a host is less trusted than the person who runs the playbook.
+
+Under `contained`, the directories that count are the `files` and `templates` directories of the role, of the roles it is a dependency of, of the directory of the task's file (`tasks/files` in a role) and of the playbook directory. The rest of those trees does not count: `group_vars`, `vars`, `defaults`, an inventory, `ansible.cfg` and a vault password file are never reachable by a name a host chose, and neither is a file kept beside the playbook. The rules, in order:
+
+- A name that starts with `~`, or `~user`, is refused. ansible-core's own plugins expand it to a home directory, which the text of the name does not show.
+- A name with a `..` component is refused, even one that folds back inside. The file system follows a link before it folds `..`, so the folded path is not the one that would be opened.
+- An absolute name must lie under one of those directories and must not hold a `$`, which ansible-core expands in an absolute name. `with_first_found` hands over an absolute name of this kind.
+- A relative name is looked up as the plugin looks it up. The first file that exists is the one read, and it must lie under one of those directories. A file with that name beside the playbook, outside `files`, is refused when it exists. As a result the refusal tells a host that such a file exists. This is limited to a file at `<playbook>/<name>`, `<role>/<name>`, `<role>/tasks/<name>` or `<parent role>/<name>`; the answer for any other name is the usual "could not find".
+
+The check reads the text of the path. A link that you placed inside those directories is your own file and is followed. A source on the host, such as `remote_src: true` for `copy` and `unarchive`, or `assemble` when `remote_src` is not set to false, is not a controller file and is not checked. `template`, `script` and the plugins of a collection read no `remote_src`, so it never exempts them. For `script`, the file is the first word of the line, or of `cmd`. For `uri`, `src` and the `filename` of each field of a multipart `body` count.
+
+A task is refused before the path is looked up when the mode or the text of the name decides it, because an answer of "not found" would already tell a host whether a path exists on the controller. Under `refuse` the message is:
 
 ```text
 the 'src' of this task was named by a managed host, and a controller file a host chose is
 never sent
 ```
 
-This is stricter than the reference, on purpose. Measured on ansible-core 2.19.12, a `copy` (or `template`, or `unarchive`) whose `src` is a registered value, a command's `stdout` or a fact, sends whatever controller file that value names to the host, `~/.ssh` included. A host that controls what a command prints, or what a fact reports, can have any file the operator can read sent to it.
+Under `contained`, it names the value and the setting:
 
-The check runs before the path is so much as looked up, not after a search that comes back empty: answering "not found" would already tell a host whether a path exists on the controller. `dest`, by contrast, is only ever a place to write to, never a file that gets read, so it is not rejected this way; `template_destpath` (see above) carries it through to the render as the host's own value when the host is the one who named it, same as any other untrusted string.
+```text
+the 'src' of this task was named by a managed host, and '../up.j2' is not inside the
+files or templates directories of the playbook or the role (host_named_paths = contained)
+```
+
+The argument is `_raw_params` or `cmd` for a `script`. Any other word for the setting stops the run at start with exit code 5 and names the key, the three words and the value found.
+
+The setting covers the tasks listed above. It does not cover `include_vars`, `vars_files` or a lookup such as `file` whose path a host named. Nor does it cover a `copy` with `remote_src` or a `slurp` delegated to `localhost` that reads a controller path a host named. These behave as in ansible-core, and the same way on every earlier version of Volant.
+
+The mode changes which file is read, never how the text of a template is trusted. When the `src` of a `template` was named by a host, `template_path` and `template_fullpath` are that host's values in the render, the way `template_destpath` is for a `dest`.
+
+`fetch` is outside this setting. Its `dest` is a place the controller writes, not a file it reads, and a `dest` a host named is refused in every mode (see `fetch` below). `dest` of the other plugins is only ever a place to write on the host, so it is not refused; `template_destpath` carries it into the render as the host's own value.
 
 ## What stays on the host
 
