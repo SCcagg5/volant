@@ -142,7 +142,6 @@ The file's own trailing newline survives the render. [Action plugins](/reference
 
 - A string that reads two variables, one of them chained through a third that holds a `raw` block, is rendered once more than in the reference.
 - A value under `!unsafe` is data and is never templated. A `!vault` value is decrypted; see [Vault](/variables/vault/).
-- In a variable or a task argument, `{% ... %}` blocks render, but `trim_blocks` does not apply, a `{# ... #}` comment stays in the text, and a value made only of a block, such as a `for` loop that yields `1`, comes out as the string `"1"` instead of a number. A template file for the `template` module is not affected.
 - Python methods that change a value or that MiniJinja lacks fail with `method <name> is not available yet`: `append`, `extend`, `insert`, `pop`, `remove`, `sort`, `reverse`, `update`, `setdefault`, `copy`, `index`, `rsplit`, `partition`, `zfill`, `ljust`, `swapcase`, `removeprefix`, `encode` and `dict.fromkeys`. So does `%` formatting of a string, as in `'%s' % x`.
 - `now()` and `lipsum()` fail with an unknown function.
 - These filter arguments are not supported: the method of `round`, `start` and `attribute` of `sum`, `attribute` of `min` and `max`, `count` of `replace`, `base` of `int`, `sort_keys` of `to_json`, `encoding` of `b64encode`, and `strict` and `version_type` of the `version` test.
