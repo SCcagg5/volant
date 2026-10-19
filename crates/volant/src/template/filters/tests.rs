@@ -530,9 +530,8 @@ fn the_regex_filters_return_what_python_re_returned() {
     }
 }
 
-/// Python syntax the `regex` crate has no counterpart for: ansible-core runs each pattern, and
-/// Volant refuses it with the construct's name instead of a wrong answer. The recorded rows in
-/// `cases.yml` cover what both run.
+/// Python syntax the `regex` crate lacks is refused by the construct's name, not answered wrongly.
+/// The rows in `cases.yml` cover what both engines run.
 #[test]
 fn a_pattern_without_a_rust_counterpart_is_refused_by_name() {
     let rows = [
