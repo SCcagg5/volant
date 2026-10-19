@@ -1,0 +1,12 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: Left out by its when
+      debug: {msg: never}
+      when: false
+      become: "{{ 'maybe' }}"
+      timeout: "{{ 'abc' }}"
+      ignore_unreachable: "{{ 'maybe' }}"
+      delegate_facts: "{{ 'maybe' }}"
+    - name: Runs
+      debug: {msg: after}

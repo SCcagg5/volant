@@ -1,0 +1,4 @@
+# gather_facts and force_handlers written as templates are rendered once, when the play starts. The
+# play still counts as one that may gather, so it needs ansible-core to be there.
+args: [-i, inv.ini, play.yml]
+needs: [ansible-core]

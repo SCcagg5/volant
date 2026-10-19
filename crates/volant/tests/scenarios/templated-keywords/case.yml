@@ -1,0 +1,11 @@
+# Keywords written as templates are rendered for each host when its task runs, at the task, the
+# block and the play: no_log, run_once and delegate_facts; any_errors_fatal, which the strategy
+# reads as true whatever it renders to; timeout; ignore_unreachable. A task its `when` leaves out
+# renders none of them.
+runs:
+  - args: [-i, inv.ini, tasks.yml]
+  - args: [-i, inv.ini, layers.yml]
+  - args: [-i, inv.ini, skipped.yml]
+  - args: [-i, inv.ini, any-errors-fatal.yml]
+  - args: [-i, inv.ini, timeout.yml]
+  - args: [-i, inv.ini, unreachable.yml]
