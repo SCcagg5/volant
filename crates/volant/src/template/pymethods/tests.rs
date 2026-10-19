@@ -203,3 +203,41 @@ fn percent_reads_integers_past_64_bits() {
 fn vars(v: Json) -> Map<String, Json> {
     v.as_object().unwrap().clone()
 }
+
+/// A large integer is ordered against a float by value, as Python does, and not after it was
+/// rounded to a float: `2**53 + 1` is larger than `2.0**53`.
+#[test]
+fn sorting_a_large_integer_against_a_float_is_exact() {
+    for (template, want) in [
+        (
+            "{% set l = [9007199254740993, 9007199254740992.0] %}{% set _ = l.sort() %}{{ l | map('string') | join(',') }}",
+            "9007199254740992.0,9007199254740993",
+        ),
+        (
+            "{% set l = [9007199254740992.0, 9007199254740993] %}{% set _ = l.sort(reverse=True) %}{{ l | map('string') | join(',') }}",
+            "9007199254740993,9007199254740992.0",
+        ),
+    ] {
+        assert_eq!(render(template), Ok(json!(want)), "{template}");
+    }
+}
+
+/// `inf` is padded with blanks, and the fields of one format string together stay within the limit.
+#[test]
+fn percent_pads_infinity_with_blanks_and_bounds_the_whole_text() {
+    let v = vars(json!({"big": 1e308}));
+    let t = crate::testing::templar();
+    assert_eq!(
+        t.render("{{ '%08f|%+08.1f' % (big * 10, big * 10) }}", &v)
+            .unwrap(),
+        json!("     inf|    +inf")
+    );
+    let err = t
+        .render("{{ '%200000000s%200000000s' % ('a', 'b') }}", &v)
+        .unwrap_err();
+    assert!(err.0.contains("256 MiB"), "{err}");
+    let err = t
+        .render("{{ '%.*f' % (2147483648, 1.5) }}", &v)
+        .unwrap_err();
+    assert!(err.0.contains("C int"), "{err}");
+}

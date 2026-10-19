@@ -176,17 +176,69 @@ fn merge_sort(
     Ok(out)
 }
 
+/// A number as `<` reads it: an integer stays one, so that a large integer is compared with a float
+/// by value, as Python does, and not after rounding it to a float.
+#[derive(Clone, Copy)]
+enum Num {
+    Int(i128),
+    Float(f64),
+}
+
+fn number(v: &Value) -> Option<Num> {
+    match v.kind() {
+        ValueKind::Bool => Some(Num::Int(i128::from(v.is_true()))),
+        ValueKind::Number if v.is_integer() => i128::try_from(v.clone()).ok().map(Num::Int),
+        ValueKind::Number => f64::try_from(v.clone()).ok().map(Num::Float),
+        _ => None,
+    }
+}
+
+impl Num {
+    /// `None` when a side is `nan`.
+    fn cmp_exact(self, other: Num) -> Option<Ordering> {
+        match (self, other) {
+            (Num::Int(x), Num::Int(y)) => Some(x.cmp(&y)),
+            (Num::Float(x), Num::Float(y)) => x.partial_cmp(&y),
+            (Num::Int(x), Num::Float(y)) => int_against_float(x, y),
+            (Num::Float(x), Num::Int(y)) => int_against_float(y, x).map(Ordering::reverse),
+        }
+    }
+}
+
+/// `x` against `y`, exactly.
+fn int_against_float(x: i128, y: f64) -> Option<Ordering> {
+    if y.is_nan() {
+        return None;
+    }
+    // 2^127: a float at or past it is outside what an `i128` holds.
+    let limit = 2f64.powi(127);
+    if y >= limit {
+        return Some(Ordering::Less);
+    }
+    if y < -limit {
+        return Some(Ordering::Greater);
+    }
+    let whole = y.trunc();
+    // `whole` is an integer value inside the range of `i128`, so the cast is exact.
+    Some(x.cmp(&(whole as i128)).then_with(|| {
+        // Equal wholes: the fraction of `y` decides.
+        let fraction = y - whole;
+        if fraction > 0.0 {
+            Ordering::Less
+        } else if fraction < 0.0 {
+            Ordering::Greater
+        } else {
+            Ordering::Equal
+        }
+    }))
+}
+
 /// Python's `<` between two values, for those that can be ordered.
 fn compare(a: &Value, b: &Value) -> Result<Ordering, Error> {
     let kinds = (a.kind(), b.kind());
-    let number = |v: &Value| match v.kind() {
-        ValueKind::Bool => Some(f64::from(u8::from(v.is_true()))),
-        ValueKind::Number => f64::try_from(v.clone()).ok(),
-        _ => None,
-    };
     if let (Some(x), Some(y)) = (number(a), number(b)) {
         return x
-            .partial_cmp(&y)
+            .cmp_exact(y)
             .ok_or_else(|| raise("cannot order a number that is not a number"));
     }
     match kinds {

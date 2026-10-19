@@ -101,7 +101,7 @@ fn modulo(lhs: &Value, rhs: &Value) -> Result<Value, Error> {
 }
 
 /// The flags, width and precision of one conversion.
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 struct Spec {
     left: bool,
     plus: bool,
@@ -137,21 +137,18 @@ impl Args<'_> {
         let Some(Num::Int(i)) = number(&v) else {
             return Err(raise("* wants int"));
         };
-        let bound = if precision {
-            i64::from(i32::MAX)
+        let fits = if precision {
+            i32::try_from(i).map(i64::from).ok()
         } else {
-            i64::MAX
+            i64::try_from(i).ok()
         };
-        i64::try_from(i)
-            .ok()
-            .filter(|n| n.unsigned_abs() <= bound.unsigned_abs() + 1)
-            .ok_or_else(|| {
-                raise(if precision {
-                    "Python int too large to convert to C int"
-                } else {
-                    "Python int too large to convert to C ssize_t"
-                })
+        fits.ok_or_else(|| {
+            raise(if precision {
+                "Python int too large to convert to C int"
+            } else {
+                "Python int too large to convert to C ssize_t"
             })
+        })
     }
 }
 
@@ -206,7 +203,10 @@ fn interpolate(fmt: &str, rhs: &Value, tuple: bool) -> Result<String, Error> {
             Some(v) => v,
             None => args.next()?,
         };
-        out.push_str(&convert(conv, &arg, &spec, at)?);
+        let piece = convert(conv, &arg, &spec, at)?;
+        // Each field is within the limit; many of them together are checked here.
+        check(out.len() as u128 + piece.len() as u128)?;
+        out.push_str(&piece);
         at += 1;
     }
     if args.mapping.is_none() && args.at < args.items.len() {
@@ -407,7 +407,12 @@ fn convert(conv: char, arg: &Value, spec: &Spec, at: usize) -> Result<String, Er
             } else {
                 float::special(f.abs(), conv.is_ascii_uppercase())
             };
-            Ok(numeric(negative, "", &body, spec))
+            // `inf` and `nan` are padded with blanks, never with zeros.
+            let spec = Spec {
+                zero: spec.zero && f.is_finite(),
+                ..*spec
+            };
+            Ok(numeric(negative, "", &body, &spec))
         }
         other => Err(raise(format!(
             "unsupported format character '{other}' (0x{:02x}) at index {at}",
