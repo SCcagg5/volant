@@ -11261,5 +11261,83 @@
       }
     },
     "result": "7|{{ C }}"
+  },
+  {
+    "case": {
+      "template": "{{ '½'.isdecimal() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ '½'.isdigit() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ '½'.isnumeric() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ '²'.isdecimal() }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ '²'.isdigit() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ '²'.isnumeric() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ '٣'.isdecimal() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ '٣'.isdigit() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ '٣'.isnumeric() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ '5'.isdecimal() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ '5'.isdigit() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ '5'.isnumeric() }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ '一'.isnumeric() }}"
+    },
+    "result": true
   }
 ]

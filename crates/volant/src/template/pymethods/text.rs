@@ -4,6 +4,7 @@
 use minijinja::{Error, Value};
 
 use super::args::{Call, index, is_space, raise, type_of};
+use super::digits;
 use super::limits::check;
 
 /// `split` and `rsplit`: `(sep=None, maxsplit=-1)`.
@@ -305,9 +306,9 @@ pub(super) fn predicate(s: &str, name: &str) -> Option<bool> {
     let all = |f: fn(char) -> bool| !s.is_empty() && s.chars().all(f);
     let cased = |c: char| c.is_lowercase() || c.is_uppercase();
     Some(match name {
-        "isdigit" => all(|c| c.is_ascii_digit() || (!c.is_ascii() && c.is_numeric())),
-        "isdecimal" => all(|c| c.is_ascii_digit() || (!c.is_ascii() && c.is_numeric())),
-        "isnumeric" => all(char::is_numeric),
+        "isdigit" => all(|c| digits::contains(&digits::DIGIT, c)),
+        "isdecimal" => all(|c| digits::contains(&digits::DECIMAL, c)),
+        "isnumeric" => all(|c| digits::contains(&digits::NUMERIC, c)),
         "isalpha" => all(char::is_alphabetic),
         "isalnum" => all(char::is_alphanumeric),
         "isspace" => all(is_space),
