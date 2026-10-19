@@ -170,3 +170,7 @@ Ansible ignores this section, so one `ansible.cfg` can carry it and still drive 
 <Option name="ssh_control_master" id="volant-ssh-control-master" default="true" env="VOLANT_SSH_CONTROL_MASTER">
   Share one OpenSSH connection between all the `ssh` runs of an inventory host. With `false`, each link and probe opens its own connection. See [One connection per host](/hosts/connections/#one-connection-per-host).
 </Option>
+
+<Option name="host_named_paths" id="volant-host-named-paths" default="allow" env="VOLANT_HOST_NAMED_PATHS">
+  What `template`, `copy`, `script`, `unarchive` and `assemble` do with a controller `src` that a managed host named, through a gathered fact or a registered result. `allow` reads the file as ansible-core does: a managed host can choose which readable controller file a task sends to it. `contained` reads it only when its path stays inside the directories where you keep the files of the task, and fails the task for a `..` component or an absolute path outside them. `refuse` fails the task for every such name. Any other word stops the run with exit code 5. A `fetch` whose `dest` a host named is refused in every mode. See [A source file a managed host named](/reference/action-plugins/#a-source-file-a-managed-host-named).
+</Option>
