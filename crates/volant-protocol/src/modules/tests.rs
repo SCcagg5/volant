@@ -12,6 +12,22 @@ fn builtin_prefixes_are_stripped_and_collections_kept() {
     assert_eq!(short_name("community.general.ufw"), "community.general.ufw");
 }
 
+/// Measured on ansible-core 2.19.12: every module `ansible.builtin` ships resolves under
+/// `ansible.legacy` as well, and to the same module.
+#[test]
+fn every_builtin_module_resolves_under_both_prefixes() {
+    for m in BUILTIN_MODULES {
+        for spelling in [
+            format!("ansible.builtin.{m}"),
+            format!("ansible.legacy.{m}"),
+        ] {
+            assert!(is_builtin(&spelling), "{spelling}");
+            assert_eq!(builtin_route(&spelling), builtin_route(m), "{spelling}");
+        }
+    }
+    assert!(!is_builtin("ansible.legacy.nosuchmodule"));
+}
+
 #[test]
 fn native_lookup_uses_the_short_name() {
     assert_eq!(native("ansible.builtin.raw").map(|m| m.name), Some("raw"));
