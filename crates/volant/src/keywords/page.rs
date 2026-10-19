@@ -61,7 +61,9 @@ pub fn documentation() -> String {
          fails for that host, a `rescue` around it can catch the failure, and nothing in the file \
          runs. See [Includes and imports](/playbooks/includes/).\n\n\
          This page is generated from the tables the loader and the pre-flight read, so it always \
-         describes the release it ships with.\n\n\
+         describes the release it ships with. A status says what Volant does with the keyword, \
+         not that every value works: the [known gaps](/start/compatibility/#known-gaps) list the \
+         values that fail.\n\n\
          ## All keywords\n\n\
          <div class=\"kw-grid-wrap not-content\">\n<table class=\"kw-grid\">\n<thead><tr>\
          <th>Keyword</th><th>Play</th><th>Block</th><th>Task</th></tr></thead>\n<tbody>\n",

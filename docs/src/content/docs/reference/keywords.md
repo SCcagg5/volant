@@ -16,7 +16,7 @@ Volant loads a playbook against the whole ansible-core 2.19 grammar, so it parse
 
 A keyword inside a file that only a dynamic `include_tasks` or `include_role` names is checked when a host reaches that statement: if it is not supported yet, the statement fails for that host, a `rescue` around it can catch the failure, and nothing in the file runs. See [Includes and imports](/playbooks/includes/).
 
-This page is generated from the tables the loader and the pre-flight read, so it always describes the release it ships with.
+This page is generated from the tables the loader and the pre-flight read, so it always describes the release it ships with. A status says what Volant does with the keyword, not that every value works: the [known gaps](/start/compatibility/#known-gaps) list the values that fail.
 
 ## All keywords
 
@@ -52,7 +52,7 @@ This page is generated from the tables the loader and the pre-flight read, so it
 <tr><td><code>gather_subset</code></td><td><span class="kw kw-runs">runs</span></td><td><span class="kw kw-no">not accepted</span></td><td><span class="kw kw-no">not accepted</span></td></tr>
 <tr><td><code>gather_timeout</code></td><td><span class="kw kw-runs">runs</span></td><td><span class="kw kw-no">not accepted</span></td><td><span class="kw kw-no">not accepted</span></td></tr>
 <tr><td><code>handlers</code></td><td><span class="kw kw-runs">runs</span></td><td><span class="kw kw-no">not accepted</span></td><td><span class="kw kw-no">not accepted</span></td></tr>
-<tr><td><code>hosts</code></td><td><span class="kw kw-runs">runs</span></td><td><span class="kw kw-no">not accepted</span></td><td><span class="kw kw-no">not accepted</span></td></tr>
+<tr><td><code>hosts</code></td><td><span class="kw kw-partial">partial</span></td><td><span class="kw kw-no">not accepted</span></td><td><span class="kw kw-no">not accepted</span></td></tr>
 <tr><td><code>ignore_errors</code></td><td><span class="kw kw-runs">runs</span></td><td><span class="kw kw-runs">runs</span></td><td><span class="kw kw-runs">runs</span></td></tr>
 <tr><td><code>ignore_unreachable</code></td><td><span class="kw kw-runs">runs</span></td><td><span class="kw kw-runs">runs</span></td><td><span class="kw kw-runs">runs</span></td></tr>
 <tr><td><code>local_action</code></td><td><span class="kw kw-no">not accepted</span></td><td><span class="kw kw-no">not accepted</span></td><td><span class="kw kw-runs">runs</span></td></tr>
@@ -120,6 +120,7 @@ Each keyword below behaves the same way in every place the grid marks it `partia
 
 | Keyword | What is missing |
 |---|---|
+| `hosts` | A pattern written as a template is not rendered: the play matches no host, prints a warning and exits 0 |
 
 ## Limits of what runs
 

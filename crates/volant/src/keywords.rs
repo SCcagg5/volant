@@ -74,6 +74,17 @@ const fn noted_kw(name: &'static str, note: &'static str) -> Keyword {
     }
 }
 
+/// A keyword this release answers in part, with what is missing as the generated page prints it.
+const fn partial_kw(name: &'static str, missing: &'static str) -> Keyword {
+    Keyword {
+        name,
+        support: Partial,
+        missing: Some(missing),
+        note: None,
+        barrier: false,
+    }
+}
+
 /// The limit of the `debugger` rows.
 pub const DEBUGGER_NOTE: &str = "`p` and a line that is not a command evaluate a subset of Python: names, literals, indexing, attributes, assignments and the calls the prompt needs. `task_vars` edited at the prompt reach a redo through `u` only";
 
@@ -229,7 +240,10 @@ pub const PLAY_KEYWORDS: &[Keyword] = &[
     kw("gather_subset", Runs),
     kw("gather_timeout", Runs),
     kw("handlers", Runs),
-    kw("hosts", Runs),
+    partial_kw(
+        "hosts",
+        "A pattern written as a template is not rendered: the play matches no host, prints a warning and exits 0",
+    ),
     kw("ignore_errors", Runs),
     kw("ignore_unreachable", Runs),
     kw("max_fail_percentage", Runs),
