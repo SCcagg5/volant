@@ -158,7 +158,10 @@ pub(in crate::executor) fn resolve(
     }
     if let Some(raw) = &waiting.async_val {
         match whole("async_val", raw, vars, templar) {
-            Ok(n) => task.async_val = u64::try_from(n).unwrap_or(0),
+            Ok(n) => match u64::try_from(n) {
+                Ok(n) => task.async_val = n,
+                Err(_) => out.fail(negative("async_val", n)),
+            },
             Err(err) => out.fail(err),
         }
     }
@@ -196,7 +199,10 @@ pub(in crate::executor) fn resolve(
     }
     if let Some(raw) = &waiting.poll {
         match whole("poll", raw, vars, templar) {
-            Ok(n) => task.poll = Some(u64::try_from(n).unwrap_or(0)),
+            Ok(n) => match u64::try_from(n) {
+                Ok(n) => task.poll = Some(n),
+                Err(_) => out.fail(negative("poll", n)),
+            },
             Err(err) => out.fail(err),
         }
     }
@@ -221,6 +227,14 @@ pub(in crate::executor) fn resolve(
         ..step.clone()
     }));
     out
+}
+
+/// ansible-core 2.19.12 runs a task with a negative `async` or `poll`; the typed fields here are
+/// unsigned, as for a literal, which the loader refuses, so a negative value is refused by name.
+fn negative(key: &str, n: i64) -> TemplateError {
+    TemplateError(format!(
+        "Error processing keyword '{key}': the value {n} is negative, which is not supported yet."
+    ))
 }
 
 /// Whether a layer holds a keyword for [`resolve`]. `become`, `gather_facts` and `force_handlers`

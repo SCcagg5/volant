@@ -1357,7 +1357,11 @@ fn resolved(key: &str, template: &str) -> Result<Value, String> {
     Err("Task failed: Timeout 100000001 is invalid, it must be between 0 and 100000000.")
 )]
 #[case::async_number("async_val", "{{ n }}", Ok(json!(3)))]
-#[case::async_negative("async_val", "{{ -1 }}", Ok(json!(0)))]
+#[case::async_negative(
+    "async_val",
+    "{{ -1 }}",
+    Err("Task failed: Error processing keyword 'async_val': the value -1 is negative")
+)]
 #[case::async_word(
     "async_val",
     "{{ 'abc' }}",
@@ -1366,7 +1370,11 @@ fn resolved(key: &str, template: &str) -> Result<Value, String> {
     )
 )]
 #[case::poll_number("poll", "{{ n }}", Ok(json!(3)))]
-#[case::poll_negative("poll", "{{ -1 }}", Ok(json!(0)))]
+#[case::poll_negative(
+    "poll",
+    "{{ -1 }}",
+    Err("Task failed: Error processing keyword 'poll': the value -1 is negative")
+)]
 #[case::poll_word(
     "poll",
     "{{ 'abc' }}",
