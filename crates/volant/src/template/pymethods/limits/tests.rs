@@ -88,5 +88,6 @@ fn a_wide_zero_padded_grouped_number_is_built_at_once() {
     let out = templar()
         .render("{{ ('{:0300000,d}'.format(1)) | length }}", &Map::new())
         .unwrap();
-    assert_eq!(out, "300000");
+    // Python never starts the field with a separator, so it ends one place past the width.
+    assert_eq!(out, json!(300_001));
 }
