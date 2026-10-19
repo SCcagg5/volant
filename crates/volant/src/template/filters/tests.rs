@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-use super::regex::python_replacement;
 use super::*;
 use crate::testing::templar;
 
@@ -104,10 +103,6 @@ fn the_filters_print_what_the_reference_printed() {
             ),
             "str int list dict NoneType bool float"
         );
-    }
-    {
-        assert_eq!(python_replacement(r"A\1-\g<name>"), "A${1}-${name}");
-        assert_eq!(python_replacement("plain"), "plain");
     }
     {
         let vars = serde_json::json!({"managed": "Ansible managed", "two": "two\nlines", "x": "x"});
@@ -461,4 +456,67 @@ fn extract_reads_container_item_then_each_more_key() {
         r("{{ 'a' | ansible.builtin.extract({'a': 3}) }}"),
         Ok(json!(3))
     );
+}
+
+/// Measured on ansible-core 2.19.12 (Python 3.13): the groups of `re.findall`, the empty matches
+/// of `re.sub`, a literal `$` in a replacement, and the arguments in their Python order.
+#[test]
+fn the_regex_filters_return_what_python_re_returned() {
+    let rows = [
+        (
+            "{{ 'a1b2' | regex_findall('([a-z])[0-9]') }}",
+            serde_json::json!(["a", "b"]),
+        ),
+        (
+            "{{ 'a1b2' | regex_findall('([a-z])([0-9])') }}",
+            serde_json::json!([["a", "1"], ["b", "2"]]),
+        ),
+        (
+            "{{ 'a1b2' | regex_findall('((a)|(b))[0-9]') }}",
+            serde_json::json!([["a", "a", ""], ["b", "", "b"]]),
+        ),
+        (
+            "{{ 'ab12' | regex_findall('[a-z]*') }}",
+            serde_json::json!(["ab", "", "", ""]),
+        ),
+        (
+            "{{ 'aAbB' | regex_findall('([a-z])', false, true) }}",
+            serde_json::json!(["a", "A", "b", "B"]),
+        ),
+        (
+            "{{ 'abc' | regex_replace('b*', '-') }}",
+            serde_json::json!("-a--c-"),
+        ),
+        (
+            "{{ 'ab' | regex_replace('(a)', '$1') }}",
+            serde_json::json!("$1b"),
+        ),
+        (
+            "{{ 'aab' | regex_replace('a', 'x', count=1) }}",
+            serde_json::json!("xab"),
+        ),
+        (
+            "{{ 'ab' | regex_search('(a)|(b)', '\\1', '\\2') }}",
+            serde_json::json!(["a", null]),
+        ),
+        (
+            "{{ 12321 | regex_replace('2', 'x') }}",
+            serde_json::json!("1x3x1"),
+        ),
+        (
+            "{{ 'a{,1}' | regex_replace('a{,1}', 'x') }}",
+            serde_json::json!("xx{x,x1x}x"),
+        ),
+        (
+            "{{ 'ab' | regex_replace('[[:alpha:]]', 'x') }}",
+            serde_json::json!("ab"),
+        ),
+    ];
+    for (template, want) in rows {
+        assert_eq!(
+            render(template, serde_json::json!({})),
+            Ok(want),
+            "{template}"
+        );
+    }
 }
