@@ -66,7 +66,7 @@ fn within<T: Send + 'static>(secs: u64, f: impl FnOnce() -> T + Send + 'static) 
 fn render(template: &'static str) -> Result<serde_json::Value, String> {
     within(20, move || {
         crate::testing::templar()
-            .render(template, &serde_json::Map::new())
+            .render(template, &Map::new())
             .map_err(|e| e.0)
     })
 }
@@ -137,12 +137,12 @@ fn a_list_stops_growing_at_the_limit() {
 /// a task error before any text is built, with Python's own words for a count past an index.
 #[test]
 fn a_percent_width_or_precision_past_the_limit_is_a_task_error() {
-    let v = vars(json!({"w": 10_000_000_000_i64, "f": "%.70000f"}));
+    let v = vars(json!({"w": 10_000_000_000_i64, "p": 2_000_000_000, "f": "%.70000f"}));
     for template in [
         "{{ '%10000000000d' % 1 }}",
         "{{ '%0100000000000d' % 1 }}",
         "{{ '%*d' % (w, 1) }}",
-        "{{ '%.*f' % (w, 1.5) }}",
+        "{{ '%.*f' % (p, 1.5) }}",
         "{{ '%.10000000000d' % 1 }}",
         "{{ '%-10000000000s' | format('a') }}",
         "{{ f.replace('7', '99999999999') % 1.5 }}",
@@ -156,7 +156,7 @@ fn a_percent_width_or_precision_past_the_limit_is_a_task_error() {
         ("{{ '%*d' % (100000000000000000000, 1) }}", "C ssize_t"),
     ] {
         let err = crate::testing::templar()
-            .render(template, &serde_json::Map::new())
+            .render(template, &Map::new())
             .unwrap_err();
         assert!(err.0.contains(want), "{template}: {err}");
     }
@@ -172,7 +172,7 @@ fn a_percent_width_or_precision_past_the_limit_is_a_task_error() {
 #[test]
 fn percent_reads_integers_past_64_bits() {
     let t = crate::testing::templar();
-    let none = serde_json::Map::new();
+    let none = Map::new();
     for (template, want) in [
         ("{{ '%d' % 18446744073709551615 }}", "18446744073709551615"),
         (
