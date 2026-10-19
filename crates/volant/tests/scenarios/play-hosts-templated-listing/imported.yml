@@ -1,0 +1,3 @@
+- import_playbook: inner.yml
+  vars:
+    pick: o1

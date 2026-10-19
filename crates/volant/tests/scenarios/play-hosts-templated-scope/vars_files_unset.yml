@@ -1,0 +1,7 @@
+- hosts: "{{ from_file | default('w1') }}"
+  gather_facts: false
+  vars_files:
+    - 'nosuch_{{ nosuchvar }}.yml'
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ ansible_play_hosts }}"

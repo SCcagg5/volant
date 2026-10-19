@@ -14,3 +14,13 @@ w*b1
 same
 missing
 web,missing
+::1
+fe80::1
+localhost
+127.0.0.1
+localhost,web1
+web:db,cache
+web[0:1]:db
+web:!localhost
+all:&localhost
+web1,::1

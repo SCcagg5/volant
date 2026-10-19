@@ -84,6 +84,18 @@
       ],
       "warning": false
     },
+    "127.0.0.1": {
+      "hosts": [
+        "127.0.0.1"
+      ],
+      "warning": false
+    },
+    "::1": {
+      "hosts": [
+        "::1"
+      ],
+      "warning": false
+    },
     "all": {
       "hosts": [
         "lonely",
@@ -102,6 +114,27 @@
         "solo",
         "db1",
         "db2"
+      ],
+      "warning": false
+    },
+    "all:&localhost": {
+      "hosts": [],
+      "warning": false
+    },
+    "fe80::1": {
+      "hosts": [],
+      "warning": false
+    },
+    "localhost": {
+      "hosts": [
+        "localhost"
+      ],
+      "warning": false
+    },
+    "localhost,web1": {
+      "hosts": [
+        "localhost",
+        "web1"
       ],
       "warning": false
     },
@@ -162,6 +195,21 @@
       ],
       "warning": false
     },
+    "web1,::1": {
+      "hosts": [
+        "web1",
+        "::1"
+      ],
+      "warning": false
+    },
+    "web:!localhost": {
+      "hosts": [
+        "web1",
+        "web2",
+        "web3"
+      ],
+      "warning": false
+    },
     "web:&prod": {
       "hosts": [
         "web1",
@@ -180,11 +228,24 @@
       ],
       "warning": false
     },
+    "web:db,cache": {
+      "hosts": [],
+      "warning": false
+    },
     "web?": {
       "hosts": [
         "web1",
         "web2",
         "web3"
+      ],
+      "warning": false
+    },
+    "web[0:1]:db": {
+      "hosts": [
+        "web1",
+        "web2",
+        "db1",
+        "db2"
       ],
       "warning": false
     },

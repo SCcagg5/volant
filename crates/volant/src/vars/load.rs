@@ -111,11 +111,20 @@ impl std::fmt::Display for VaultFile {
 
 impl std::error::Error for VaultFile {}
 
-/// A YAML or JSON file whose document is a mapping. An empty file is an empty mapping. A vaulted
-/// file is decrypted with the run's secrets first.
-pub fn load_vars_file(path: &Path) -> anyhow::Result<Map<String, Value>> {
+/// A YAML or JSON file read, before anyone checks what its document is.
+pub struct VarsDocument {
+    /// The first document of the file, or null when there is none.
+    pub value: Value,
+    /// Whether the file was vaulted: `include_vars` hides the result of a task that read one.
+    pub encrypted: bool,
+}
+
+/// The first document of a YAML or JSON file. A vaulted file is decrypted with the run's secrets
+/// first, and a failure of the vault is a [`VaultFile`] inside the error.
+pub fn read_vars_document(path: &Path) -> anyhow::Result<VarsDocument> {
     let mut bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-    if crate::vault::is_encrypted(&bytes) {
+    let encrypted = crate::vault::is_encrypted(&bytes);
+    if encrypted {
         bytes = crate::vault::decrypt(&bytes, &crate::vault::run_secrets()).map_err(|e| {
             anyhow::Error::new(VaultFile {
                 path: path.to_path_buf(),
@@ -125,16 +134,23 @@ pub fn load_vars_file(path: &Path) -> anyhow::Result<Map<String, Value>> {
     }
     let text = String::from_utf8(bytes).with_context(|| format!("reading {}", path.display()))?;
     let docs = yaml::load(&text, &path.display().to_string())?;
-    match docs.first() {
-        None => Ok(Map::new()),
-        Some(doc) => match yaml::to_json(doc).with_context(|| format!("in {}", path.display()))? {
-            Value::Object(map) => Ok(map),
-            Value::Null => Ok(Map::new()),
-            _ => bail!(
-                "{}: a variables file must contain a mapping",
-                path.display()
-            ),
-        },
+    let value = match docs.first() {
+        None => Value::Null,
+        Some(doc) => yaml::to_json(doc).with_context(|| format!("in {}", path.display()))?,
+    };
+    Ok(VarsDocument { value, encrypted })
+}
+
+/// A YAML or JSON file whose document is a mapping. An empty file is an empty mapping. A vaulted
+/// file is decrypted with the run's secrets first.
+pub fn load_vars_file(path: &Path) -> anyhow::Result<Map<String, Value>> {
+    match read_vars_document(path)?.value {
+        Value::Object(map) => Ok(map),
+        Value::Null => Ok(Map::new()),
+        _ => bail!(
+            "{}: a variables file must contain a mapping",
+            path.display()
+        ),
     }
 }
 

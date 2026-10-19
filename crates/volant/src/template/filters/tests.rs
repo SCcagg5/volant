@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-use super::regex::python_replacement;
 use super::*;
 use crate::testing::templar;
 
@@ -106,10 +105,6 @@ fn the_filters_print_what_the_reference_printed() {
         );
     }
     {
-        assert_eq!(python_replacement(r"A\1-\g<name>"), "A${1}-${name}");
-        assert_eq!(python_replacement("plain"), "plain");
-    }
-    {
         let vars = serde_json::json!({"managed": "Ansible managed", "two": "two\nlines", "x": "x"});
         let r = |t: &str| render(t, vars.clone()).unwrap();
         assert_eq!(r("{{ managed | comment }}"), "#\n# Ansible managed\n#");
@@ -158,10 +153,19 @@ fn the_filters_print_what_the_reference_printed() {
         );
     }
     {
-        let vars = serde_json::json!({"doc": "a: 1\nb: [x, y]", "bad": "a: [1"});
+        let vars = serde_json::json!({
+            "doc": "a: 1\nb: [x, y]",
+            "bad": "a: [1",
+            "two": "a: 1\n---\nb: 2\n",
+        });
         assert_eq!(
             render("{{ doc | from_yaml }}", vars.clone()).unwrap(),
             serde_json::json!({"a": 1, "b": ["x", "y"]})
+        );
+        assert!(
+            render("{{ two | from_yaml }}", vars.clone())
+                .unwrap_err()
+                .contains("from_yaml: expected a single document in the stream"),
         );
         assert!(
             render("{{ bad | from_yaml }}", vars)
@@ -461,4 +465,141 @@ fn extract_reads_container_item_then_each_more_key() {
         r("{{ 'a' | ansible.builtin.extract({'a': 3}) }}"),
         Ok(json!(3))
     );
+}
+
+/// Measured on ansible-core 2.19.12 (Python 3.13): the groups of `re.findall`, the empty matches
+/// of `re.sub`, a literal `$` in a replacement, and the arguments in their Python order.
+#[test]
+fn the_regex_filters_return_what_python_re_returned() {
+    let rows = [
+        (
+            "{{ 'a1b2' | regex_findall('([a-z])[0-9]') }}",
+            serde_json::json!(["a", "b"]),
+        ),
+        (
+            "{{ 'a1b2' | regex_findall('([a-z])([0-9])') }}",
+            serde_json::json!([["a", "1"], ["b", "2"]]),
+        ),
+        (
+            "{{ 'a1b2' | regex_findall('((a)|(b))[0-9]') }}",
+            serde_json::json!([["a", "a", ""], ["b", "", "b"]]),
+        ),
+        (
+            "{{ 'ab12' | regex_findall('[a-z]*') }}",
+            serde_json::json!(["ab", "", "", ""]),
+        ),
+        (
+            "{{ 'aAbB' | regex_findall('([a-z])', false, true) }}",
+            serde_json::json!(["a", "A", "b", "B"]),
+        ),
+        (
+            "{{ 'abc' | regex_replace('b*', '-') }}",
+            serde_json::json!("-a--c-"),
+        ),
+        (
+            "{{ 'ab' | regex_replace('(a)', '$1') }}",
+            serde_json::json!("$1b"),
+        ),
+        (
+            "{{ 'aab' | regex_replace('a', 'x', count=1) }}",
+            serde_json::json!("xab"),
+        ),
+        (
+            "{{ 'ab' | regex_search('(a)|(b)', '\\1', '\\2') }}",
+            serde_json::json!(["a", null]),
+        ),
+        (
+            "{{ 12321 | regex_replace('2', 'x') }}",
+            serde_json::json!("1x3x1"),
+        ),
+        (
+            "{{ 'a{,1}' | regex_replace('a{,1}', 'x') }}",
+            serde_json::json!("xx{x,x1x}x"),
+        ),
+        (
+            "{{ 'ab' | regex_replace('[[:alpha:]]', 'x') }}",
+            serde_json::json!("ab"),
+        ),
+    ];
+    for (template, want) in rows {
+        assert_eq!(
+            render(template, serde_json::json!({})),
+            Ok(want),
+            "{template}"
+        );
+    }
+}
+
+/// Python syntax the `regex` crate lacks is refused by the construct's name, not answered wrongly.
+/// The rows in `cases.yml` cover what both engines run.
+#[test]
+fn a_pattern_without_a_rust_counterpart_is_refused_by_name() {
+    let rows = [
+        ("{{ 'ab' | regex_findall('a(?=b)') }}", "look-ahead"),
+        ("{{ 'ab' | regex_search('a(?!c)') }}", "look-ahead"),
+        ("{{ 'ab' | regex_replace('(?<=a)b', 'x') }}", "look-behind"),
+        ("{{ 'ab' is regex('(?<!x)b') }}", "look-behind"),
+        ("{{ 'aa' | regex_findall('(a)\\1') }}", "back reference"),
+        (
+            "{{ 'aa' | regex_replace('(?P<n>a)(?P=n)', 'x') }}",
+            "'(?P=name)'",
+        ),
+        (
+            "{{ 'ab' | regex_replace('a++', 'x') }}",
+            "possessive quantifier",
+        ),
+        (
+            "{{ 'ab' | regex_replace('a{1,2}+', 'x') }}",
+            "possessive quantifier",
+        ),
+        ("{{ 'ab' | regex_replace('(?>a)', 'x') }}", "atomic group"),
+        (
+            "{{ 'ab' | regex_findall('(a)?(?(1)b|c)') }}",
+            "conditional group",
+        ),
+        (
+            "{{ 'ab' | regex_replace('\\N{LATIN SMALL LETTER A}', 'x') }}",
+            "'\\N{name}'",
+        ),
+        ("{{ 'ab' | regex_replace('(?a)\\w', 'x') }}", "'(?a)'"),
+        ("{{ 'ab' | regex_replace('(?x:a b)', 'x') }}", "'(?x:'"),
+        ("{{ 'aaa' | regex_findall('a*?') }}", "lazy repeat"),
+        ("{{ 'ab' | regex_findall('|ab') }}", "empty alternative"),
+        (
+            "{{ t | regex_search('b=2$') }}",
+            "'$' before the final newline",
+        ),
+    ];
+    for (template, construct) in rows {
+        let vars = serde_json::json!({"t": "a=1\nb=2\n"});
+        let err = render(template, vars).unwrap_err();
+        assert!(
+            err.contains("unsupported regular expression") && err.contains(construct),
+            "{template}: {err}"
+        );
+    }
+    // Python refuses these too, and says where.
+    for (template, reason) in [
+        (
+            "{{ 'ab' | regex_findall('(') }}",
+            "missing ), unterminated subpattern",
+        ),
+        ("{{ 'ab' | regex_findall('a**') }}", "multiple repeat"),
+        ("{{ 'ab' | regex_findall('*a') }}", "nothing to repeat"),
+        ("{{ 'ab' | regex_findall('[b-a]') }}", "bad character range"),
+        ("{{ 'ab' | regex_findall('\\e') }}", "bad escape \\e"),
+        (
+            "{{ 'ab' | regex_findall('(?<n>a)') }}",
+            "unknown extension ?<",
+        ),
+        (
+            "{{ 'ab' | regex_findall('a(?i)b') }}",
+            "global flags not at the start",
+        ),
+        ("{{ 'ab' | regex_findall('b\\z') }}", "bad escape \\z"),
+        ("{{ 'ab' is regex('(') }}", "unterminated subpattern"),
+    ] {
+        let err = render(template, serde_json::json!({})).unwrap_err();
+        assert!(err.contains(reason), "{template}: {err}");
+    }
 }

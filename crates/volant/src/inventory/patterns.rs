@@ -1,40 +1,64 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Host patterns: splitting terms, `fnmatch`-style globs and `[N:M]` subscripts.
 
-/// Splits a pattern on `,` and `:` the way Ansible's own pattern splitter does: not inside a
-/// `[...]` subscript, so `web[0:1]` stays one term instead of being torn into `web[0` and `1]` at
-/// the colon that is part of its range, not a term separator. Bracket mode is only entered when
-/// the very next `]` closes *this* `[` before another `[` opens: an unbalanced `[` (`web[1:db`,
-/// no `]` at all) or one whose only later `]` actually belongs to a subsequent bracket
-/// (`a[,b[1]`, where the first `[` would otherwise borrow the second one's close and swallow both
-/// terms into one) now just fails to match on its own, instead of corrupting every later term.
+use std::sync::LazyLock;
+
+use regex::Regex;
+
+/// The terms of a host pattern, as `split_host_pattern` of ansible-core 2.19.12 cuts them. A
+/// pattern with a comma is that comma-separated list, and a `:` in one of its terms stays. A
+/// pattern with none is one term when it is a valid address or host name with a port or a range
+/// (`::1`, `fe80::1`, `[::1]:22`, `web[0:1]`), and a `:`-separated list otherwise: a bracketed
+/// part holds its colons (`web[0:1]:db` is `web[0:1]` and `db`), and a lone `[` is dropped.
 pub(super) fn split_terms(pattern: &str) -> Vec<&str> {
-    let mut terms = Vec::new();
-    let mut start = 0;
-    let mut in_bracket = false;
-    for (i, c) in pattern.char_indices() {
+    static COLON_LIST: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?:[^\s:\[\]]|\[[^\]]*\])+").expect("a valid pattern"));
+    let terms: Vec<&str> = if pattern.contains(',') {
+        pattern.split(',').collect()
+    } else if pattern.contains(|c: char| c.is_whitespace() || matches!(c, ':' | '[' | ']')) {
+        if is_one_address(pattern) {
+            vec![pattern]
+        } else {
+            COLON_LIST.find_iter(pattern).map(|m| m.as_str()).collect()
+        }
+    } else {
+        // No colon, bracket or blank: one term whether or not it is an address.
+        vec![pattern]
+    };
+    terms
+        .into_iter()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .collect()
+}
+
+/// Whether `parse_address` takes `pattern` whole. The address expressions are costly to build,
+/// so a pattern they cannot match is turned away first: with a colon outside the brackets it is
+/// an IPv6 address, which has hexadecimal digits and `.:[]` only, or a name with a port, which
+/// ends in `:` and digits.
+pub(super) fn is_one_address(pattern: &str) -> bool {
+    let mut depth = 0usize;
+    let mut bare_colon = false;
+    for c in pattern.chars() {
         match c {
-            '[' if !in_bracket => {
-                let rest = &pattern[i + 1..];
-                let closes_before_reopening = match (rest.find(']'), rest.find('[')) {
-                    (Some(close), Some(open)) => close < open,
-                    (Some(_), None) => true,
-                    (None, _) => false,
-                };
-                if closes_before_reopening {
-                    in_bracket = true;
-                }
-            }
-            ']' if in_bracket => in_bracket = false,
-            ',' | ':' if !in_bracket => {
-                terms.push(&pattern[start..i]);
-                start = i + c.len_utf8();
-            }
+            '[' => depth += 1,
+            ']' => depth = depth.saturating_sub(1),
+            ':' if depth == 0 => bare_colon = true,
             _ => {}
         }
     }
-    terms.push(&pattern[start..]);
-    terms
+    if bare_colon {
+        let hex = pattern
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() || matches!(c, ':' | '.' | '[' | ']'));
+        let port = pattern
+            .rsplit_once(':')
+            .is_some_and(|(_, tail)| !tail.is_empty() && tail.bytes().all(|b| b.is_ascii_digit()));
+        if !hex && !port {
+            return false;
+        }
+    }
+    super::ranges::parse_address(pattern, true).is_ok()
 }
 
 /// `fnmatch` as Python does it for host patterns: `*` any run, `?` one character, `[abc]` and
@@ -175,7 +199,7 @@ pub(super) fn split_subscript(term: &str) -> Option<(&str, Subscript)> {
         !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
     };
     if is_signed_digits(inner) {
-        return Some((base, Subscript::Index(inner.parse().ok()?)));
+        return Some((base, Subscript::Index(saturating(inner))));
     }
     let sep = inner.find([':', '-'])?;
     let (start, end) = (&inner[..sep], &inner[sep + 1..]);
@@ -186,9 +210,20 @@ pub(super) fn split_subscript(term: &str) -> Option<(&str, Subscript)> {
     let end = if end.is_empty() {
         None
     } else {
-        Some(end.parse().ok()?)
+        Some(saturating(end))
     };
-    Some((base, Subscript::Range(start.parse().ok()?, end)))
+    Some((base, Subscript::Range(saturating(start), end)))
+}
+
+/// The integer `digits` spell, with an optional leading `-`. Python's integers have no end, so a
+/// number past this one's still orders against a host count as it would there: it is clamped to
+/// the largest or the smallest value, which no inventory is that long to tell from the real one.
+fn saturating(digits: &str) -> i64 {
+    digits.parse().unwrap_or(if digits.starts_with('-') {
+        i64::MIN
+    } else {
+        i64::MAX
+    })
 }
 
 /// Ansible's `_apply_subscript`: a Python-style negative index wraps from the end; a range's
@@ -207,9 +242,12 @@ pub(super) fn apply_subscript(names: &[String], sub: Subscript) -> Vec<String> {
                 Vec::new()
             }
         }
+        // The reference reads an end of `0` as no end at all and takes the one host `start` names,
+        // so `[1:0]` is `[1]`.
+        Subscript::Range(start, Some(0)) => apply_subscript(names, Subscript::Index(start)),
         Subscript::Range(start, end) => {
             let start = start.clamp(0, len);
-            let stop = (end.unwrap_or(len - 1) + 1).clamp(0, len);
+            let stop = end.unwrap_or(len - 1).saturating_add(1).clamp(0, len);
             if start >= stop {
                 Vec::new()
             } else {

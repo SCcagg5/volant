@@ -6,6 +6,7 @@ use minijinja::value::ValueKind;
 use minijinja::{Error, Value};
 
 use super::args::{raise, type_of};
+use super::limits::check;
 
 pub(crate) mod float;
 pub(crate) mod spec;
@@ -144,7 +145,9 @@ impl Fields<'_> {
                         }));
                     }
                     let field: String = chars[start..at - 1].iter().collect();
-                    out.push_str(&self.field(&field, depth)?);
+                    let piece = self.field(&field, depth)?;
+                    check(out.len() as u128 + piece.len() as u128)?;
+                    out.push_str(&piece);
                 }
                 c => out.push(c),
             }

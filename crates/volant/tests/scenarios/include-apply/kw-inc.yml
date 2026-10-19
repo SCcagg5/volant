@@ -1,0 +1,9 @@
+- name: reads
+  debug:
+    msg: "v={{ v }}"
+- name: fails
+  fail:
+    msg: boom
+- name: after the failure
+  debug:
+    msg: still here

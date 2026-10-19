@@ -1,0 +1,5 @@
+# `template`, `copy` and `script` send a controller file that a gathered fact or a registered
+# result names, as ansible-core does: `{{ ansible_os_family }}.j2` and `with_first_found` into
+# `template`. This is `host_named_paths = allow`, the default.
+args: [-i, inv.ini, play.yml]
+needs: [ansible-core]

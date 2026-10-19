@@ -1,0 +1,11 @@
+# `apply:` on include_tasks puts its keywords on the tasks of the file, and nothing on the statement.
+runs:
+  - args: [-i, inv.ini, tags.yml]
+  - args: [-i, inv.ini, tags.yml, --tags, t]
+  - args: [-i, inv.ini, tags.yml, --tags, u]
+  - args: [-i, inv.ini, tags.yml, --skip-tags, t]
+  - args: [-i, inv.ini, bare.yml, --tags, t]
+  - args: [-i, inv.ini, keywords.yml]
+  - args: [-i, inv.ini, when.yml]
+  - args: [-i, inv.ini, nested.yml, --tags, outer]
+  - args: [-i, inv.ini, empty.yml]

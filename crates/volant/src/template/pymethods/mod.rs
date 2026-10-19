@@ -8,7 +8,8 @@ use minijinja::{Environment, Error, ErrorKind, State, Value};
 
 mod args;
 mod dicts;
-mod format;
+mod digits;
+pub(crate) mod format;
 pub(crate) mod limits;
 mod lists;
 pub(super) mod mutable;

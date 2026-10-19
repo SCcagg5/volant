@@ -1,0 +1,8 @@
+# Two loops on one task, a with_ key with no value, and a loop written after a with_ key, which
+# replaces the terms and keeps the lookup.
+runs:
+  - args: [two-with.yml]
+  - args: [loop-first.yml]
+  - args: [no-value.yml]
+  - args: [loop-last.yml]
+needs: ["ansible-core"]

@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! `str.translate` and `str.maketrans`.
 
+use std::collections::HashMap;
+
 use minijinja::value::ValueKind;
 use minijinja::{Error, Value};
 
 use super::args::{Call, raise, type_of};
+use super::limits::check;
 
 /// `translate(table)`: each character is looked up by its code point in a mapping or list.
 pub(super) fn translate(s: &str, table: &Value) -> Result<Value, Error> {
@@ -23,7 +26,11 @@ pub(super) fn translate(s: &str, table: &Value) -> Result<Value, Error> {
         match hit {
             None => out.push(c),
             Some(v) if v.is_none() => {}
-            Some(v) if v.as_str().is_some() => out.push_str(v.as_str().unwrap_or_default()),
+            Some(v) if v.as_str().is_some() => {
+                out.push_str(v.as_str().unwrap_or_default());
+                // A table can map one character to a long text.
+                check(out.len() as u128)?;
+            }
             Some(v) if v.kind() == ValueKind::Number && v.is_integer() => {
                 let mapped = v
                     .as_i64()
@@ -88,8 +95,20 @@ pub(super) fn maketrans(call: &Call<'_>) -> Result<Value, Error> {
             "the first two maketrans arguments must have equal length",
         ));
     }
+    // A code point keeps the place of its first entry when a later one sets it again, as in a
+    // Python dict.
+    let mut place: HashMap<u32, usize> = HashMap::new();
+    let mut set = |table: &mut Vec<(Value, Value)>, code: char, to: Value| {
+        let code = u32::from(code);
+        if let Some(&at) = place.get(&code) {
+            table[at].1 = to;
+        } else {
+            place.insert(code, table.len());
+            table.push((Value::from(code), to));
+        }
+    };
     for (a, b) in from.chars().zip(to.chars()) {
-        table.push((Value::from(u32::from(a)), Value::from(u32::from(b))));
+        set(&mut table, a, Value::from(u32::from(b)));
     }
     if let Some(drop) = args.get(2) {
         let drop = drop.as_str().ok_or_else(|| {
@@ -99,8 +118,7 @@ pub(super) fn maketrans(call: &Call<'_>) -> Result<Value, Error> {
             ))
         })?;
         for c in drop.chars() {
-            table.retain(|(k, _)| k.as_i64() != Some(i64::from(u32::from(c))));
-            table.push((Value::from(u32::from(c)), Value::from(())));
+            set(&mut table, c, Value::from(()));
         }
     }
     Ok(table.into_iter().collect())

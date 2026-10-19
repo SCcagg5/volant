@@ -1,0 +1,20 @@
+# A play's `hosts` reads variables that name each other: a chain of any practical depth settles, a
+# ring is refused, and text that merely holds braces is text. Chains deeper than 90 are refused
+# by the reference's own recursion limit, which no scenario pins.
+runs:
+  - args: [-i, inventory.ini, chain3.yml]
+  - args: [-i, inventory.ini, chain5.yml]
+  - args: [-i, inventory.ini, chain12.yml]
+  - args: [-i, inventory.ini, chain50.yml]
+  - args: [-i, inventory.ini, braces_text.yml]
+  - args: [-i, inventory.ini, braces_expression.yml]
+  - args: [-i, inventory.ini, braces_joined.yml]
+  - args: [-i, inventory.ini, ring_two.yml]
+  - args: [-i, inventory.ini, ring_three.yml]
+  - args: [-i, inventory.ini, ring_self.yml]
+  - args: [-i, inventory.ini, undefined_in_chain.yml]
+  - args: [-i, inventory.ini, extra_template.yml, -e, 'tgt={{ pick }}']
+  - args: [-i, inventory.ini, extra_json.yml, -e, '{"tgt": ["w1", "w2"]}']
+  - args: [-i, inventory.ini, unsafe_text.yml]
+  - args: [-i, inventory.ini, vars_file_chain.yml]
+  - args: [-i, inventory.ini, role_chain.yml]

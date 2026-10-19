@@ -1,0 +1,23 @@
+- hosts: s1
+  gather_facts: false
+  tasks:
+    - shell: printf '%s%s' '{' '{"w1"}}'
+      register: braces
+
+- name: Host text inside a list
+  hosts: "{{ [pick] }}"
+  gather_facts: false
+  vars:
+    pick: "{{ hostvars['s1']['braces']['stdout'] }}"
+  tasks:
+    - debug:
+        msg: never
+
+- name: Host text inside a mapping's values
+  hosts: "{{ {'k': pick}.values() | list }}"
+  gather_facts: false
+  vars:
+    pick: "{{ hostvars['s1']['braces']['stdout'] }}"
+  tasks:
+    - debug:
+        msg: never

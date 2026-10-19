@@ -1,0 +1,12 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    short: 1
+    long: 30
+  tasks:
+    - name: Long enough
+      command: sleep 0
+      timeout: "{{ long }}"
+    - name: Too short
+      command: sleep 3
+      timeout: "{{ short }}"

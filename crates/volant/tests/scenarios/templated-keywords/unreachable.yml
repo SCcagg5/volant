@@ -1,0 +1,10 @@
+- hosts: h1,hu
+  gather_facts: false
+  vars:
+    flag_t: true
+  ignore_unreachable: "{{ flag_t }}"
+  tasks:
+    - name: Reaches the host that answers
+      command: "true"
+    - name: Runs on
+      debug: {msg: second}

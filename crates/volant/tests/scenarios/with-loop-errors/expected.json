@@ -1,0 +1,18 @@
+[
+  {
+    "code": 2,
+    "stdout": "\nPLAY [localhost] ***************************************************************\n\nTASK [debug] *******************************************************************\n[ERROR]: Task failed: 'nope' is undefined\n\nTask failed.\nOrigin: <golden-tmp>/undefined-loop.yml:4:7\n\n2   gather_facts: false\n3   tasks:\n4     - debug: {msg: \"{{ item }}\"}\n        ^ column 7\n\n<<< caused by >>>\n\n'nope' is undefined\nOrigin: <golden-tmp>/undefined-loop.yml:5:13\n\n3   tasks:\n4     - debug: {msg: \"{{ item }}\"}\n5       loop: \"{{ nope }}\"\n              ^ column 13\n\nfatal: [localhost]: FAILED! => {\"msg\": \"Task failed: 'nope' is undefined\"}\n\nPLAY RECAP *********************************************************************\nlocalhost                  : ok=0    changed=0    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0   \n\n"
+  },
+  {
+    "code": 2,
+    "stdout": "\nPLAY [localhost] ***************************************************************\n\nTASK [debug] *******************************************************************\n[ERROR]: Task failed: 'nope' is undefined\n\nTask failed.\nOrigin: <golden-tmp>/undefined-with.yml:4:7\n\n2   gather_facts: false\n3   tasks:\n4     - debug: {msg: \"{{ item }}\"}\n        ^ column 7\n\n<<< caused by >>>\n\n'nope' is undefined\nOrigin: <golden-tmp>/undefined-with.yml:5:23\n\n3   tasks:\n4     - debug: {msg: \"{{ item }}\"}\n5       with_flattened: \"{{ nope }}\"\n                        ^ column 23\n\nfatal: [localhost]: FAILED! => {\"msg\": \"Task failed: 'nope' is undefined\"}\n\nPLAY RECAP *********************************************************************\nlocalhost                  : ok=0    changed=0    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0   \n\n"
+  },
+  {
+    "code": 2,
+    "stdout": "\nPLAY [localhost] ***************************************************************\n\nTASK [debug] *******************************************************************\n[ERROR]: The lookup plugin 'subelements' failed: subelements lookup expects a list of two or three items, first a dict or a list, second a string pointing to the subkey\nOrigin: <unknown>\n\ninvoke_lookup()\n\nfatal: [localhost]: FAILED! => {\"msg\": \"The lookup plugin 'subelements' failed: subelements lookup expects a list of two or three items, first a dict or a list, second a string pointing to the subkey\"}\n\nPLAY RECAP *********************************************************************\nlocalhost                  : ok=0    changed=0    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0   \n\n"
+  },
+  {
+    "code": 0,
+    "stdout": "\nPLAY [localhost] ***************************************************************\n\nTASK [debug] *******************************************************************\n[ERROR]: The lookup plugin 'subelements' failed: subelements lookup expects a list of two or three items, first a dict or a list, second a string pointing to the subkey\nOrigin: <unknown>\n\ninvoke_lookup()\n\nfatal: [localhost]: FAILED! => {\"msg\": \"The lookup plugin 'subelements' failed: subelements lookup expects a list of two or three items, first a dict or a list, second a string pointing to the subkey\"}\n...ignoring\n\nTASK [debug] *******************************************************************\nok: [localhost] => {\n    \"msg\": \"after\"\n}\n\nPLAY RECAP *********************************************************************\nlocalhost                  : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=1   \n\n"
+  }
+]

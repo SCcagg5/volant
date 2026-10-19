@@ -1,0 +1,4 @@
+# with_<collection lookup> runs the lookup of the collection, under its full name and under the
+# short name the reference redirects to it.
+args: [play.yml]
+needs: ["ansible-core"]
