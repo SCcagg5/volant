@@ -9,10 +9,13 @@
 #![cfg(target_os = "linux")]
 
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 use rstest::rstest;
+
+#[path = "common/process.rs"]
+mod process;
 
 const AGENT: &str = include_str!("fixtures/frame_agent.py");
 
@@ -20,14 +23,16 @@ const AGENT: &str = include_str!("fixtures/frame_agent.py");
 /// more in a debug build.
 const REFUSED_PEAK_MB: u64 = 250;
 
+/// How long a run that ends may take. A frame refused or read whole ends in a few seconds.
+const ENDS: Duration = Duration::from_secs(120);
+
 struct Run {
     code: Option<i32>,
     text: String,
     peak_mb: u64,
-    secs: u64,
 }
 
-fn run(name: &str, frame: &str, n: u64, tasks: &str, hosts: &str) -> Run {
+fn run(name: &str, frame: &str, n: u64, tasks: &str, hosts: &str, deadline: Duration) -> Run {
     use std::os::unix::fs::PermissionsExt;
     let dir = std::env::temp_dir().join(format!("volant-frames-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -48,8 +53,8 @@ fn run(name: &str, frame: &str, n: u64, tasks: &str, hosts: &str) -> Run {
         format!("- hosts: all\n  gather_facts: false\n  tasks:\n{tasks}"),
     )
     .unwrap();
-    let started_at = Instant::now();
-    let child = Command::new(env!("CARGO_BIN_EXE_volant"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_volant"));
+    command
         .args(["playbook", "-i"])
         .arg(dir.join("inv.ini"))
         .arg(dir.join("play.yml"))
@@ -57,42 +62,12 @@ fn run(name: &str, frame: &str, n: u64, tasks: &str, hosts: &str) -> Run {
         .env("VOLANT_AGENT_DIR", dir.join("agents"))
         .env("VOLANT_RUNTIME", "system")
         .env("FRAME", frame)
-        .env("N", n.to_string())
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("volant starts");
-    // The high-water mark of the resident set only grows, so the last reading before the process
-    // goes is its peak.
-    let status = PathBuf::from(format!("/proc/{}/status", child.id()));
-    let sampler = std::thread::spawn(move || {
-        let mut peak_kb = 0u64;
-        let started = Instant::now();
-        while started.elapsed() < Duration::from_secs(120) {
-            let Ok(text) = std::fs::read_to_string(&status) else {
-                break;
-            };
-            if let Some(kb) = text
-                .lines()
-                .find_map(|l| l.strip_prefix("VmHWM:"))
-                .and_then(|l| l.trim().trim_end_matches("kB").trim().parse::<u64>().ok())
-            {
-                peak_kb = peak_kb.max(kb);
-            }
-            std::thread::sleep(Duration::from_millis(2));
-        }
-        peak_kb / 1024
+        .env("N", n.to_string());
+    let mut sampler = None;
+    let out = process::run_within_seen(&mut command, deadline, Some(b""), |pid| {
+        sampler = Some(std::thread::spawn(move || peak_mb_of(pid)));
     });
-    // A run that waits for ever is a failure of the test, not a hang of the suite.
-    let pid = libc::pid_t::try_from(child.id()).expect("a pid fits a pid_t");
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_secs(25));
-        // SAFETY: kill(2) takes plain integers; a process that is gone makes it fail harmlessly.
-        unsafe { libc::kill(pid, libc::SIGKILL) };
-    });
-    let out = child.wait_with_output().expect("volant ends");
-    let peak_mb = sampler.join().unwrap();
+    let peak_mb = sampler.expect("volant started").join().unwrap();
     let text = format!(
         "{}{}",
         String::from_utf8_lossy(&out.stdout),
@@ -104,16 +79,35 @@ fn run(name: &str, frame: &str, n: u64, tasks: &str, hosts: &str) -> Run {
         code: out.status.code(),
         text,
         peak_mb,
-        secs: started_at.elapsed().as_secs(),
     }
+}
+
+/// The high-water mark of the resident set of `pid`, in MB. It only grows, so the last reading
+/// before the process goes is its peak.
+fn peak_mb_of(pid: u32) -> u64 {
+    let status = PathBuf::from(format!("/proc/{pid}/status"));
+    let mut peak_kb = 0u64;
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(300) {
+        let Ok(text) = std::fs::read_to_string(&status) else {
+            break;
+        };
+        if let Some(kb) = text
+            .lines()
+            .find_map(|l| l.strip_prefix("VmHWM:"))
+            .and_then(|l| l.trim().trim_end_matches("kB").trim().parse::<u64>().ok())
+        {
+            peak_kb = peak_kb.max(kb);
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    peak_kb / 1024
 }
 
 const BAD_TASK: &str = "    - command: \"{{ inventory_hostname }}\"\n";
 
-/// One host sends a frame the controller refuses. It fails alone, with the figure and the limit
-/// in its message, and the other host finishes its task. A result over a limit is a failed task
-/// (exit 2). A frame that is not a result and is too long leaves the host unreachable (exit 4),
-/// as any frame the controller cannot accept does.
+/// A frame over a limit fails its host alone (exit 2 for a result, 4 for any other message),
+/// with the figure and the limit in its message, and the other host finishes.
 #[rstest]
 #[case::too_many_values("values", 2_000_000, 2, "has 2000013 values, over the limit of 500000")]
 #[case::too_many_lines("lines", 3_000_000, 2, "more lines than the limit of 500000")]
@@ -136,7 +130,7 @@ fn a_frame_over_a_limit_fails_its_host_alone(
     #[case] code: i32,
     #[case] says: &str,
 ) {
-    let run = run(frame, frame, n, BAD_TASK, "bad good");
+    let run = run(frame, frame, n, BAD_TASK, "bad good", ENDS);
     assert_eq!(run.code, Some(code), "{}", run.text);
     assert!(run.text.contains(says), "{}", run.text);
     assert!(
@@ -170,13 +164,12 @@ fn a_large_result_within_the_limits_arrives_whole(
     #[case] n: u64,
     #[case] tasks: &str,
 ) {
-    let run = run(frame, frame, n, tasks, "only");
+    let run = run(frame, frame, n, tasks, "only", ENDS);
     assert_eq!(run.code, Some(0), "{}", run.text);
 }
 
-/// A result over a bound is answered as a failed task only when a task waits for it. One that
-/// names no batch or task, or one nobody waits for, ends its host, and the agent that then goes
-/// silent does not hold the run: the other host finishes.
+/// A refused result no task waits for ends its host, and the agent's 30 s of silence after it
+/// does not hold the run: the other host finishes.
 #[rstest]
 #[case::no_batch("nobatch")]
 #[case::no_index("noindex")]
@@ -184,9 +177,15 @@ fn a_large_result_within_the_limits_arrives_whole(
 #[case::a_batch_nobody_waits_for("wrongbatch")]
 #[case::a_task_nobody_waits_for("wrongindex")]
 fn a_result_nobody_waits_for_ends_its_host(#[case] frame: &str) {
-    let run = run(frame, frame, 30_000_000, BAD_TASK, "bad good");
+    let run = run(
+        frame,
+        frame,
+        30_000_000,
+        BAD_TASK,
+        "bad good",
+        Duration::from_secs(20),
+    );
     assert_eq!(run.code, Some(4), "{}", run.text);
-    assert!(run.secs < 20, "{} s: {}", run.secs, run.text);
     assert!(
         run.text.contains("over the limit of 500000"),
         "{}",

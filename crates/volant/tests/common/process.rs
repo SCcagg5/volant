@@ -10,6 +10,17 @@ use std::time::Duration;
 /// because the agents and modules a run starts hold the same pipes; the output is read while
 /// waiting, since a child whose output outgrows the pipe blocks until someone does.
 pub fn run_within(command: &mut Command, deadline: Duration, stdin: Option<&[u8]>) -> Output {
+    run_within_seen(command, deadline, stdin, |_| {})
+}
+
+/// [`run_within`], with `seen` given the child's pid once it has started, for a test that watches
+/// the process while it runs.
+pub fn run_within_seen(
+    command: &mut Command,
+    deadline: Duration,
+    stdin: Option<&[u8]>,
+    seen: impl FnOnce(u32),
+) -> Output {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt as _;
@@ -43,6 +54,7 @@ pub fn run_within(command: &mut Command, deadline: Duration, stdin: Option<&[u8]
         })
     });
     let pid = child.id();
+    seen(pid);
     let (send, receive) = std::sync::mpsc::channel();
     std::thread::spawn(move || send.send(child.wait_with_output()));
     let received = receive.recv_timeout(deadline);

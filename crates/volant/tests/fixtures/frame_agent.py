@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 # A stand-in for volant-agent that speaks the protocol and answers the task named "bad" with the
 # frame the FRAME variable asks for, of size N. Every other task gets a small, ordinary result.
 import json
@@ -75,7 +76,7 @@ while True:
     msg = json.loads(raw)
     kind = msg.get("type")
     if kind == "hello":
-        send({"type": "ready", "protocol": 8, "version": "0.1.0-alpha.8", "arch": "x86_64",
+        send({"type": "ready", "protocol": msg["protocol"], "version": "0.1.0-alpha.8", "arch": "x86_64",
               "interpreters": ["/usr/bin/python3"], "natives": []})
     elif kind == "run_batch":
         for i, task in enumerate(msg["tasks"]):

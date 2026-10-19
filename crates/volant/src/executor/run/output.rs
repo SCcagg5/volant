@@ -45,12 +45,28 @@ pub(crate) fn drop_internal_keys(result: &mut TaskResult) {
     });
 }
 
+/// The output a line of `stdout` or `stderr` stands for past [`MAX_VALUES`] lines. A command may
+/// print millions of ordinary lines, which ansible-core splits whole; what the bound stops is a
+/// frame of near-empty lines, two bytes each on the wire. At 32 bytes a line, the most a 64 MiB
+/// frame may split into is about two million lines, the same order of memory as the frame's own
+/// text.
+const BYTES_PER_LINE: usize = 32;
+
 /// The lines of `stdout` and `stderr` are values like any other: a line of a few bytes costs a
-/// few hundred bytes of memory as one. Together they may hold [`MAX_VALUES`] lines, and a host
-/// over that gets a failed result in place of its own.
+/// few hundred bytes of memory as one. Together they may hold [`MAX_VALUES`] lines, or one line
+/// for every [`BYTES_PER_LINE`] bytes of output when that is more, and a host over that gets a
+/// failed result in place of its own.
 pub(super) fn add_output_lines(result: &mut TaskResult) {
-    let mut room = MAX_VALUES;
-    for (key, lines) in [("stdout", "stdout_lines"), ("stderr", "stderr_lines")] {
+    const SPLIT: [(&str, &str); 2] = [("stdout", "stdout_lines"), ("stderr", "stderr_lines")];
+    let bytes: usize = SPLIT
+        .iter()
+        .filter(|(_, lines)| !result.0.contains_key(*lines))
+        .filter_map(|(key, _)| result.0.get(*key)?.as_str())
+        .map(str::len)
+        .sum();
+    let limit = MAX_VALUES.max(bytes / BYTES_PER_LINE);
+    let mut room = limit;
+    for (key, lines) in SPLIT {
         if result.0.contains_key(lines) {
             continue;
         }
@@ -61,7 +77,7 @@ pub(super) fn add_output_lines(result: &mut TaskResult) {
                 let Some(split) = splitlines(text, room) else {
                     *result = TaskResult::failed_with(format!(
                         "the output of the host is refused: {key} of {} bytes has more lines \
-                         than the limit of {MAX_VALUES} for stdout and stderr together",
+                         than the limit of {limit} for stdout and stderr together",
                         text.len()
                     ));
                     return;
