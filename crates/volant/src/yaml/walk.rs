@@ -25,7 +25,7 @@ enum Lowering<'a> {
         out: Vec<Yaml<'a>>,
     },
     Mapping {
-        entries: std::vec::IntoIter<(MarkedYaml<'a>, MarkedYaml<'a>)>,
+        entries: Box<dyn Iterator<Item = (MarkedYaml<'a>, MarkedYaml<'a>)> + 'a>,
         /// The value of the entry whose key is being lowered.
         value: Option<MarkedYaml<'a>>,
         /// The key of the entry whose value is being lowered.
@@ -33,6 +33,24 @@ enum Lowering<'a> {
         out: Mapping<'a>,
     },
     Tagged(Cow<'a, Tag>),
+}
+
+/// Whether `node` has no children to walk.
+fn is_leaf(node: &MarkedYaml<'_>) -> bool {
+    matches!(node.data, YamlData::Value(_))
+}
+
+/// A scalar of the source tree, with PyYAML's reading of it.
+fn lower_scalar<'a>(node: MarkedYaml<'a>, text: &'a str) -> Yaml<'a> {
+    match node.data {
+        YamlData::Value(scalar) => {
+            let start = char_to_byte(text, node.span.start.index());
+            let end = char_to_byte(text, node.span.end.index());
+            let raw = text.get(start..end).unwrap_or_default();
+            Yaml::Value(pyyaml_scalar(scalar, raw))
+        }
+        _ => Yaml::BadValue,
+    }
 }
 
 /// Drops the source positions `MarkedYaml` tracks once loading is done, applying PyYAML's
@@ -46,18 +64,26 @@ pub(super) fn lower<'a>(root: MarkedYaml<'a>, text: &'a str) -> Yaml<'a> {
     loop {
         if let Some(node) = next.take() {
             match node.data {
-                YamlData::Value(scalar) => {
-                    let start = char_to_byte(text, node.span.start.index());
-                    let end = char_to_byte(text, node.span.end.index());
-                    let raw = text.get(start..end).unwrap_or_default();
-                    done = Some(Yaml::Value(pyyaml_scalar(scalar, raw)));
+                YamlData::Value(_) => done = Some(lower_scalar(node, text)),
+                // A collection of scalars, the usual one, is lowered at once, with no frame.
+                YamlData::Sequence(items) if items.iter().all(is_leaf) => {
+                    done = Some(Yaml::Sequence(
+                        items.into_iter().map(|n| lower_scalar(n, text)).collect(),
+                    ));
+                }
+                YamlData::Mapping(map) if map.iter().all(|(k, v)| is_leaf(k) && is_leaf(v)) => {
+                    let mut out = Mapping::new();
+                    for (k, v) in map {
+                        out.insert(lower_scalar(k, text), lower_scalar(v, text));
+                    }
+                    done = Some(Yaml::Mapping(out));
                 }
                 YamlData::Sequence(items) => open.push(Lowering::Sequence {
                     out: Vec::with_capacity(items.len()),
                     items: items.into_iter(),
                 }),
                 YamlData::Mapping(map) => open.push(Lowering::Mapping {
-                    entries: map.into_iter().collect::<Vec<_>>().into_iter(),
+                    entries: Box::new(map.into_iter()),
                     value: None,
                     key: None,
                     out: Mapping::new(),
@@ -183,6 +209,44 @@ pub(super) fn mapping_addresses(root: &Yaml<'_>, out: &mut (Vec<usize>, Vec<usiz
     }
 }
 
+fn is_scalar(node: &Yaml<'_>) -> bool {
+    matches!(node, Yaml::Value(_))
+}
+
+fn scalar_json(scalar: &Scalar<'_>) -> Value {
+    match scalar {
+        Scalar::Null => Value::Null,
+        Scalar::Boolean(b) => Value::Bool(*b),
+        Scalar::Integer(i) => Value::from(*i),
+        Scalar::FloatingPoint(f) => serde_json::Number::from_f64(f.into_inner())
+            .map_or_else(|| Value::String(f.to_string()), Value::Number),
+        Scalar::String(s) => Value::String(s.to_string()),
+    }
+}
+
+/// A sequence of scalars as JSON.
+fn scalar_array(items: &[Yaml<'_>]) -> Value {
+    let scalars = items.iter().filter_map(|n| match n {
+        Yaml::Value(scalar) => Some(scalar_json(scalar)),
+        _ => None,
+    });
+    Value::Array(scalars.collect())
+}
+
+/// A mapping of scalars as JSON.
+fn scalar_object(map: &Mapping<'_>) -> anyhow::Result<Value> {
+    let mut out = Map::new();
+    for (k, v) in map {
+        let key = k
+            .as_str()
+            .ok_or_else(|| anyhow!("mapping keys must be strings"))?;
+        if let Yaml::Value(scalar) = v {
+            out.insert(key.to_string(), scalar_json(scalar));
+        }
+    }
+    Ok(Value::Object(out))
+}
+
 /// A collection of the lowered tree whose children are being converted.
 enum Converting<'t, 'a> {
     Array {
@@ -190,7 +254,7 @@ enum Converting<'t, 'a> {
         out: Vec<Value>,
     },
     Object {
-        entries: std::vec::IntoIter<(&'t Yaml<'a>, &'t Yaml<'a>)>,
+        entries: Box<dyn Iterator<Item = (&'t Yaml<'a>, &'t Yaml<'a>)> + 't>,
         key: Option<String>,
         out: Map<String, Value>,
     },
@@ -209,22 +273,20 @@ pub(super) fn to_json(root: &Yaml) -> anyhow::Result<Value> {
     loop {
         if let Some(node) = next.take() {
             match node {
-                Yaml::Value(Scalar::Null) => done = Some(Value::Null),
-                Yaml::Value(Scalar::Boolean(b)) => done = Some(Value::Bool(*b)),
-                Yaml::Value(Scalar::Integer(i)) => done = Some(Value::from(*i)),
-                Yaml::Value(Scalar::FloatingPoint(f)) => {
-                    done = Some(
-                        serde_json::Number::from_f64(f.into_inner())
-                            .map_or_else(|| Value::String(f.to_string()), Value::Number),
-                    );
+                Yaml::Value(scalar) => done = Some(scalar_json(scalar)),
+                // A collection of scalars, the usual one, is converted at once, with no frame.
+                Yaml::Sequence(items) if items.iter().all(is_scalar) => {
+                    done = Some(scalar_array(items));
                 }
-                Yaml::Value(Scalar::String(s)) => done = Some(Value::String(s.to_string())),
+                Yaml::Mapping(map) if map.iter().all(|(k, v)| is_scalar(k) && is_scalar(v)) => {
+                    done = Some(scalar_object(map)?);
+                }
                 Yaml::Sequence(items) => open.push(Converting::Array {
                     items: items.iter(),
                     out: Vec::with_capacity(items.len()),
                 }),
                 Yaml::Mapping(map) => open.push(Converting::Object {
-                    entries: map.iter().collect::<Vec<_>>().into_iter(),
+                    entries: Box::new(map.iter()),
                     key: None,
                     out: Map::new(),
                 }),
