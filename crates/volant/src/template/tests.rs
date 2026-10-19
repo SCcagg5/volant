@@ -932,9 +932,8 @@ fn text_prints_containers_none_and_chained_undefined_as_the_reference_does() {
     assert!(t.render("x {{ d.no.sub }}", &v).is_err());
 }
 
-/// What a `raw` block or a string constant writes is text: the reference renders a result once.
-/// Rows of `(template, variables, result)`, each one rendered as written and then as the value of
-/// a variable another one reads.
+/// A `raw` block or a string constant writes text the reference renders once. Rows of
+/// `(template, result)`, rendered as written and then as the value of a variable.
 #[test]
 fn a_raw_block_is_emitted_once() {
     let x = json!({"x": "val"});

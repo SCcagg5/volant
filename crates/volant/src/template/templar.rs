@@ -227,10 +227,9 @@ impl Templar {
         Ok(self.render_value_tainted(value, vars)?.0)
     }
 
-    /// `render_value`, saying as well whether what came out is data: true when any string of it
-    /// was rendered by a pass that read a name from a managed host, or read a file at run time,
-    /// or left text of its own that `keep_literal` keeps. The loop path asks: such items must not
-    /// be rendered again once they are bound to the loop variable.
+    /// `render_value`, saying as well whether what came out is data: true when a string of it
+    /// read a name from a managed host or a file at run time, or holds text `keep_literal` keeps.
+    /// The loop path asks: such items must not be rendered again once bound to the loop variable.
     pub fn render_value_tainted<'a>(
         &self,
         value: &Value,
