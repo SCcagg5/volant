@@ -194,6 +194,8 @@ pub(super) struct Context {
     /// Names whose rendered value was built from something a managed host wrote. A read of one is
     /// as much a read of host data as a read of the name it was built from.
     soiled: Mutex<BTreeSet<String>>,
+    /// Whether `soiled` holds a name, so that a render that resolved nothing never takes its lock.
+    any_soiled: AtomicBool,
     /// Set when `failed` is: the first error a nested render raised that the read cannot carry.
     failure: Mutex<Option<TemplateError>>,
     failed: AtomicBool,
@@ -239,6 +241,7 @@ impl Context {
                 .lock()
                 .expect("template soiled")
                 .insert(key.to_string());
+            self.any_soiled.store(true, Ordering::Relaxed);
         }
         match rendered {
             Ok(value) => (minijinja::Value::from_serialize(&value), true),
@@ -252,7 +255,7 @@ impl Context {
         }
     }
 
-    fn read(self: &Arc<Self>, key: &str) -> Option<(minijinja::Value, bool)> {
+    fn read(self: &Arc<Self>, key: &str, untrusted: bool) -> Option<(minijinja::Value, bool)> {
         // A map that carries a `hostvars` key of its own - a fixture, a recorded scope -
         // keeps being read from the map when no view came with it, so the two sources never
         // disagree about which one answers.
@@ -295,7 +298,7 @@ impl Context {
             return Some((view, true));
         }
         if let Some(value) = self.vars.get(key) {
-            if !self.untrusted.contains(key) && holds_template(value) {
+            if !untrusted && holds_template(value) {
                 return Some(self.resolve(key, value));
             }
             return Some((minijinja::Value::from_serialize(value), true));
@@ -390,8 +393,10 @@ impl Object for Context {
         // cache and would otherwise leave the render looking clean.
         // A `hostvars` the map carries as a plain value lists its hosts on any read, so a host
         // name that came from a managed host taints every read of it.
-        if self.untrusted.contains(key)
-            || self.soiled.lock().expect("template soiled").contains(key)
+        let untrusted = self.untrusted.contains(key);
+        if untrusted
+            || (self.any_soiled.load(Ordering::Relaxed)
+                && self.soiled.lock().expect("template soiled").contains(key))
             || (key == "hostvars"
                 && self.hostvars.is_none()
                 && self.untrusted.contains(HOSTVARS_KEYS))
@@ -401,7 +406,7 @@ impl Object for Context {
         if let Some(value) = self.memo.lookup(key) {
             return Some(value);
         }
-        let (value, keep) = self.read(key)?;
+        let (value, keep) = self.read(key, untrusted)?;
         if keep {
             self.memo.store(key, &value);
         }
@@ -520,6 +525,7 @@ pub(super) fn context_of(templar: &Templar, vars: Vars<'_>) -> (minijinja::Value
         templar: templar.clone(),
         resolving: Mutex::new(Vec::new()),
         soiled: Mutex::new(BTreeSet::new()),
+        any_soiled: AtomicBool::new(false),
         failure: Mutex::new(None),
         failed: AtomicBool::new(false),
     });
