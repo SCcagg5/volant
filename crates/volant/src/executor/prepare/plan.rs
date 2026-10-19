@@ -55,7 +55,8 @@ pub(in crate::executor) struct PlayPlan {
     /// Every host the play resolved, whatever batch it belongs to and whether it has failed or
     /// not: `ansible_play_hosts_all`. Fixed for the whole play, batches included.
     pub(in crate::executor) all_play_hosts: Vec<String>,
-    pub(in crate::executor) r#become: Option<bool>,
+    /// The play's `become` as a literal, or as the template each host's task renders.
+    pub(in crate::executor) r#become: (Option<bool>, Option<String>),
     pub(in crate::executor) become_user: Option<String>,
     /// The module payloads this run sends, built once before the first connection. Shared rather
     /// than copied: it is the base64 of a 631 KB zip and every host of every batch reads it.

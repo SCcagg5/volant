@@ -1,0 +1,73 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    s1: {w: 0, x: 9, deep: {a: 1}}
+    s2: {w: 0, x: 9, deep: {a: 1}}
+    s3: {w: 0, x: 9, deep: {a: 1}}
+  tasks:
+    - name: every file the extensions allow, nested directories and hidden files included
+      include_vars: {dir: cfg, ignore_unknown_extensions: true}
+      register: all
+    - debug: var=all
+
+    - name: the directory itself only
+      include_vars: {dir: cfg, ignore_unknown_extensions: true, depth: 1}
+      register: one
+    - debug: var=one.ansible_included_var_files
+
+    - name: two levels
+      include_vars: {dir: cfg, ignore_unknown_extensions: true, depth: 2}
+      register: two
+    - debug: var=two.ansible_included_var_files
+
+    - name: files_matching is searched in the name, not the path
+      include_vars: {dir: cfg, ignore_unknown_extensions: true, files_matching: '^[0-9]'}
+      register: matching
+    - debug: var=matching
+
+    - name: ignore_files as a list, each pattern anchored at the end of the name
+      include_vars:
+        dir: cfg
+        ignore_unknown_extensions: true
+        ignore_files: ['.*\.json', 'Zeta.yml']
+      register: ignored
+    - debug: var=ignored.ansible_included_var_files
+
+    - name: ignore_files as one string of patterns split on white space
+      include_vars: {dir: cfg, ignore_unknown_extensions: true, ignore_files: '.*\.json .*\.yaml'}
+      register: ignored_text
+    - debug: var=ignored_text.ansible_included_var_files
+
+    - name: extensions replaces the default list
+      include_vars: {dir: cfg, extensions: [yml], ignore_unknown_extensions: true}
+      register: yml_only
+    - debug: var=yml_only.ansible_included_var_files
+
+    - name: a name puts every file under one variable
+      include_vars: {dir: cfg, ignore_unknown_extensions: true, name: config}
+      register: named
+    - debug: var=named.ansible_facts.config.nested
+
+    - name: a later file replaces the keys of an earlier one, values whole
+      include_vars: {dir: cfg, ignore_unknown_extensions: true, files_matching: '^[0-9]'}
+      register: replaced
+    - debug: var=replaced.ansible_facts.nested
+
+    - name: without hash_behaviour a mapping replaces the variable of that name
+      include_vars: {dir: m1}
+      register: kept
+    - debug: var=kept.ansible_facts
+
+    - name: hash_behaviour merge lays the mapping over it, all the way down
+      include_vars: {dir: m2, hash_behaviour: merge}
+      register: merged
+    - debug: var=merged.ansible_facts
+
+    - name: hash_behaviour replace is the default
+      include_vars: {dir: m3, hash_behaviour: replace}
+      register: replace
+    - debug: var=replace.ansible_facts
+
+    - name: the variables are set for the rest of the play
+      debug:
+        msg: "{{ a }} {{ sub }} {{ deep }} {{ hid }} {{ nested }} {{ s1 }} {{ s2 }} {{ s3 }}"

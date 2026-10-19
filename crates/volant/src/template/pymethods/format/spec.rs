@@ -204,10 +204,13 @@ fn finish(digits: &str, tail: &str, prefix: &str, spec: &Spec, size: usize) -> S
         let target = spec
             .width
             .saturating_sub(prefix.chars().count() + tail.chars().count());
-        while body.chars().count() < target || body.starts_with(sep) {
-            digits.insert(0, '0');
-            body = grouped(&digits, sep, size);
+        // The fewest digits whose grouped form reaches the width; the digits are ASCII.
+        let mut n = digits.len();
+        while n + n.saturating_sub(1) / size < target {
+            n += 1;
         }
+        digits.insert_str(0, &"0".repeat(n - digits.len()));
+        body = grouped(&digits, sep, size);
     }
     pad(&format!("{body}{tail}"), prefix, spec.width, fill, align)
 }

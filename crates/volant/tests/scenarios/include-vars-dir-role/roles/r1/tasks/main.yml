@@ -1,0 +1,28 @@
+- name: a name is looked for under the role's vars
+  include_vars: {dir: extra}
+  register: r
+- debug: var=r.ansible_included_var_files
+
+- name: a name that starts with vars is the role's own path
+  include_vars: {dir: vars/extra}
+  register: r
+- debug: var=r.ansible_included_var_files
+
+- name: the role's vars, main.yml and the nested directory included
+  include_vars: {dir: vars}
+  register: r
+- debug: var=r.ansible_included_var_files
+
+- name: other directories of the role are not searched
+  include_vars: {dir: files/fd}
+  register: r
+  ignore_errors: true
+- debug: var=r
+
+- name: a path is not normalised
+  include_vars: {dir: ../vars/extra}
+  register: r
+- debug: var=r.ansible_included_var_files
+
+- name: a task file the role includes still counts as the role
+  include_tasks: inner.yml

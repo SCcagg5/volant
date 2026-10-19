@@ -1,0 +1,18 @@
+- hosts: h1
+  gather_facts: "{{ flag_f }}"
+  force_handlers: "{{ flag_t }}"
+  vars:
+    flag_t: true
+    flag_f: false
+  tasks:
+    - name: Notify
+      command: "true"
+      changed_when: true
+      notify: Clean up
+    - name: Fail
+      fail: {msg: boom}
+    - name: Never reached
+      debug: {msg: never}
+  handlers:
+    - name: Clean up
+      debug: {msg: handled}

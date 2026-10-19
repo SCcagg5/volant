@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use super::paths::{expand_home, path_list};
 use super::settings::{
-    boolean, cache_plugin, forks, gathering, integer, runtime_mode, switch, timeout_secs,
+    boolean, cache_plugin, forks, gathering, host_named_paths, integer, runtime_mode, switch,
+    timeout_secs,
 };
 use super::{Config, tag_list};
 
@@ -79,6 +80,7 @@ pub(super) fn parse(text: &str, base: &Path, origin: &str) -> anyhow::Result<Con
                         config.batching = on;
                     }
                 }
+                "host_named_paths" => config.host_named_paths = host_named_paths(value, origin)?,
                 "native_modules" => {
                     config.native_modules = boolean("VOLANT_NATIVE_MODULES", origin, value)?;
                 }
@@ -158,6 +160,9 @@ pub(super) fn parse(text: &str, base: &Path, origin: &str) -> anyhow::Result<Con
                 if let Some(on) = crate::yaml::bool_from_str(value.trim()) {
                     config.force_handlers = on;
                 }
+            }
+            "localhost_warning" => {
+                config.localhost_warning = boolean("LOCALHOST_WARNING", origin, value.trim())?;
             }
             "show_custom_stats" => {
                 if let Some(on) = crate::yaml::bool_from_str(value.trim()) {

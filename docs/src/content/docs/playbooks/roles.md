@@ -62,11 +62,12 @@ A role contributes three layers of variables, and they sit at different heights 
 
 A role's `defaults` and `vars` are visible to the whole play, so `pre_tasks` and later roles can read them. For the role's own steps, its values are laid back on top. Role parameters stay inside the role.
 
+An `import_role` with `public: false` keeps them to itself, and an `include_role` does that unless it says `public: true`. See [Role options](/playbooks/includes/#role-options).
+
 ## Differences from Ansible
 
 - A role name containing a `.` is tried as a path before it is tried as a collection role, so a role directory with a dot in its name stays reachable.
 - `collections_path` from `ansible.cfg` and `ANSIBLE_COLLECTIONS_PATH` are read the same way as `roles_path`. That behavior was not measured against the reference.
-- `import_role` does not support `public`, `allow_duplicates` and `rolespec_validate` yet. Ansible honors them, and accepting a `rolespec_validate: false` that Volant then ignored would fail a run that Ansible passes.
 - A missing `import_tasks` file is reported with the reference's first two sentences but not its third, which names a Python error number for a module that was never called.
 - `import_playbook` written as a task is rejected before the play starts instead of failing under a play banner. The exit code is the same 2.
 - A file that imports itself is rejected with exit code 1 and a message of its own. Ansible recurses until the interpreter gives up, at exit code 250 with a long traceback.

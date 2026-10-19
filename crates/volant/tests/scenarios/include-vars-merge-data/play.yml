@@ -1,0 +1,43 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    plain: {a: 1}
+    kept: {safe: !unsafe "{{ 1 + 1 }}"}
+  tasks:
+    - name: text that a managed host returned
+      command: cat returned.txt
+      register: r
+    - set_fact:
+        h: {text: "{{ r.stdout }}", nested: {deep: "{{ r.stdout }}"}}
+        h2: {text: "{{ r.stdout }}", nested: {deep: "{{ r.stdout }}"}, lst: ["{{ r.stdout }}"]}
+        held: {text: "{{ r.stdout }}"}
+
+    - name: a file merged over the registered result
+      include_vars: {file: r.yml, hash_behaviour: merge}
+    - debug:
+        msg: "{{ r.stdout }}"
+
+    - name: a directory merged over a set_fact value
+      include_vars: {dir: dir, hash_behaviour: merge}
+    - debug:
+        msg: "{{ h.text }} {{ h.nested.deep }}"
+
+    - name: nested mappings and lists
+      include_vars: {file: nested.yml, hash_behaviour: merge}
+    - debug:
+        msg: "{{ h2.text }} {{ h2.nested.deep }} {{ h2.lst[0] }}"
+
+    - name: under a name
+      include_vars: {file: held.yml, name: held, hash_behaviour: merge}
+    - debug:
+        msg: "{{ held.text }}"
+
+    - name: text of the file still renders where the variable is the author's
+      include_vars: {file: plain.yml, hash_behaviour: merge}
+    - debug:
+        msg: "{{ plain.note }} {{ plain.a }}"
+
+    - name: a value marked as data stays data through a merge
+      include_vars: {file: held.yml, name: kept, hash_behaviour: merge}
+    - debug:
+        msg: "{{ kept.safe }}"

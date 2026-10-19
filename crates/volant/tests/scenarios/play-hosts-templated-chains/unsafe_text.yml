@@ -1,0 +1,7 @@
+- hosts: "{{ a }}"
+  gather_facts: false
+  vars:
+    a: !unsafe "{{ x }}"
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }}"

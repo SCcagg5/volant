@@ -54,6 +54,31 @@ pub struct RoleEntry {
     pub params: Map<String, Value>,
     /// The task keywords written on the entry, which every task of the role inherits.
     pub keywords: PlayTask,
+    /// Whether the role lends its `defaults` and `vars` to the rest of the play. A role of a
+    /// `roles:` list and an `import_role` do unless the statement says `public: false`; an
+    /// `include_role` does only when it says `public: true`.
+    pub public: bool,
+    /// Whether the argument-spec check runs in front of the role: `rolespec_validate`.
+    pub validate: bool,
+    /// `allow_duplicates: false` on an `include_role` or an `import_role`: the statement does
+    /// nothing for a host that has already run an identical one.
+    pub unique: bool,
+}
+
+impl RoleEntry {
+    /// An entry that names a role and nothing else: no keywords, no parameters, the defaults of
+    /// a `roles:` list.
+    pub fn named(name: &str, from: RoleFrom) -> Self {
+        Self {
+            name: name.to_string(),
+            from,
+            params: Map::new(),
+            keywords: PlayTask::empty(),
+            public: true,
+            validate: true,
+            unique: false,
+        }
+    }
 }
 
 /// What one role directory holds.
@@ -88,6 +113,22 @@ pub struct RoleVars {
     pub defaults: Map<String, Value>,
     pub vars: Map<String, Value>,
     pub params: Map<String, Value>,
+    /// Whether this instance lends `defaults` and `vars` to the rest of the play.
+    pub public: bool,
+    /// What the role itself says, set aside when the rest of the play's values were first laid
+    /// under it, so that a variable another role publishes later can be laid under it again.
+    pub own: Option<Box<OwnVars>>,
+}
+
+/// The `defaults` and `vars` a role directory holds, before anything was laid under them.
+#[derive(Debug, Clone, Default)]
+pub struct OwnVars {
+    pub defaults: Map<String, Value>,
+    pub vars: Map<String, Value>,
+    /// What the other roles of the same statement lend: its dependencies, which see each other
+    /// and the role that asked for them whether or not the statement is public.
+    pub group_defaults: Map<String, Value>,
+    pub group_vars: Map<String, Value>,
 }
 
 /// Where a role is looked for.

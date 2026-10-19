@@ -38,6 +38,11 @@ pub struct Cause {
 /// "help"}]`. Taken off with [`ERROR_KEY`].
 pub const CHAIN_KEY: &str = "_volant_chain";
 
+/// The key the executor leaves what the reference shows under `Origin: <unknown>` under, for a
+/// failure that has no place in a file: a `with_` lookup that failed is shown as the expression
+/// `invoke_lookup()`, not at the task. Taken off with [`ERROR_KEY`].
+pub const UNKNOWN_KEY: &str = "_volant_unknown";
+
 /// One cause as [`CHAIN_KEY`] holds it.
 pub fn cause(
     msg: &str,
@@ -100,10 +105,19 @@ impl ErrorBlock {
             .get(ERROR_KEY)
             .and_then(serde_json::Value::as_str)
             .map_or_else(|| task_failed(&message_of(result)), str::to_string);
+        let unknown = result
+            .0
+            .get(UNKNOWN_KEY)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
         Self {
             message: if censored { censor(&message) } else { message },
-            origin: origin.cloned(),
-            unknown: None,
+            origin: if unknown.is_some() {
+                None
+            } else {
+                origin.cloned()
+            },
+            unknown,
             // A `no_log` task's causes would repeat what its censored message no longer says.
             causes: if censored {
                 Vec::new()
@@ -214,6 +228,11 @@ pub fn shorten(text: &str, width: usize) -> String {
 /// `Origin: ...`, a blank line, then the task's line and the two before it, numbered, with a
 /// marker under the column: `SourceContext.from_origin` and its `__str__`.
 pub(crate) fn source_context(origin: &crate::playbook::Origin) -> String {
+    // A file with no position: the reference names a vaulted file that could not be opened by its
+    // path alone.
+    if origin.line == 0 {
+        return format!("Origin: {}", origin.path);
+    }
     let mut out = format!("Origin: {}:{}:{}", origin.path, origin.line, origin.col);
     let annotated = annotated_lines(origin);
     if !annotated.is_empty() {

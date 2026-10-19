@@ -1,0 +1,4 @@
+# Text an expression made that ends in `{#`, kept as it is when it is read again: a play variable,
+# a fact, a registered result and a loop item. Only the text of a template is rendered again.
+args: [-i, inv.ini, play.yml]
+needs: ["ansible-core"]

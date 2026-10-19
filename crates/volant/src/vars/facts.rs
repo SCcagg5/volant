@@ -304,6 +304,12 @@ impl VarStore {
         if !self.caching() {
             return;
         }
+        if !crate::fact_cache::fits(value) {
+            eprintln!(
+                "[WARNING]: The fact '{key}' of {host} nests too deep for the fact cache and is not cached."
+            );
+            return;
+        }
         self.persisted
             .entry(host.to_string())
             .or_default()
@@ -343,8 +349,22 @@ impl VarStore {
     }
 
     /// Whether `host` is the `localhost` the reference conjures because the inventory has none.
+    /// A spelling that another host of the inventory answers to is that host, not an implicit one.
     pub fn is_implicit_localhost(&self, host: &str) -> bool {
-        !self.inventory_vars.contains_key(host) && is_localhost(host)
+        is_localhost(host)
+            && !self.inventory_vars.contains_key(host)
+            && self.controller_alias(host).is_none()
+    }
+
+    /// The inventory's own host that answers to `host`: see `Inventory::controller_alias`.
+    pub fn controller_alias(&self, host: &str) -> Option<&str> {
+        if !is_localhost(host) || self.inventory_vars.contains_key(host) {
+            return None;
+        }
+        self.groups["all"]
+            .iter()
+            .map(String::as_str)
+            .find(|name| is_localhost(name))
     }
 
     /// Whether every one of `hosts` already holds `key` among the facts a module returned.

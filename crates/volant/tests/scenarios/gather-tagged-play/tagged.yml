@@ -1,0 +1,12 @@
+- name: tagged
+  hosts: all
+  tags: [x]
+  tasks:
+    - name: tagged task
+      debug: {msg: tagged}
+- name: untagged
+  hosts: all
+  tasks:
+    - name: untagged task
+      debug: {msg: untagged}
+      tags: [y]

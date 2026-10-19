@@ -132,7 +132,9 @@ impl Bridged {
                 Ok((Sub::run("raw", raw(format!("rm -f -r '{path}'"))), Pending::RemoveTmp(path)))
             }
             Ask::HostVar { host } => Err(Reply::Value(
-                self.hostvars.get(&host).cloned().unwrap_or(Value::Null),
+                self.hostvars
+                    .get(&host)
+                    .map_or(Value::Null, |entry| crate::vars::settled(entry).into_owned()),
             )),
         }
     }

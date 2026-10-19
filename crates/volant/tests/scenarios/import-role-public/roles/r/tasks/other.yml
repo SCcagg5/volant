@@ -1,0 +1,3 @@
+- name: show r from other
+  debug:
+    msg: "in r other: qdef={{ qdef | default('unset') }} qvar={{ qvar | default('unset') }}"

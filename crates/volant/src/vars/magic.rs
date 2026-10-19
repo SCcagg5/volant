@@ -48,6 +48,23 @@ impl VarStore {
                 Value::String(file.display().to_string()),
             );
         }
+        self.options_magic(&mut vars);
+        vars
+    }
+
+    /// The magic variables a render has with no host: the playbook's directory and the run's own
+    /// options. What a play's `hosts` reads, before any host is chosen.
+    pub(super) fn play_magic(&self) -> Map<String, Value> {
+        let mut vars = Map::new();
+        vars.insert(
+            "playbook_dir".to_string(),
+            Value::String(self.playbook_dir.display().to_string()),
+        );
+        self.options_magic(&mut vars);
+        vars
+    }
+
+    fn options_magic(&self, vars: &mut Map<String, Value>) {
         vars.insert("omit".to_string(), Value::String(omit_token().to_string()));
         vars.insert(
             "ansible_check_mode".to_string(),
@@ -68,7 +85,6 @@ impl VarStore {
             "volant_version".to_string(),
             Value::String(env!("CARGO_PKG_VERSION").to_string()),
         );
-        vars
     }
 }
 

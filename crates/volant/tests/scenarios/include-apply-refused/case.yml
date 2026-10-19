@@ -1,0 +1,7 @@
+# A key of `apply:` that is not a block keyword stops the run when the statement runs, after its
+# banner. An `apply:` that is not a mapping stops the load.
+runs:
+  - args: [-i, inv.ini, unknown-key.yml]
+  - args: [-i, inv.ini, unknown-key-skipped.yml]
+  - args: [-i, inv.ini, not-a-mapping.yml]
+  - args: [-i, inv.ini, role-unknown-key.yml]

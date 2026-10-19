@@ -1,0 +1,7 @@
+- name: own tag play
+  hosts: all
+  gather_facts: false
+  tags: [own]
+  tasks:
+    - name: own task
+      debug: {msg: own}

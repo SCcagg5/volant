@@ -1,0 +1,275 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! The Jinja globals that build a value: `dict`, `cycler`, `joiner` and `undef`.
+//!
+//! minijinja's `dict` takes a mapping and keywords only. Python's `dict`, which Jinja hands to
+//! templates unchanged, also takes any iterable of pairs, and Ansible roles rely on it
+//! (`dict(items)`, `dict(keys | zip(values))`). Its failures are worded as CPython words them.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use minijinja::value::{Object, Rest, ValueKind, from_args};
+use minijinja::{Error, ErrorKind, State, Value};
+
+use super::type_name;
+
+/// What makes two keys the same key in a Python `dict`: `1`, `1.0` and `true` are one key. An
+/// integer is held whole, so two integers beyond 64 bits stay two keys.
+#[derive(Hash, PartialEq, Eq)]
+enum Key {
+    Int(i128),
+    Text(String),
+}
+
+/// The most pairs `dict()` takes from one iterable. A generator of unknown length would otherwise
+/// grow the result until the process runs out of memory; ten million is far above what a
+/// playbook builds and a few hundred megabytes at most.
+const MAX_PAIRS: usize = 10_000_000;
+
+/// A `dict` under construction: the keys in the order they were first set, the value last set.
+#[derive(Default)]
+struct Entries {
+    items: Vec<(Value, Value)>,
+    index: HashMap<Key, usize>,
+}
+
+impl Entries {
+    /// A key that is text, a boolean or a whole number. `none` and a number with a fraction (or
+    /// beyond any integer) are keys Python accepts and this engine cannot carry through a
+    /// template result: they would reach the output as `null` or fail there, depending on the
+    /// consumer. They are refused here, where the cause is still known.
+    fn set(&mut self, key: Value, value: Value) -> Result<(), Error> {
+        let canonical = match key.kind() {
+            ValueKind::Bool | ValueKind::Number => match i128::try_from(key.clone()) {
+                Ok(whole) => Key::Int(whole),
+                Err(_) => {
+                    return Err(invalid(
+                        "a dict key of type 'float' is not supported by this release, only text, \
+                         boolean and whole number keys"
+                            .into(),
+                    ));
+                }
+            },
+            ValueKind::None => {
+                return Err(invalid(
+                    "a dict key of type 'NoneType' is not supported by this release, only text, \
+                     boolean and whole number keys"
+                        .into(),
+                ));
+            }
+            ValueKind::String => Key::Text(key.to_string()),
+            ValueKind::Undefined => return Err(Error::from(ErrorKind::UndefinedError)),
+            _ => {
+                return Err(invalid(format!("unhashable type: '{}'", python_type(&key))));
+            }
+        };
+        if let Some(&at) = self.index.get(&canonical) {
+            self.items[at].1 = value;
+        } else {
+            self.index.insert(canonical, self.items.len());
+            self.items.push((key, value));
+        }
+        Ok(())
+    }
+}
+
+fn invalid(message: String) -> Error {
+    Error::new(ErrorKind::InvalidOperation, message)
+}
+
+/// The name Python gives the type of a value, as the messages of `dict` quote it.
+fn python_type(value: &Value) -> &'static str {
+    match value.kind() {
+        ValueKind::None => "NoneType",
+        ValueKind::Bool => "bool",
+        ValueKind::Number => serde_json::to_value(value).map_or("int", |json| type_name(&json)),
+        ValueKind::String => "str",
+        ValueKind::Bytes => "bytes",
+        ValueKind::Seq => "list",
+        ValueKind::Map => "dict",
+        ValueKind::Iterable => "generator",
+        _ => "object",
+    }
+}
+
+/// The items of a sequence, a generator or a string, one at a time; for a mapping, its keys.
+/// Nothing is collected, so an iterable that is not made of pairs fails at its first element.
+fn items_of(value: &Value) -> Result<Box<dyn Iterator<Item = Value>>, Error> {
+    if value.kind() == ValueKind::String {
+        let chars: Vec<Value> = value
+            .to_string()
+            .chars()
+            .map(|c| Value::from(c.to_string()))
+            .collect();
+        return Ok(Box::new(chars.into_iter()));
+    }
+    Ok(Box::new(value.try_iter()?))
+}
+
+/// `dict(...)`: nothing, a mapping, or any iterable of two-item elements, then keywords.
+///
+/// Measured on ansible-core 2.19.12: a later pair wins over an earlier one with the same key,
+/// a keyword wins over the positional argument, `dict(none)` and `dict(5)` fail as non-iterable
+/// and a string is read character by character.
+pub(super) fn dict(args: Rest<Value>) -> Result<Value, Error> {
+    build(args.0, MAX_PAIRS)
+}
+
+/// [`dict`] with the most pairs it takes from one iterable as a parameter.
+pub(super) fn build(mut args: Vec<Value>, max_pairs: usize) -> Result<Value, Error> {
+    let keywords = match args.last() {
+        Some(last) if last.is_kwargs() => args.pop(),
+        _ => None,
+    };
+    if args.len() > 1 {
+        return Err(invalid(format!(
+            "dict expected at most 1 argument, got {}",
+            args.len()
+        )));
+    }
+    // A mapping and no keywords: the copy is the mapping. Values are never changed in place in a
+    // template, and the mapping may be lazy (`vars`, `hostvars`), where a copy would read, and
+    // fail on, every variable the caller never asked for.
+    if keywords.is_none()
+        && let Some(source) = args.first()
+        && source.kind() == ValueKind::Map
+    {
+        return Ok(source.clone());
+    }
+    let mut entries = Entries::default();
+    if let Some(source) = args.first() {
+        match source.kind() {
+            ValueKind::Undefined => return Err(Error::from(ErrorKind::UndefinedError)),
+            ValueKind::Map => {
+                for key in source.try_iter()? {
+                    // A value that cannot be read is undefined in the copy, as it is in the
+                    // mapping itself.
+                    let value = source.get_item(&key).unwrap_or(Value::UNDEFINED);
+                    entries.set(key, value)?;
+                }
+            }
+            ValueKind::Seq | ValueKind::Iterable | ValueKind::String => {
+                for (at, element) in items_of(source)?.enumerate() {
+                    if at >= max_pairs {
+                        return Err(invalid(format!(
+                            "dict() takes at most {max_pairs} pairs from one iterable"
+                        )));
+                    }
+                    let (key, value) = pair(at, &element)?;
+                    entries.set(key, value)?;
+                }
+            }
+            _ => {
+                return Err(invalid(format!(
+                    "'{}' object is not iterable",
+                    python_type(source)
+                )));
+            }
+        }
+    }
+    if let Some(keywords) = keywords {
+        for key in keywords.try_iter()? {
+            let value = keywords.get_item(&key)?;
+            entries.set(key, value)?;
+        }
+    }
+    Ok(entries.items.into_iter().collect())
+}
+
+/// The two items of element number `at`.
+fn pair(at: usize, element: &Value) -> Result<(Value, Value), Error> {
+    if element.is_undefined() {
+        return Err(Error::from(ErrorKind::UndefinedError));
+    }
+    let wrong_length = |length: usize| {
+        invalid(format!(
+            "dictionary update sequence element #{at} has length {length}; 2 is required"
+        ))
+    };
+    match element.kind() {
+        ValueKind::Seq | ValueKind::Iterable | ValueKind::String | ValueKind::Map => {}
+        _ => {
+            return Err(invalid(format!(
+                "cannot convert dictionary update sequence element #{at} to a sequence"
+            )));
+        }
+    }
+    // The length is read without walking the element when the element knows it.
+    if let Some(length) = element.len()
+        && length != 2
+    {
+        return Err(wrong_length(length));
+    }
+    let mut items = items_of(element)?;
+    let Some(key) = items.next() else {
+        return Err(wrong_length(0));
+    };
+    let Some(value) = items.next() else {
+        return Err(wrong_length(1));
+    };
+    let more = items.count();
+    if more > 0 {
+        return Err(wrong_length(2 + more));
+    }
+    Ok((key, value))
+}
+
+/// Jinja's `cycler`: `next()` answers the current item and moves on, `current` reads it,
+/// `reset()` starts over, and the items repeat for ever.
+#[derive(Debug)]
+struct Cycler {
+    items: Vec<Value>,
+    pos: AtomicUsize,
+}
+
+impl Object for Cycler {
+    fn get_value(self: &Arc<Self>, key: &Value) -> Option<Value> {
+        match key.as_str()? {
+            "current" => Some(self.items[self.pos.load(Ordering::Relaxed)].clone()),
+            "pos" => Some(Value::from(self.pos.load(Ordering::Relaxed))),
+            "items" => Some(Value::from(self.items.clone())),
+            _ => None,
+        }
+    }
+
+    fn call_method(
+        self: &Arc<Self>,
+        _state: &State<'_, '_>,
+        method: &str,
+        args: &[Value],
+    ) -> Result<Value, Error> {
+        let () = from_args(args)?;
+        let at = self.pos.load(Ordering::Relaxed);
+        match method {
+            "next" => {
+                self.pos
+                    .store((at + 1) % self.items.len(), Ordering::Relaxed);
+                Ok(self.items[at].clone())
+            }
+            "reset" => {
+                self.pos.store(0, Ordering::Relaxed);
+                Ok(Value::from(()))
+            }
+            _ => Err(Error::from(ErrorKind::UnknownMethod)),
+        }
+    }
+}
+
+/// `cycler(*items)`. At least one item is needed, as in Jinja.
+pub(super) fn cycler(items: Rest<Value>) -> Result<Value, Error> {
+    if items.is_empty() {
+        return Err(invalid("at least one item has to be provided".into()));
+    }
+    Ok(Value::from_object(Cycler {
+        items: items.0,
+        pos: AtomicUsize::new(0),
+    }))
+}
+
+/// `undef(hint=none, name=none)`: a value that is undefined, so that reading it fails and
+/// `default` and `is defined` see it as missing. The hint is not kept: the failure it causes
+/// reads as any other undefined variable.
+pub(super) fn undef(_args: Rest<Value>) -> Value {
+    Value::UNDEFINED
+}
