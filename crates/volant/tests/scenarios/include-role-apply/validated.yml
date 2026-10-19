@@ -1,0 +1,11 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: the argument check is a task of the role, so apply reaches it
+      include_role:
+        name: sp
+        apply:
+          tags: [x]
+      vars:
+        must: ok
+      tags: [always]

@@ -1,0 +1,119 @@
+- hosts: all
+  gather_facts: false
+  vars:
+    T: "{{ playbook_dir }}/t"
+    x: val
+    y: café
+    items: [1, 2]
+  tasks:
+    - name: Set up
+      shell: |
+        mkdir -p {{ T }}
+        printf 'old\n' > {{ T }}/basic
+        printf 'old\n' > {{ T }}/all_six
+        printf 'old\n' > {{ T }}/lstrip
+        printf 'old\n' > {{ T }}/lstrip_spaced
+        printf 'old\n' > {{ T }}/newline_header
+        printf 'old\n' > {{ T }}/newline_task_only_at_end
+        printf 'old\n' > {{ T }}/keep_trailing
+        printf 'old\n' > {{ T }}/header_wins
+        printf 'old\n' > {{ T }}/header_with_task_delims
+        printf 'old\n' > {{ T }}/double_quotes
+        printf 'old\n' > {{ T }}/escapes
+        printf 'old\n' > {{ T }}/adjacent_strings
+        printf 'old\n' > {{ T }}/colon_in_value
+        printf 'old\n' > {{ T }}/no_space
+        printf 'old\n' > {{ T }}/duplicate_key
+        printf 'old\n' > {{ T }}/not_first_line
+        printf 'old\n' > {{ T }}/leading_space
+        printf 'old\n' > {{ T }}/no_final_newline
+      check_mode: false
+    - name: basic
+      template:
+        src: basic.j2
+        dest: "{{ T }}/basic"
+    - name: all_six
+      template:
+        src: all_six.j2
+        dest: "{{ T }}/all_six"
+    - name: lstrip
+      template:
+        src: lstrip.j2
+        dest: "{{ T }}/lstrip"
+    - name: lstrip_spaced
+      template:
+        src: lstrip_spaced.j2
+        dest: "{{ T }}/lstrip_spaced"
+    - name: newline_header
+      template:
+        src: newline_header.j2
+        dest: "{{ T }}/newline_header"
+    - name: newline_task_only_at_end
+      template:
+        src: newline_task_only_at_end.j2
+        dest: "{{ T }}/newline_task_only_at_end"
+        newline_sequence: '\r\n'
+    - name: keep_trailing
+      template:
+        src: keep_trailing.j2
+        dest: "{{ T }}/keep_trailing"
+    - name: header_wins
+      template:
+        src: header_wins.j2
+        dest: "{{ T }}/header_wins"
+        variable_start_string: '<!'
+        variable_end_string: '!>'
+    - name: header_with_task_delims
+      template:
+        src: header_with_task_delims.j2
+        dest: "{{ T }}/header_with_task_delims"
+        variable_start_string: '<!'
+        variable_end_string: '!>'
+    - name: double_quotes
+      template:
+        src: double_quotes.j2
+        dest: "{{ T }}/double_quotes"
+    - name: escapes
+      template:
+        src: escapes.j2
+        dest: "{{ T }}/escapes"
+    - name: adjacent_strings
+      template:
+        src: adjacent_strings.j2
+        dest: "{{ T }}/adjacent_strings"
+    - name: colon_in_value
+      template:
+        src: colon_in_value.j2
+        dest: "{{ T }}/colon_in_value"
+    - name: no_space
+      template:
+        src: no_space.j2
+        dest: "{{ T }}/no_space"
+    - name: duplicate_key
+      template:
+        src: duplicate_key.j2
+        dest: "{{ T }}/duplicate_key"
+    - name: not_first_line
+      template:
+        src: not_first_line.j2
+        dest: "{{ T }}/not_first_line"
+    - name: leading_space
+      template:
+        src: leading_space.j2
+        dest: "{{ T }}/leading_space"
+    - name: no_final_newline
+      template:
+        src: no_final_newline.j2
+        dest: "{{ T }}/no_final_newline"
+    - name: Read back
+      slurp:
+        src: "{{ T }}/{{ item }}"
+      loop: [basic, all_six, lstrip, lstrip_spaced, newline_header, newline_task_only_at_end, keep_trailing, header_wins, header_with_task_delims, double_quotes, escapes, adjacent_strings, colon_in_value, no_space, duplicate_key, not_first_line, leading_space, no_final_newline]
+      register: back
+      when: not ansible_check_mode
+    - name: Show
+      debug:
+        msg: "{{ item.item }}: {{ item.content | b64decode | to_json }}"
+      loop: "{{ back.results }}"
+      loop_control: {label: "{{ item.item }}"}
+      when: not ansible_check_mode

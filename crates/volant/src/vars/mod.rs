@@ -177,7 +177,7 @@ enum Added {
 /// Whether any string in `value`, at any depth, is a template.
 pub(crate) fn holds_template(value: &Value) -> bool {
     match value {
-        Value::String(text) => Templar::is_template(text),
+        Value::String(text) => Templar::is_stored_template(text),
         Value::Array(items) => items.iter().any(holds_template),
         Value::Object(map) => map.values().any(holds_template),
         _ => false,

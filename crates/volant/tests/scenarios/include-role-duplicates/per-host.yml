@@ -1,0 +1,11 @@
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: only h1 runs it first
+      include_role:
+        name: q
+      when: inventory_hostname == 'h1'
+    - name: h2 runs it now, h1 does not
+      include_role:
+        name: q
+        allow_duplicates: false

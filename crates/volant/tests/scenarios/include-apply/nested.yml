@@ -1,0 +1,11 @@
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: outer
+      include_tasks:
+        file: outer.yml
+        apply:
+          tags: [outer]
+          vars:
+            w: from-outer
+      tags: [always]

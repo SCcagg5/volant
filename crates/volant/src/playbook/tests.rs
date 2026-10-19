@@ -284,6 +284,18 @@ fn hosts_lists_defaults_and_escalation_keywords_are_read() {
     "- hosts: all\n  tasks:\n    - name: t\n      command: \"true\"\n      poll: -1\n",
     &["task 't': 'poll' must be a non-negative integer"]
 )]
+#[case::apply_list(
+    "- hosts: all\n  tasks:\n    - include_tasks:\n        file: a.yml\n        apply: [tags]\n",
+    &["Expected a dict for apply but got a list instead"]
+)]
+#[case::apply_text(
+    "- hosts: all\n  tasks:\n    - include_role:\n        name: r\n        apply: tags\n",
+    &["Expected a dict for apply but got a string instead"]
+)]
+#[case::apply_null(
+    "- hosts: all\n  tasks:\n    - include_tasks:\n        file: a.yml\n        apply:\n",
+    &["Expected a dict for apply but got null instead"]
+)]
 fn the_load_refuses(#[case] text: &str, #[case] needles: &[&str]) {
     let err = parse(text, "x.yml").expect_err("the load must refuse");
     let got = format!("{err:#}");
@@ -614,6 +626,55 @@ fn a_block_takes_its_sections_and_its_inherited_keywords() {
         panic!("a block");
     };
     assert!(empty.body.is_empty());
+}
+
+/// `apply:` of an include statement is read as a block's keywords. A key a block does not have
+/// is kept as the sentence the reference stops the run with, and an empty mapping is no `apply`.
+#[rstest]
+#[case::tags("include_tasks", "tags: [t]", "keywords")]
+#[case::several(
+    "include_role",
+    "{tags: [t], become: true, when: x, vars: {a: 1}}",
+    "keywords"
+)]
+#[case::empty("include_tasks", "{}", "none")]
+#[case::unknown_key(
+    "include_tasks",
+    "{nosuch: 1}",
+    "'nosuch' is not a valid attribute for a Block"
+)]
+#[case::task_only_key(
+    "include_role",
+    "{register: z}",
+    "'register' is not a valid attribute for a Block"
+)]
+#[case::bad_value("include_tasks", "{vars: 5}", "'vars' must be a mapping")]
+#[case::not_an_include("debug", "none", "none")]
+fn apply_is_read_as_the_keywords_of_a_block(
+    #[case] module: &str,
+    #[case] apply: &str,
+    #[case] expected: &str,
+) {
+    use crate::playbook::Apply;
+    let apply = if apply.starts_with('{') || apply == "none" {
+        apply.to_string()
+    } else {
+        format!("{{{apply}}}")
+    };
+    let line = match module {
+        "debug" => "debug: {msg: x}".to_string(),
+        "include_role" => format!("include_role: {{name: r, apply: {apply}}}"),
+        _ => format!("{module}: {{file: a.yml, apply: {apply}}}"),
+    };
+    let pb = parse(&format!("- hosts: all\n  tasks:\n    - {line}\n"), "x.yml").unwrap();
+    match (&first(&pb).apply, expected) {
+        (None, "none") => {}
+        (Some(Apply::Keywords(k)), "keywords") => {
+            assert!(!k.tags.is_empty(), "{k:?}");
+        }
+        (Some(Apply::Refused(sentence)), want) => assert!(sentence.contains(want), "{sentence}"),
+        (got, want) => panic!("{want}: {got:?}"),
+    }
 }
 
 /// Shapes the loader keeps for the pre-flight: a `set_fact` key
