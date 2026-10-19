@@ -87,6 +87,40 @@ pub(in crate::executor) fn delegate_host_vars(
     origin: &Origin,
     playbook_dir: &Path,
 ) -> HostVars {
+    let merged = merged_vars(
+        host,
+        named,
+        plan,
+        task_vars,
+        role,
+        include_params,
+        live,
+        store,
+        origin,
+        playbook_dir,
+    );
+    resolved(merged, templar)
+}
+
+/// [`delegate_host_vars`] before the variables resolve each other: every layer merged, the names
+/// that came from a managed host marked, and the engine's own search path in place. A looped
+/// `set_fact` keeps this form, because a variable built from a fact it sets has to render again.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the driver's whole context, read for one host's variables"
+)]
+pub(in crate::executor) fn merged_vars(
+    host: &str,
+    named: Named,
+    plan: &PlayPlan,
+    task_vars: &Map<String, Value>,
+    role: Option<usize>,
+    include_params: Option<&IncludeParams>,
+    live: &Progress,
+    store: &Mutex<VarStore>,
+    origin: &Origin,
+    playbook_dir: &Path,
+) -> HostVars {
     let compiled = plan.steps();
     let role = role
         .and_then(|i| compiled.roles.get(i))
@@ -148,6 +182,11 @@ pub(in crate::executor) fn delegate_host_vars(
     // calls (`first_found`, `template`) reads these two names to find its file, and a pass that
     // resolves the task's variables without them first is a pass that lookup cannot complete on.
     insert_search_path(&mut vars, origin, playbook_dir);
+    vars
+}
+
+/// The variables of [`merged_vars`] resolved against each other.
+pub(in crate::executor) fn resolved(mut vars: HostVars, templar: &Templar) -> HostVars {
     // The merged map carries this host's facts, so the names that came from a managed host
     // travel into the resolution below and are left there exactly as they arrived. The set comes
     // back wider than it went in: a `vars:` of the play, of a block or of the task itself built

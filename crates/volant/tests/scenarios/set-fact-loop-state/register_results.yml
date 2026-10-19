@@ -1,0 +1,13 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    x: []
+  tasks:
+    - command: echo {{ item }}
+      register: r
+      loop: [1, 2, 3]
+    - set_fact:
+        x: "{{ x + [item.stdout] }}"
+      loop: "{{ r.results }}"
+      loop_control: {label: "{{ item.stdout }}"}
+    - debug: {var: x}

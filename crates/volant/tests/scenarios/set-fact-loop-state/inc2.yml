@@ -1,0 +1,3 @@
+- set_fact:
+    x: "{{ x + [item] }}"
+  loop: "{{ outer }}"
