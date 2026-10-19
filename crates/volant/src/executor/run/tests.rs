@@ -5094,3 +5094,35 @@ h1
     assert_eq!(groups["all_roles"], ["h1"]);
     assert_eq!(store.custom_stats().hosts()["h1"]["n"], json!(1));
 }
+
+/// A host that sends output of many short lines gets a failed result rather than a list of
+/// millions of strings, and the bound covers `stdout` and `stderr` together.
+#[test]
+fn the_lines_of_output_are_bounded_for_stdout_and_stderr_together() {
+    let max = volant_protocol::shape::MAX_VALUES;
+    // (lines of stdout, lines of stderr, refused)
+    for (out, err, refused) in [
+        (max, 0, false),
+        (max + 1, 0, true),
+        (max / 2, max / 2, false),
+        (max / 2, max / 2 + 1, true),
+        (0, max + 1, true),
+    ] {
+        let mut result = TaskResult(vars(
+            json!({"rc": 0, "stdout": "\n".repeat(out), "stderr": "\n".repeat(err)}),
+        ));
+        add_output_lines(&mut result);
+        if refused {
+            assert!(result.failed(), "{out} and {err} lines");
+            let msg = result.0["msg"].as_str().unwrap();
+            assert!(
+                msg.contains("more lines than the limit of 1000000"),
+                "{msg}"
+            );
+            assert!(!result.0.contains_key("stdout"));
+        } else {
+            assert_eq!(result.0["stdout_lines"].as_array().unwrap().len(), out);
+            assert_eq!(result.0["stderr_lines"].as_array().unwrap().len(), err);
+        }
+    }
+}

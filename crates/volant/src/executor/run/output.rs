@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use serde_json::Value;
+use volant_protocol::shape::MAX_VALUES;
 use volant_protocol::{Task, TaskResult};
 
 use crate::stats::Outcome;
@@ -44,7 +45,11 @@ pub(crate) fn drop_internal_keys(result: &mut TaskResult) {
     });
 }
 
+/// The lines of `stdout` and `stderr` are values like any other: a line of a few bytes costs a
+/// few hundred bytes of memory as one. Together they may hold [`MAX_VALUES`] lines, and a host
+/// over that gets a failed result in place of its own.
 pub(super) fn add_output_lines(result: &mut TaskResult) {
+    let mut room = MAX_VALUES;
     for (key, lines) in [("stdout", "stdout_lines"), ("stderr", "stderr_lines")] {
         if result.0.contains_key(lines) {
             continue;
@@ -52,7 +57,18 @@ pub(super) fn add_output_lines(result: &mut TaskResult) {
         // `data.get('stdout') or ''` in the reference: a value Python reads as false splits as
         // an empty string. Any other value that is not a string is left alone.
         let split = match result.0.get(key) {
-            Some(Value::String(text)) => splitlines(text).into_iter().map(Value::from).collect(),
+            Some(Value::String(text)) => {
+                let Some(split) = splitlines(text, room) else {
+                    *result = TaskResult::failed_with(format!(
+                        "the output of the host is refused: {key} of {} bytes has more lines \
+                         than the limit of {MAX_VALUES} for stdout and stderr together",
+                        text.len()
+                    ));
+                    return;
+                };
+                room -= split.len();
+                split.into_iter().map(Value::from).collect()
+            }
             Some(value) if python_falsy(value) => Vec::new(),
             _ => continue,
         };
@@ -125,8 +141,8 @@ pub(super) fn python_falsy(value: &Value) -> bool {
 }
 
 /// Python's `str.splitlines()`: every line boundary Python knows, `\r\n` counted as one, and no
-/// empty line after a final boundary.
-fn splitlines(text: &str) -> Vec<&str> {
+/// empty line after a final boundary. `None` once there are more than `limit` lines.
+fn splitlines(text: &str, limit: usize) -> Option<Vec<&str>> {
     let boundary = |c: char| {
         matches!(
             c,
@@ -144,6 +160,9 @@ fn splitlines(text: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut rest = text;
     while let Some(at) = rest.find(boundary) {
+        if out.len() == limit {
+            return None;
+        }
         out.push(&rest[..at]);
         let width = if rest[at..].starts_with("\r\n") {
             2
@@ -153,9 +172,12 @@ fn splitlines(text: &str) -> Vec<&str> {
         rest = &rest[at + width..];
     }
     if !rest.is_empty() {
+        if out.len() == limit {
+            return None;
+        }
         out.push(rest);
     }
-    out
+    Some(out)
 }
 
 pub(in crate::executor) fn classify(
