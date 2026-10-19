@@ -8,7 +8,7 @@ use minijinja::{Environment, Error, ErrorKind, State, Value};
 
 mod args;
 mod format;
-mod limits;
+pub(crate) mod limits;
 mod search;
 mod text;
 mod translate;

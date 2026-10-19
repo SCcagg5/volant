@@ -143,7 +143,7 @@ pub fn register(
         add_filter(env, "batch", f::batch);
         add_filter(env, "slice", f::slice);
         add_text_filter(env, "sum", f::sum);
-        add_filter(env, "indent", f::indent);
+        add_filter(env, "indent", super::pymethods::limits::indent);
         add_filter(env, "select", f::select);
         add_filter(env, "reject", f::reject);
         add_filter(env, "selectattr", f::selectattr);

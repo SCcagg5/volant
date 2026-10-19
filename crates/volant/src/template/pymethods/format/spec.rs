@@ -6,6 +6,7 @@ use minijinja::{Error, Value};
 
 use super::float;
 use crate::template::pymethods::args::{raise, type_of};
+use crate::template::pymethods::limits::check;
 
 /// A parsed `[[fill]align][sign][z][#][0][width][grouping][.precision][type]`.
 #[derive(Debug, Default)]
@@ -22,6 +23,7 @@ pub(crate) struct Spec {
 }
 
 fn number(chars: &[char], at: &mut usize) -> Result<Option<usize>, Error> {
+    // The count of a width or a precision: more digits than an index holds is an error.
     let from = *at;
     while chars.get(*at).is_some_and(char::is_ascii_digit) {
         *at += 1;
@@ -32,9 +34,11 @@ fn number(chars: &[char], at: &mut usize) -> Result<Option<usize>, Error> {
     chars[from..*at]
         .iter()
         .collect::<String>()
-        .parse()
+        .parse::<i64>()
+        .ok()
+        .and_then(|n| usize::try_from(n).ok())
         .map(Some)
-        .map_err(|_| raise("Too many decimal digits in format string"))
+        .ok_or_else(|| raise("Too many decimal digits in format string"))
 }
 
 pub(crate) fn parse(spec: &str, type_name: &str) -> Result<Spec, Error> {
@@ -76,6 +80,8 @@ pub(crate) fn parse(spec: &str, type_name: &str) -> Result<Spec, Error> {
             number(&chars, &mut at)?.ok_or_else(|| raise("Format specifier missing precision"))?,
         );
     }
+    check(out.width as u128)?;
+    check(out.precision.unwrap_or(0) as u128)?;
     match chars.len() - at {
         0 => {}
         1 => out.kind = Some(chars[at]),
@@ -95,8 +101,8 @@ pub(crate) fn format_value(value: &Value, spec: &str) -> Result<String, Error> {
     }
     match value.kind() {
         ValueKind::String => text(value.as_str().unwrap_or_default(), parse(spec, "str")?),
-        ValueKind::Bool => integer(i64::from(value.is_true()), parse(spec, "int")?),
-        ValueKind::Number if value.is_integer() => match value.as_i64() {
+        ValueKind::Bool => integer(i128::from(value.is_true()), parse(spec, "int")?),
+        ValueKind::Number if value.is_integer() => match i128::try_from(value.clone()).ok() {
             Some(n) => integer(n, parse(spec, "int")?),
             None => Err(raise("Python int too large to convert to C ssize_t")),
         },
@@ -206,7 +212,7 @@ fn finish(digits: &str, tail: &str, prefix: &str, spec: &Spec, size: usize) -> S
     pad(&format!("{body}{tail}"), prefix, spec.width, fill, align)
 }
 
-fn integer(n: i64, spec: Spec) -> Result<String, Error> {
+fn integer(n: i128, spec: Spec) -> Result<String, Error> {
     let kind = spec.kind.unwrap_or('d');
     if "eEfFgG%".contains(kind) {
         // An integer given a float type is converted first.

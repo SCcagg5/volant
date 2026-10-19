@@ -5,6 +5,7 @@ use minijinja::value::ValueKind;
 use minijinja::{Error, Value};
 
 use super::args::{Call, bound, clamp, index, raise, text, type_of};
+use super::limits::check;
 
 /// A text read by character position, as Python reads it. Byte offsets stand in for the
 /// positions when the text is ASCII.
@@ -154,6 +155,15 @@ pub(super) fn replace(s: &str, call: &Call<'_>) -> Result<Value, Error> {
     let old = text(slots[0].unwrap_or(&call.pos[0]), "replace() argument 1")?;
     let new = text(slots[1].unwrap_or(&call.pos[1]), "replace() argument 2")?;
     let count = slots[2].map_or(Ok(-1), index)?;
+    if new.len() > old.len() {
+        let hits = if old.is_empty() {
+            s.chars().count() + 1
+        } else {
+            s.matches(old).count()
+        };
+        let hits = usize::try_from(count).map_or(hits, |n| n.min(hits));
+        check(s.len() as u128 + hits as u128 * (new.len() - old.len()) as u128)?;
+    }
     Ok(Value::from(match usize::try_from(count) {
         Ok(n) => s.replacen(old, new, n),
         Err(_) => s.replace(old, new),

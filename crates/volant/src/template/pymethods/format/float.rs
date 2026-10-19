@@ -43,9 +43,25 @@ fn exponent(exp: i32) -> String {
     format!("{}{:02}", if exp < 0 { '-' } else { '+' }, exp.abs())
 }
 
+/// Digits after the point past which a float's exact decimal expansion is all zeros: a double
+/// has at most 767 significant digits in scientific form and 1074 places after the point.
+const EXACT_SCI: usize = 800;
+const EXACT_FIXED: usize = 1100;
+
+/// `{f:.precision$e}` for any precision. Rust's formatter refuses one above 65535, and the
+/// digits past `EXACT_SCI` are zeros, so those are written here.
+fn sci(f: f64, precision: usize) -> String {
+    let text = format!("{f:.prec$e}", prec = precision.min(EXACT_SCI));
+    if precision <= EXACT_SCI {
+        return text;
+    }
+    let (mantissa, exp) = text.split_once('e').unwrap_or((&text, "0"));
+    format!("{mantissa}{}e{exp}", "0".repeat(precision - EXACT_SCI))
+}
+
 /// `%e` with `precision` digits after the point. `f` is not negative.
 pub(crate) fn exp_style(f: f64, precision: usize, alt: bool, upper: bool) -> String {
-    let sci = format!("{f:.precision$e}");
+    let sci = sci(f, precision);
     let (mantissa, exp) = sci.split_once('e').unwrap_or((&sci, "0"));
     let mut mantissa = mantissa.to_string();
     if alt && precision == 0 {
@@ -57,7 +73,10 @@ pub(crate) fn exp_style(f: f64, precision: usize, alt: bool, upper: bool) -> Str
 
 /// `%f` with `precision` digits after the point. `f` is not negative.
 pub(crate) fn fixed(f: f64, precision: usize, alt: bool) -> String {
-    let mut text = format!("{f:.precision$}");
+    let mut text = format!("{f:.prec$}", prec = precision.min(EXACT_FIXED));
+    if precision > EXACT_FIXED {
+        text.push_str(&"0".repeat(precision - EXACT_FIXED));
+    }
     if alt && precision == 0 {
         text.push('.');
     }
@@ -68,7 +87,7 @@ pub(crate) fn fixed(f: f64, precision: usize, alt: bool) -> String {
 /// exponent says, trailing zeros dropped unless `alt`. `f` is not negative.
 pub(crate) fn general(f: f64, precision: usize, alt: bool, upper: bool) -> String {
     let precision = precision.max(1);
-    let sci = format!("{f:.prec$e}", prec = precision - 1);
+    let sci = sci(f, precision - 1);
     let exp: i32 = sci
         .split_once('e')
         .and_then(|(_, e)| e.parse().ok())

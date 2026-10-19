@@ -4,6 +4,7 @@
 use minijinja::{Error, Value};
 
 use super::args::{Call, index, is_space, raise, type_of};
+use super::limits::check;
 
 /// `split` and `rsplit`: `(sep=None, maxsplit=-1)`.
 pub(super) fn split(
@@ -139,6 +140,7 @@ pub(super) fn pad(s: &str, name: &str, call: &Call<'_>) -> Result<Value, Error> 
         return Ok(Value::from(s));
     }
     let margin = width - len;
+    check(u128::try_from(width).unwrap_or(u128::MAX))?;
     let left = match name {
         "ljust" => 0,
         "rjust" => margin,
@@ -160,6 +162,7 @@ pub(super) fn zfill(s: &str, call: &Call<'_>) -> Result<Value, Error> {
     if width <= len {
         return Ok(Value::from(s));
     }
+    check(u128::try_from(width).unwrap_or(u128::MAX))?;
     let zeros = "0".repeat(usize::try_from(width - len).unwrap_or(0));
     Ok(Value::from(match s.chars().next() {
         Some(sign @ ('+' | '-')) => format!("{sign}{zeros}{}", &s[1..]),
@@ -209,6 +212,9 @@ pub(super) fn splitlines(s: &str, call: &Call<'_>) -> Result<Value, Error> {
 pub(super) fn expandtabs(s: &str, call: &Call<'_>) -> Result<Value, Error> {
     let slots = call.named("expandtabs", &["tabsize"])?;
     let size = slots[0].map_or(Ok(8), index)?;
+    if i32::try_from(size).is_err() {
+        return Err(raise("Python int too large to convert to C int"));
+    }
     let size = usize::try_from(size).unwrap_or(0);
     let mut out = String::new();
     let mut column = 0usize;
@@ -216,6 +222,7 @@ pub(super) fn expandtabs(s: &str, call: &Call<'_>) -> Result<Value, Error> {
         match c {
             '\t' if size > 0 => {
                 let fill = size - column % size;
+                check(out.len() as u128 + fill as u128)?;
                 out.extend(std::iter::repeat_n(' ', fill));
                 column += fill;
             }

@@ -165,10 +165,12 @@ pub(super) fn bound(value: Option<&Value>) -> Result<Option<i64>, Error> {
         None => Ok(None),
         Some(v) if v.is_none() => Ok(None),
         Some(v) if matches!(v.kind(), ValueKind::Bool) => Ok(Some(i64::from(v.is_true()))),
-        Some(v) if matches!(v.kind(), ValueKind::Number) && v.is_integer() => v
-            .as_i64()
-            .map(Some)
-            .ok_or_else(|| raise("cannot fit 'int' into an index-sized integer")),
+        // An integer past what an index holds stands for the end it lies beyond.
+        Some(v) if matches!(v.kind(), ValueKind::Number) && v.is_integer() => {
+            Ok(Some(i128::try_from(v.clone()).map_or(i64::MAX, |n| {
+                i64::try_from(n).unwrap_or(if n < 0 { i64::MIN } else { i64::MAX })
+            })))
+        }
         Some(_) => Err(raise(
             "slice indices must be integers or None or have an __index__ method",
         )),
