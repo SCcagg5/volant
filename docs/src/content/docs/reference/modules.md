@@ -102,7 +102,7 @@ The controller runs these as the reference's action plugins do: it picks or rend
 | `add_host` | Add a host, or groups to a host, in the running play's inventory. |
 | `assemble` | Join the fragments of a directory into one file on the host. |
 | `copy` | Copy a file from the controller, or `content:`, to the host. |
-| `dnf` | Install or remove packages with `dnf` or `dnf5`, whichever the host runs. |
+| `dnf` | Install or remove packages with `dnf` or `dnf5`, whichever the host runs. `yum` is a redirect to it. |
 | `fetch` | Copy a file from the host to the controller, under `dest` and nowhere else. |
 | `gather_facts` | Gather the host's facts as a task. |
 | `group_by` | Put the host in a group named from its variables. |
