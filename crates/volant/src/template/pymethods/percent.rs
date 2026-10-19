@@ -7,6 +7,7 @@ use minijinja::{Error, ErrorKind, Value};
 
 use super::args::{raise, type_of};
 use super::format::{ascii, float, repr, to_str};
+use super::limits::check;
 
 /// `lhs % rhs`. `tuple` says that the right side was written as a tuple: Volant has no tuple
 /// type, so the compiler tells a `(a, b)` from a list that a variable holds.
@@ -47,14 +48,14 @@ pub(crate) fn format_filter(
 
 /// An integer or a float as the numeric operators read it: a bool counts as 0 or 1.
 enum Num {
-    Int(i64),
+    Int(i128),
     Float(f64),
 }
 
 fn number(value: &Value) -> Option<Num> {
     match value.kind() {
-        ValueKind::Bool => Some(Num::Int(i64::from(value.is_true()))),
-        ValueKind::Number if value.is_integer() => value.as_i64().map(Num::Int),
+        ValueKind::Bool => Some(Num::Int(i128::from(value.is_true()))),
+        ValueKind::Number if value.is_integer() => i128::try_from(value.clone()).ok().map(Num::Int),
         ValueKind::Number => f64::try_from(value.clone()).ok().map(Num::Float),
         _ => None,
     }
@@ -129,15 +130,28 @@ impl Args<'_> {
         Ok(item)
     }
 
-    /// The width or precision a `*` takes from the arguments.
-    fn star(&mut self) -> Result<i64, Error> {
+    /// The width or precision a `*` takes from the arguments. A width past an index is Python's
+    /// `ssize_t` error, and a precision past an `int` is its `int` one.
+    fn star(&mut self, precision: bool) -> Result<i64, Error> {
         let v = self.next()?;
-        number(&v)
-            .and_then(|n| match n {
-                Num::Int(i) => Some(i),
-                Num::Float(_) => None,
+        let Some(Num::Int(i)) = number(&v) else {
+            return Err(raise("* wants int"));
+        };
+        let bound = if precision {
+            i64::from(i32::MAX)
+        } else {
+            i64::MAX
+        };
+        i64::try_from(i)
+            .ok()
+            .filter(|n| n.unsigned_abs() <= bound.unsigned_abs() + 1)
+            .ok_or_else(|| {
+                raise(if precision {
+                    "Python int too large to convert to C int"
+                } else {
+                    "Python int too large to convert to C ssize_t"
+                })
             })
-            .ok_or_else(|| raise("* wants int"))
     }
 }
 
@@ -241,33 +255,46 @@ fn spec_of(chars: &[char], at: &mut usize, args: &mut Args<'_>) -> Result<Spec, 
     }
     if chars.get(*at) == Some(&'*') {
         *at += 1;
-        let w = args.star()?;
+        let w = args.star(false)?;
         spec.left |= w < 0;
         spec.width = usize::try_from(w.unsigned_abs()).unwrap_or(usize::MAX);
     } else {
-        spec.width = digits(chars, at).unwrap_or(0);
+        spec.width = digits(chars, at, "width")?.unwrap_or(0);
     }
     if chars.get(*at) == Some(&'.') {
         *at += 1;
         spec.precision = Some(if chars.get(*at) == Some(&'*') {
             *at += 1;
-            usize::try_from(args.star()?).unwrap_or(0)
+            usize::try_from(args.star(true)?).unwrap_or(0)
         } else {
-            digits(chars, at).unwrap_or(0)
+            digits(chars, at, "precision")?.unwrap_or(0)
         });
     }
     while chars.get(*at).is_some_and(|c| "hlL".contains(*c)) {
         *at += 1;
     }
+    check(spec.width as u128)?;
+    check(spec.precision.unwrap_or(0) as u128)?;
     Ok(spec)
 }
 
-fn digits(chars: &[char], at: &mut usize) -> Option<usize> {
+/// The number a width or a precision is written as; more than an index holds is `what` too big.
+fn digits(chars: &[char], at: &mut usize, what: &str) -> Result<Option<usize>, Error> {
     let from = *at;
     while chars.get(*at).is_some_and(char::is_ascii_digit) {
         *at += 1;
     }
-    chars[from..*at].iter().collect::<String>().parse().ok()
+    if from == *at {
+        return Ok(None);
+    }
+    chars[from..*at]
+        .iter()
+        .collect::<String>()
+        .parse::<i64>()
+        .ok()
+        .and_then(|n| usize::try_from(n).ok())
+        .map(Some)
+        .ok_or_else(|| raise(format!("{what} too big")))
 }
 
 fn pad(body: &str, spec: &Spec) -> String {

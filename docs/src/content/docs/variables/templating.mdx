@@ -141,6 +141,8 @@ What differs from ansible-core:
 
 On a text, `%` formats it the way Python does: `'%s-%d' % (name, 3)`, `'%(host)s:%(port)d' % item`, `'%5.2f%%' % pct`. The flags `-`, `+`, space, `0` and `#`, a width and a precision (each of them `*` to read it from the arguments), the length modifiers `h`, `l` and `L`, and the conversions `s`, `r`, `a`, `c`, `d`, `i`, `u`, `o`, `x`, `X`, `e`, `E`, `f`, `F`, `g`, `G` and `%` are read. A wrong call fails with Python's words: `not enough arguments for format string`, `not all arguments converted during string formatting`, `%d format: a real number is required, not str`.
 
+Integers up to 128 bits are read exactly (`'%d' % 18446744073709551615`). A larger one reaches a template as a float, so `%d` prints that float's integer value and `%x` refuses it. A width or a precision past 256 MiB of text is a task error that names the limit, as for the `str` methods, and one past what an index holds is Python's `width too big`.
+
 On two numbers, `%` takes the sign of the divisor, as in Python: `7 % -3` is `-2`. A zero divisor is an error. The `format` filter is `%` with the arguments written out, and reads the same formats.
 
 Volant has no tuple type, so the right side of `%` is read as a tuple when it is written out in the template, as `(a, b)`, `(a,)` or `['a', 'b']`. A list that a variable holds or a call answers is one argument, as it is in Python: `'%s' % items` prints the list. `'%s %s' % pair` with a two item list in `pair` is an error in ansible-core, and here. A tuple prints as a list: `'%s' % ((1, 2),)` is `[1, 2]` here and `(1, 2)` in ansible-core.
