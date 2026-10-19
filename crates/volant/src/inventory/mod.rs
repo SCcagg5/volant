@@ -94,6 +94,8 @@ pub struct Resolution {
     pub hosts: Vec<Host>,
     pub unmatched: Vec<String>,
     pub warnings: Vec<String>,
+    /// The first spelling of the implicit controller host a pattern names: it stands for the host.
+    implicit: Option<String>,
 }
 
 #[derive(Debug)]
@@ -404,18 +406,20 @@ impl Inventory {
             return out;
         }
         if is_localhost(term) {
-            return vec![self.controller_alias(term).unwrap_or(term).to_string()];
+            return vec![match self.controller_alias(term) {
+                Some(alias) => alias.to_string(),
+                None => res.implicit.get_or_insert_with(|| term.to_string()).clone(),
+            }];
         }
         res.unmatched.push(term.to_string());
         Vec::new()
     }
 
     /// The inventory's own host that answers to `name`, when `name` is one of the three spellings
-    /// of the controller (`localhost`, `127.0.0.1`, `::1`), the inventory has no host of that
-    /// name and it has a host of another of the three. The reference keeps one controller host
-    /// and hands it out for every spelling the inventory does not list, so `hosts: 127.0.0.1`
-    /// runs on the inventory's `localhost` and takes its variables. The first one the inventory
-    /// defines is the one.
+    /// of the controller, the inventory lists no host of that name and it lists one of another.
+    /// The reference keeps one controller host and hands it out for every spelling the inventory
+    /// does not list, so `hosts: 127.0.0.1` runs on the inventory's `localhost`, the first one
+    /// it defines, with its variables.
     pub fn controller_alias(&self, name: &str) -> Option<&str> {
         if !is_localhost(name) || self.hosts.iter().any(|h| h.name == name) {
             return None;

@@ -118,6 +118,9 @@ fn the_controller_is_an_implicit_local_host() {
 #[case::listed_means_itself("localhost foo=1\n127.0.0.1 foo=2\n", "127.0.0.1", &["127.0.0.1"], json!(2))]
 #[case::a_pattern_of_spellings("localhost\n", "::1,localhost", &["localhost"], json!(null))]
 #[case::not_a_spelling("localhost\n", "web1", &[], json!(null))]
+#[case::two_implicit_spellings_are_one_host("[web]\nweb1\n", "localhost,::1", &["localhost"], json!(null))]
+#[case::the_first_spelling_names_it("[web]\nweb1\n", "::1,127.0.0.1", &["::1"], json!(null))]
+#[case::an_exclusion_by_another_spelling("[web]\nweb1\n", "127.0.0.1:!localhost", &[], json!(null))]
 fn an_unlisted_controller_spelling_is_the_inventorys_controller(
     #[case] ini: &str,
     #[case] pattern: &str,
