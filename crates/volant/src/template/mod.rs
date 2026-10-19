@@ -35,7 +35,7 @@ pub use lookups::supported as lookup_supported;
 
 /// Prefix of every error raised because a variable had no value, the one template failure
 /// Ansible treats as recoverable in places such as `vars_files`.
-const UNDEFINED: &str = "The task includes an option with an undefined variable.";
+pub(crate) const UNDEFINED: &str = "The task includes an option with an undefined variable.";
 
 /// What [`Templar::render_map_tainted`] puts before a plugin's failure, then the key in quotes.
 pub(crate) const RESOLVING: &str = "Error while resolving value for ";
@@ -48,6 +48,10 @@ impl TemplateError {
     /// an unknown filter or an illegal operation.
     pub fn is_undefined(&self) -> bool {
         self.0.starts_with(UNDEFINED)
+            || self
+                .0
+                .strip_prefix("Task failed: '")
+                .is_some_and(|rest| rest.ends_with("' is undefined"))
     }
 }
 

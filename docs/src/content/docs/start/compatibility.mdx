@@ -41,7 +41,7 @@ A file that only a dynamic `include_tasks` or `include_role` names is read when 
 | Area | Runs today | Not yet |
 |---|---|---|
 | Plays | `pre_tasks`, roles, `tasks`, `post_tasks`, handlers, `serial`, `strategy` (`linear`, `free`, `host_pinned`, `debug`), `order`, `throttle`, `timeout`, `debugger`, `any_errors_fatal`, `max_fail_percentage`, `ignore_errors`, `ignore_unreachable` | `hosts:` written as a template |
-| Tasks | `when`, `loop`, the `with_*` forms, `register`, `until`, `retries`, `changed_when`, `failed_when`, `ignore_errors`, `ignore_unreachable`, `any_errors_fatal`, `no_log`, `environment`, `timeout`, `tags`, `async`, `poll`, `module_defaults` | `with_flattened`, `with_cartesian`, `with_filetree` |
+| Tasks | `when`, `loop`, every `with_<lookup>` form, `register`, `until`, `retries`, `changed_when`, `failed_when`, `ignore_errors`, `ignore_unreachable`, `any_errors_fatal`, `no_log`, `environment`, `timeout`, `tags`, `async`, `poll`, `module_defaults` | |
 | Blocks | `block`, `rescue`, `always` | |
 | Reuse | roles and dependencies, `import_tasks`, `import_role`, `import_playbook`, `include_tasks`, `include_role`, `include_vars` | `include_vars: dir` |
 | Delegation | `delegate_to`, `delegate_facts`, `local_action`, `run_once` | |
@@ -59,7 +59,6 @@ A file that only a dynamic `include_tasks` or `include_role` names is read when 
 | An action plugin of your own, in `action_plugins/` | Volant runs the action plugins of ansible-core and of installed collections, not yours. | Write a module, or keep the play under `ansible-playbook`. |
 | A collection that is not installed | Volant does not install one during a run. It asks the controller's ansible-core what is installed, before the first connection. | Run `volant runtime install --collections NAME`, or the `ansible-galaxy collection install` command the error names. See [The managed runtime](/reference/runtime/#collections) and [Modules from collections](/internals/python/#modules-from-collections). |
 | No Python with ansible-core on the controller | Volant installs its own on first need, with `curl` or `wget` and `tar`. | Nothing, or `volant runtime install` ahead of time. Without a network, use `volant runtime pack` and `install --from`. |
-| `with_flattened`, `with_cartesian`, `with_filetree` | Volant stops the playbook when it loads, with `conflicting action statements` ([issue 479](https://github.com/lorica-labs/volant/issues/479), [pull request 484](https://github.com/lorica-labs/volant/pull/484)). | Rewrite with `loop` and a filter, such as `loop: "{{ a \| product(b) \| list }}"`, or use the `find` module. |
 | `apt`, `user`, `group` or `file` under `--check` or `--diff` on a host with no Python | These modules answer through Python on the host when the run asks for a check or a diff. | Install Python on the host, or run the play without `--check` and `--diff`. |
 
 ## Known gaps

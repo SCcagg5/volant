@@ -1,0 +1,4 @@
+# A builtin lookup is accepted under ansible.builtin and ansible.legacy too, and with_items
+# still opens one level of nested lists under either name.
+args: [play.yml]
+needs: ["ansible-core"]

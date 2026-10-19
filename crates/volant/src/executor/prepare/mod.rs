@@ -26,7 +26,8 @@ mod vars;
 
 pub(in crate::executor) use escalation::retry_name;
 pub(in crate::executor) use item::{
-    FINALIZING, Item, NOTIFY_FAILED, Prepared, failure_text, pause_of, undefined_name,
+    FINALIZING, Item, NOTIFY_FAILED, Prepared, failed_result, failure_text, pause_of,
+    undefined_name,
 };
 pub(in crate::executor) use plan::{Gate, PlayPlan, Strategy};
 pub(in crate::executor) use vars::host_vars;
@@ -36,7 +37,8 @@ use carry::Carry;
 use connect::{connect_for, delegate_for};
 use escalation::{become_for, remove_omit};
 use item::{check_gather_subset, environment_for, flag_for, ignore_errors_for, notify_for};
-use loops::{LoopOptions, loop_list, loop_options, with_lookup_items};
+pub(in crate::executor) use loops::undefined_causes;
+use loops::{LoopOptions, loop_list, loop_options, named_undefined, with_lookup_items};
 
 #[expect(
     clippy::too_many_arguments,
@@ -103,6 +105,15 @@ pub(super) fn prepare(
     // playbook wrote binds author content; one over `{{ r.stdout_lines }}` binds data, and the
     // items of such a loop are never rendered again.
     let mut items_from_host = false;
+    // The groups and keys of `module_defaults`, and the lookups of a `with_` loop, that an include
+    // brought in while the play runs have not been asked about yet. A loop over a lookup nothing
+    // answers to is refused before its terms are read.
+    if !task.module_defaults.is_empty() || task.loop_with.is_some() {
+        plan.steps()
+            .resolved
+            .ensure([task], templar.bridge().map(|bridge| &**bridge))
+            .map_err(TemplateError)?;
+    }
     // An undefined variable in the loop is kept rather than raised, the way the reference's
     // `TaskExecutor.run` keeps `_loop_eval_error`: the task's `when`, read without an item,
     // decides first, and the error is raised only if the task would run. Any other loop error
@@ -122,19 +133,14 @@ pub(super) fn prepare(
             list.into_iter().map(Some).collect()
         }
         Some(Err(e)) if e.is_undefined() => {
-            loop_error = Some(e);
+            loop_error = Some(match &task.loop_items {
+                Some(raw) => named_undefined(raw, e),
+                None => e,
+            });
             vec![None]
         }
         Some(Err(e)) => return Err(e),
     };
-    // The groups and keys of `module_defaults` an include brought in while the play runs have
-    // not been asked about yet.
-    if !task.module_defaults.is_empty() {
-        plan.steps()
-            .resolved
-            .ensure([task], templar.bridge().map(|bridge| &**bridge))
-            .map_err(TemplateError)?;
-    }
     let mut items = Vec::new();
     // What `ansible_loop` reads: every item, kept only when the loop asks for `extended`.
     let options = if task.loop_items.is_some() {

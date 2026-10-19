@@ -25,7 +25,7 @@ use crate::vars::{HostVars, VarStore};
 use super::coordinator::{Event, MetaEffect, Progress, escalated_links, render_name};
 use super::debugger::{self, Hold};
 use super::include::{report_include, resolve_include};
-use super::prepare::{Item, PlayPlan, Prepared, failure_text, pause_of, prepare, retry_name};
+use super::prepare::{Item, PlayPlan, Prepared, failed_result, pause_of, prepare, retry_name};
 use super::report::report_task;
 use super::run::{
     Attempt, DISCOVERED_INTERPRETER, DISCOVERY_HELP, ItemRetry, PluginStart, Polled, Relinker,
@@ -584,8 +584,7 @@ pub(super) async fn drive_host(
                             // A `when` that cannot be read fails the statement for this host,
                             // after the splice it still owes the others, like a failed include.
                             Err(err) => {
-                                let results =
-                                    vec![(None, TaskResult::failed_with(failure_text(&err)))];
+                                let results = vec![(None, failed_result(&err))];
                                 let rescuable = rescue_target(&c, pos).is_some();
                                 if let Some(result) = report_task(
                                     &tx,
@@ -2420,9 +2419,10 @@ pub(super) async fn drive_host(
             // reports `Task failed: Error while evaluating conditional: ...`, so a playbook
             // testing `'Task failed' in result.msg` must still see it. `failed_when` does not get
             // it: there the reference leaves `msg` empty and fills `failed_when_result`.
-            let mut result = TaskResult::failed_with(failure_text(&err));
-            if let Some(causes) =
-                debugger::causes(task, &err.0).or_else(|| throttle::causes(task, &err.0))
+            let mut result = failed_result(&err);
+            if let Some(causes) = debugger::causes(task, &err.0)
+                .or_else(|| throttle::causes(task, &err.0))
+                .or_else(|| super::prepare::undefined_causes(task, &err.0))
             {
                 result.0.insert(crate::render::CHAIN_KEY.into(), causes);
             } else if let Some(detail) = err.0.strip_prefix("Task failed: ")
