@@ -189,10 +189,6 @@ impl Templar {
         found
     }
 
-    pub fn is_template(text: &str) -> bool {
-        text.contains("{{") || text.contains("{%")
-    }
-
     /// Renders a string. Exactly one `{{ expression }}` gives the expression's value with its
     /// type; text around or between expressions gives a string.
     pub fn render<'a>(
@@ -227,7 +223,7 @@ impl Templar {
                 break;
             }
             let Value::String(text) = &value else { break };
-            if !Self::is_template(text) {
+            if !Self::holds_expression(text) {
                 break;
             }
             let before = reads(ctx);

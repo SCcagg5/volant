@@ -76,6 +76,19 @@ A value also answers a handful of Python methods: `.split()`, `.startswith()` an
 
 `difference`, `intersect` and `union` build a Python `set` in ansible-core, whose order is its own: small integers happen to come out sorted, and strings come out in an order that changes with `PYTHONHASHSEED` from one run to the next. Volant sorts the result when every element is an integer, which matches every integer case measured, and otherwise keeps the order in which the elements first appeared. On strings, that order is not guaranteed to match a given run of ansible-core.
 
+## Strings that hold blocks
+
+Volant renders any string that holds `{{`, `{%` or `{#`, in a variable, a fact, a task argument, a loop or an extra variable. It renders them as ansible-core does:
+
+- `trim_blocks` is on and `lstrip_blocks` is off. The newline after a `{% ... %}` line is dropped, so a block scalar with a `{% for %}` loop gives one line for each pass and none for the tags.
+- A result made of one `{{ }}` and nothing else keeps its type, even when statements or comments surround it. `{% set a = [1, 2] %}{{ a }}` is a list. A result made of text, or of several expressions, is a string.
+- A result with no output at all is `none`. `{% if false %}x{% endif %}` and `{# note #}` are `none`, not an empty string.
+- One newline at the end of the string is not part of the result when the result is not a string: `"{{ [1, 2] }}\n"` is a list. `{{-` and `-}}` strip the whitespace around the tag, so `{{- x -}}` with a newline after it is also one value, and the `-` is never a minus sign.
+- `{#` starts a comment. A comment that opens at the very end of the string and never closes is accepted and means nothing. Anything else that is unterminated is a syntax error. To write `{#` as text, use `{{ '{#' }}`: a result that holds `{#` is not rendered again, and neither is a stored variable or fact whose `{#` has no `#}` after it.
+- A string such as `echo ${#items[@]}` fails with a syntax error, as it does in ansible-core. Wrap it in `{% raw %}` or mark it `!unsafe`. ansible-core refuses a `command` or `shell` task that holds one while it loads the tasks, with exit code 4. Volant refuses it when the task runs, with exit code 2, so the tasks before it run first.
+
+A registered result and any other text from a managed host stays text: it is never rendered. See [Trusted and untrusted values](/variables/trust/).
+
 ## Regular expressions
 
 `regex_replace`, `regex_search`, `regex_findall` and the tests `match`, `search` and `regex` read Python `re` patterns. Volant rewrites the pattern for the Rust `regex` crate and walks the matches the way Python 3.7 and later does. Group handling, empty matches, replacement strings (`\1`, `\g<name>`, a literal `$`) and the arguments, including the flags by position, follow ansible-core.
@@ -131,7 +144,8 @@ The file's own trailing newline survives the render. [Action plugins](/reference
 - A value under `!unsafe` is data and is never templated. A `!vault` value is decrypted; see [Vault](/variables/vault/).
 - The `inventory_hostnames` and `varnames` lookups are not supported yet.
 - In a template file, `template_host`, `template_uid`, `template_run_date` and `template_mtime` are not set, unlike `template_path`, `template_fullpath` and `ansible_managed`.
-- In a template file, `{% include %}` and `{% import %}` fail: nothing loads a second file during a render.
+- `{% include %}` and `{% import %}` fail, in a template file and in a string: nothing loads a second file during a render. ansible-core loads the file from the playbook directory.
+- A `{% set x %}...{% endset %}` block in a string makes the result a string even when the rest is one expression.
 - `line_statement_prefix` and `line_comment_prefix` in a `#jinja2:` line are refused by name. minijinja and Jinja2 differ on a blank line after a line statement and on the newline of a line comment.
 - A delimiter longer than 64 characters and a `#jinja2:` line longer than 16 KiB are refused with an error that names the option. Parentheses in a `#jinja2:` value nest to 200 levels, as in Python.
 - A `variable_end_string` or `block_end_string` that begins with whitespace is refused by name. An empty delimiter is refused too, where Jinja2 reads it in a way that depends on the template.

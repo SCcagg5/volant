@@ -810,6 +810,265 @@
 - template: "{{ r }}|{% raw %}{{ r }}{% endraw %}"
   untrusted: {r: "{% raw %}{{ x }}{% endraw %}{{ x }}"}
   vars: {x: 5}
+# Statement blocks and comments in a string: ansible-core renders any string that holds `{{`, `{%`
+# or `{#`, with trim_blocks on and lstrip_blocks off. A result that is one output node keeps its
+# type, no node at all is none, and text around nodes makes a string.
+- template: "{% for i in [1, 2] %}{{ i }},{% endfor %}"
+- template: "[{% for i in [1, 2] %}{{ i }}{% if not loop.last %}, {% endif %}{% endfor %}]"
+- template: "{% set a = [1, 2] %}{{ a }}"
+- template: "{% set ns = namespace(r=[]) %}{% for i in [1, 2, 3] %}{% set ns.r = ns.r + [i] %}{% endfor %}{{ ns.r }}"
+- template: "{% set d = {'k': 1} %}{{ d }}"
+- template: "{% if true %}[1, 2]{% endif %}"
+- template: "{% if true %}42{% endif %}"
+- template: "{% if false %}x{% endif %}"
+- template: "{% set a = 1 %}"
+- template: "{% set a = 1 %}{{ a }}"
+- template: "{% set a = 1 %}\n{{ a }}"
+- template: "{% if true %}{{ [1] }}{% endif %}"
+- template: "{% for i in [1, 2] %}{{ [i] }}{% endfor %}"
+- template: "{% if true %}{{ none }}{% endif %}"
+- template: "{% macro m(x) %}<{{ x }}>{% endmacro %}{{ m(5) }}"
+- template: "{% macro w() %}[{{ caller() }}]{% endmacro %}{% call w() %}in{% endcall %}"
+- template: "{# only a comment #}"
+- template: "a{# c #}b"
+- template: "a{# c #}\nb"
+- template: "{{ [1, 2] }}{# c #}"
+- template: "{# c #}{{ [1, 2] }}"
+- template: "x {# unterminated"
+- template: "echo ${#x[@]}"
+- template: "a  {%- if true -%}  b  {%- endif -%}  c"
+- template: "x\n  {%- if true %}\ny\n{%- endif %}\nz"
+- template: "a\n{% if true %}\nb\n{% endif %}\nc\n"
+- template: "{% for i in [1, 2] %}\nl{{ i }}\n{% endfor %}\n"
+- template: "a\n  {% if true %}\nb\n  {% endif %}\nc\n"
+- template: "{% if true %}x{% endif %}\n"
+- template: "127.0.0.1 localhost\n{% for h in hosts %}\n10.0.0.{{ loop.index }} {{ h }}\n{% endfor %}\n# end\n"
+  vars: {hosts: [a, b]}
+- template: "{{ [1, 2] }}\n"
+- template: "{{ [1, 2] }}\n\n"
+- template: "\n{{ [1, 2] }}"
+- template: "{{ [1, 2] }} "
+- template: "{% set a = [1, 2] %}\n{{ a }}\n"
+- template: "{{ v }}"
+  vars: {v: "{% for i in [1, 2] %}{{ i }},{% endfor %}"}
+- template: "{{ v }}"
+  vars: {v: "{% set a = [1, 2] %}{{ a }}"}
+- template: "{{ v }}"
+  vars: {v: "{% if false %}x{% endif %}"}
+- when: "{% if true %}true{% endif %}"
+# A `{#` inside a string literal is text, and a result that holds one is not rendered again.
+- template: "{{ '{#' }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ '{#' ~ s }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "a {{ '{#' }} b"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ 'a{#b' }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ ['{#'] }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ s ~ '#}' }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ v }}"
+  vars: {v: "{{ '{#' }}"}
+# An unterminated `{#` that ends the string is a comment with nothing in it. Anything after it is an error.
+- template: "{#"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{#\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{#+"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{#-"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "x {#"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "x {#\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "x{#-"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "x {#-"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "x{#+"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x }}{#"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "a\n{#"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{# "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "x {# "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{#x"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{# x"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "a {#+ b"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{#{#"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{# c #}{#"
+  vars: {x: 5, s: abc, l: [1, 2]}
+# Whitespace control around a lone expression: `{{-` strips the text before it, `-}}` the text after it.
+- template: "{{ x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x }}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x }} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x }}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x }}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x -}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x -}} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x -}}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x -}}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x }}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x }} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x }}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x }}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x -}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x -}} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x -}}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x -}}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x }}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x }} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x }}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x }}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x -}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x -}} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x -}}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x -}}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x }}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x }} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x }}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x }}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x -}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x -}} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x -}}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x -}}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x }}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x }} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x }}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x }}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x -}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x -}} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x -}}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x -}}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x }}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x }} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x }}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x }}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x -}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x -}} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x -}}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x -}}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- l }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ l -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "  {{- l -}}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{-x}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x-}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{--x}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ - x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- - x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x - 1 }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x -}}{{ x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x }}{{- x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x -}} {{ x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x -}}\n{{ x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n {{- x }}\n{%- if true %}\ny{% endif %}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x -}}{# c #}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{# c #}{{- x -}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- 's' -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- none -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- '' -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{%- if true -%}{{- x -}}{%- endif -%}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
 # A variable whose value is a template is rendered when a template reads it, so a filter or an
 # operator sees the final value.
 - template: "{{ s }}"
