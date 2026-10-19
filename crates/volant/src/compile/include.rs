@@ -208,8 +208,13 @@ pub(crate) fn graft(
         base.roles.extend(sub.roles);
         // Behind the play's own, measured: a play handler and an included role's handler notified
         // in that order run in that order. Appending is also what keeps every index a host is
-        // already carrying in its notification list pointing at the handler it named.
-        base.handlers.extend(sub.handlers);
+        // already carrying in its notification list pointing at the handler it named. The role a
+        // handler belongs to was numbered from zero with the rest of the expansion.
+        base.handlers
+            .extend(sub.handlers.into_iter().map(|mut handler| {
+                handler.role = handler.role.map(|r| r + role_offset);
+                handler
+            }));
     }
     base.splice(at, steps.clone());
     base.blocks.extend(spans);
