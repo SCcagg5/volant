@@ -47,7 +47,7 @@ A file that only a dynamic `include_tasks` or `include_role` names is read when 
 | Delegation | `delegate_to`, `delegate_facts`, `local_action`, `run_once` | |
 | Modules | `command`, `shell`, `raw`, controller modules, `copy`, `dnf`, `fetch`, `package`, `reboot`, `service`, `template`, `unarchive`, most ansible-core Python modules, modules from installed collections | a few modules backed by an action plugin: `uri`, `script` and others, and a collection's own action plugins |
 | Inventories | INI, YAML and TOML files, directories, scripts, `constructed`, `generator` and collection plugins, several `-i`, `group_vars`, `host_vars`, the `jsonfile` fact cache | none left |
-| Connections | `ssh` with keys, an ssh-agent or a password (`-k`, needs OpenSSH 8.4 or later), `local` | the `ansible_password` variable, Windows, network devices |
+| Connections | `ssh` with keys, an ssh-agent or a password (`-k` or `ansible_password`, needs OpenSSH 8.4 or later), `local` | Windows, network devices |
 | Escalation | `become` through `sudo` or `su`, with or without a password | `doas` and other methods |
 | Templating | Jinja2 with the common Ansible filters, tests and lookups | `!unsafe`, some filters such as `hash` or `password_hash`, filters and lookups from collections |
 | Run modes | normal runs, [`--check` and `--diff`](/playbooks/check-and-diff/), [vault](/variables/vault/), `--start-at-task`, `--step`, the four listing commands | none left |
