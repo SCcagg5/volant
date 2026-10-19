@@ -2,7 +2,7 @@
 //! The variables one host runs a task with.
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value};
 
@@ -73,7 +73,17 @@ pub(in crate::executor) fn host_vars(
                 .iter()
                 .flat_map(|p| p.untrusted.iter().cloned()),
         );
-        let untrusted_hosts = store.untrusted_hosts();
+        let mut untrusted_hosts = store.untrusted_hosts();
+        // A name that holds a template is text a managed host handed to a `delegate_to`: no
+        // inventory names a host that way, and the reference reads it as a host name, prints it
+        // and fails to connect to it. The view of such a host is data end to end: its own
+        // identity, and the `hostvars` entry that carries the same name, are never rendered.
+        if Templar::is_template(host) {
+            untrusted.extend(["inventory_hostname", "inventory_hostname_short"].map(String::from));
+            let mut hosts = (*untrusted_hosts).clone();
+            hosts.insert(host.to_string());
+            untrusted_hosts = Arc::new(hosts);
+        }
         let layers = store.layered_for_host(host, &scope);
         HostVars {
             map: layers.map,
