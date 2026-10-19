@@ -1229,6 +1229,63 @@ fn a_raw_block_in_text_from_a_host_is_never_rendered() {
     );
 }
 
+/// What the reference renders: any string that holds `{{`, `{%` or `{#`, and no other brace.
+#[test]
+fn a_template_is_a_string_with_an_opening_tag() {
+    for (text, want) in [
+        ("{{ x }}", true),
+        ("a {% if x %}b{% endif %}", true),
+        ("{# note #}", true),
+        ("${#list[@]}", true),
+        ("x {", false),
+        ("{ {", false),
+        ("{x} {y}", false),
+        ("#{ {", false),
+        ("", false),
+    ] {
+        assert_eq!(Templar::is_template(text), want, "{text:?}");
+    }
+}
+
+/// A syntax error far along one line used to overflow the lexer's column counter, which panics in
+/// a debug build. The render must give an error, for any length.
+#[test]
+fn a_very_long_broken_line_is_an_error_not_a_panic() {
+    let t = templar();
+    for unit in ["{#", "{{ ", "{% "] {
+        for count in [32_768, 70_000] {
+            let text = unit.repeat(count);
+            assert!(t.render(&text, &Map::new()).is_err(), "{unit:?} x {count}");
+        }
+    }
+}
+
+/// Text an expression made, stored as a variable, is read back as it was: a `{#` at its end is
+/// not an open comment to cut once more. A complete comment in a variable is still rendered.
+#[test]
+fn a_stored_string_ending_in_an_open_comment_is_kept() {
+    let t = templar();
+    let stored = vars(json!({"a": "x{#", "b": "{#", "c": "y{#-", "d": "z{#+", "e": "{# c #}w"}));
+    let (resolved, _) = t.resolve_vars_tainted(&stored);
+    assert_eq!(
+        Value::Object(resolved),
+        json!({"a": "x{#", "b": "{#", "c": "y{#-", "d": "z{#+", "e": "w"})
+    );
+    assert_eq!(t.render("{{ a }}", &stored).unwrap(), json!("x{#"));
+}
+
+/// A comment that opens at the end of a very long line is still an open comment, not a failure
+/// of the panic guard.
+#[test]
+fn an_open_comment_ends_a_very_long_line() {
+    let t = templar();
+    let text = format!("{}{{#", "a".repeat(70_000));
+    assert_eq!(
+        t.render(&text, &Map::new()).unwrap(),
+        json!("a".repeat(70_000))
+    );
+}
+
 /// A variable whose value is a template is rendered when a template reads it, so a filter or an
 /// operator sees the final value, in play vars, mappings and lists alike, as in ansible-core.
 #[rstest::rstest]

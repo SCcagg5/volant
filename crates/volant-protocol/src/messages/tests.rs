@@ -70,6 +70,56 @@ fn a_result_fails_by_the_reference_s_own_rule() {
     );
 }
 
+/// `failed_when_result` decides a task when a result carries one (ansible-core 2.19.12): retries
+/// that ran out pass under `failed_when: false`, and in a loop only the carriers decide.
+#[test]
+fn a_task_fails_by_failed_when_result_when_it_has_one() {
+    let results = |shapes: &[Value]| -> Vec<TaskResult> {
+        shapes
+            .iter()
+            .map(|shape| TaskResult(shape.as_object().expect("an object").clone()))
+            .collect()
+    };
+    let cases = [
+        (
+            vec![json!({"failed": true, "failed_when_result": false})],
+            false,
+        ),
+        (
+            vec![json!({"failed": false, "failed_when_result": true})],
+            true,
+        ),
+        (
+            vec![json!({"failed": true, "failed_when_result": "Error while evaluating"})],
+            true,
+        ),
+        (vec![json!({"failed": true})], true),
+        (
+            vec![
+                json!({"failed": true, "failed_when_result": false}),
+                json!({"failed": true}),
+            ],
+            false,
+        ),
+        (
+            vec![
+                json!({"failed": true, "failed_when_result": false}),
+                json!({"failed": false, "failed_when_result": true}),
+            ],
+            true,
+        ),
+    ];
+    for (shapes, fails) in cases {
+        let rs = results(&shapes);
+        let decided = failed_when_decides(&rs);
+        assert_eq!(
+            rs.iter().any(|r| r.is_failed_among(decided)),
+            fails,
+            "{shapes:?}"
+        );
+    }
+}
+
 /// The native fields are additive: absent on the wire when empty, defaulted when an older peer
 /// omits them.
 #[test]

@@ -29,12 +29,12 @@ pub(super) use interpreter::{
     discovery_warning, python_for, requested_interpreter, running_host_vars, silent_discovery,
     stamp_discovery, step_tasks,
 };
-pub(super) use judge::{break_after, broke_before, empty_loop_result, finish, loops};
+pub(super) use judge::{break_after, broke_before, empty_loop_result, finish, loops, task_fails};
 pub(super) use links::reuse_or_connect;
 pub(super) use local::{run_local, set_fact_names};
 pub(super) use output::asks_to_be_hidden;
-pub(super) use output::classify;
 pub(crate) use output::{RAISED_SKIP, drop_internal_keys};
+pub(super) use output::{classify, classify_as};
 #[cfg(test)]
 pub(super) use plugin::protocol_task;
 pub(super) use plugin::{PluginStart, run_plugin_attempts, wait_or_stop};
