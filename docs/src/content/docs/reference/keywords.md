@@ -16,6 +16,8 @@ Volant loads a playbook against the whole ansible-core 2.19 grammar, so it parse
 
 A keyword inside a file that only a dynamic `include_tasks` or `include_role` names is checked when a host reaches that statement: if it is not supported yet, the statement fails for that host, a `rescue` around it can catch the failure, and nothing in the file runs. See [Includes and imports](/playbooks/includes/).
 
+A keyword that takes a boolean or a number may be written as a template: `become`, `no_log`, `run_once`, `any_errors_fatal`, `ignore_unreachable`, `delegate_facts`, `timeout`, `async` and `poll`. It is rendered for each host when its task runs, once the task's `when` has held, and a value the keyword cannot take fails the task with the reference's sentence. `gather_facts` and `force_handlers` of a play are rendered when the play starts. A literal that is not a boolean is refused when the playbook loads.
+
 This page is generated from the tables the loader and the pre-flight read, so it always describes the release it ships with.
 
 ## All keywords
@@ -125,7 +127,11 @@ Each keyword below behaves the same way in every place the grid marks it `partia
 
 | Keyword | Limit |
 |---|---|
+| `any_errors_fatal` | A template counts as true whatever it renders to, as ansible-core 2.19 reads it, and the task then fails on a value that is not a boolean |
 | `debugger` | `p` and a line that is not a command evaluate a subset of Python: names, literals, indexing, attributes, assignments and the calls the prompt needs. `task_vars` edited at the prompt reach a redo through `u` only |
+| `gather_facts` | A template is rendered once, when the play starts, with the play's variables. The play still counts as one that may gather facts, so it needs ansible-core to be there |
+| `no_log` | A template is rendered for each host when its task runs. In a loop, one item that hides hides every item, where ansible-core hides each item by its own value |
+| `run_once` | A template is read for each host of the batch, and the first host it is true for runs the task. A template that is true for some hosts and false for others ends the run, where ansible-core also runs the hosts in front of the first. Under `free` and `host_pinned` a template is ignored without the warning a literal gets |
 
 ## Handlers
 
