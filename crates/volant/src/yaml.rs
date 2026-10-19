@@ -9,6 +9,8 @@ use anyhow::{Context, anyhow, bail};
 use saphyr::{Mapping, MarkedYaml, Scalar, Yaml, YamlData, YamlLoader};
 use serde_json::{Map, Value};
 
+mod limits;
+
 /// Loads every document of `text`. Errors name `source`.
 ///
 /// A key written twice in one mapping keeps its last value, as PyYAML does for ansible-core
@@ -25,8 +27,7 @@ pub fn load<'a>(text: &'a str, source: &str) -> anyhow::Result<Vec<Yaml<'a>>> {
 fn marked<'a>(text: &'a str, source: &str) -> anyhow::Result<Vec<MarkedYaml<'a>>> {
     let mut loader = YamlLoader::<MarkedYaml>::default();
     loader.allow_duplicate_keys(true);
-    saphyr_parser::Parser::new_from_str(text)
-        .load(&mut loader, true)
+    limits::feed(text, &mut loader)
         .and_then(|()| loader.error().cloned().map_or(Ok(()), Err))
         .with_context(|| format!("{source}: invalid YAML"))?;
     Ok(loader.into_documents())
