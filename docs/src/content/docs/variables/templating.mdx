@@ -54,6 +54,18 @@ A value also answers a handful of Python methods: `.split()`, `.startswith()` an
 
 `difference`, `intersect` and `union` build a Python `set` in ansible-core, whose order is its own: small integers happen to come out sorted, and strings come out in an order that changes with `PYTHONHASHSEED` from one run to the next. Volant sorts the result when every element is an integer, which matches every integer case measured, and otherwise keeps the order in which the elements first appeared. On strings, that order is not guaranteed to match a given run of ansible-core.
 
+## Strings that hold blocks
+
+Volant renders any string that holds `{{`, `{%` or `{#`, in a variable, a fact, a task argument, a loop or an extra variable. It renders them as ansible-core does:
+
+- `trim_blocks` is on and `lstrip_blocks` is off. The newline after a `{% ... %}` line is dropped, so a block scalar with a `{% for %}` loop gives one line for each pass and none for the tags.
+- A result made of one `{{ }}` and nothing else keeps its type, even when statements or comments surround it. `{% set a = [1, 2] %}{{ a }}` is a list. A result made of text, or of several expressions, is a string.
+- A result with no output at all is `none`. `{% if false %}x{% endif %}` and `{# note #}` are `none`, not an empty string.
+- One newline at the end of the string is not part of the result when the result is not a string: `"{{ [1, 2] }}\n"` is a list.
+- `{#` starts a comment. A string such as `echo ${#items[@]}` fails with a syntax error, as it does in ansible-core. Wrap it in `{% raw %}` or mark it `!unsafe`.
+
+A registered result and any other text from a managed host stays text: it is never rendered. See [Trusted and untrusted values](/variables/trust/).
+
 ## Rendering a template file
 
 The `template` module and `lookup('template')` share one render, and it differs from a task argument's render in one way: it renders the file's text **once**. A task argument goes through further passes, which is how a value that still holds `{{ ... }}` after rendering can be read as a template again. A template file does not get that second pass, so a value a managed host contributed lands in the written file as plain text and never runs as a template of its own.
@@ -76,7 +88,8 @@ The file's own trailing newline survives the render. [Action plugins](/reference
 - A value under `!unsafe` is data and is never templated. A `!vault` value is decrypted; see [Vault](/variables/vault/).
 - The `inventory_hostnames` and `varnames` lookups are not supported yet.
 - In a template file, `template_host`, `template_uid`, `template_run_date` and `template_mtime` are not set, unlike `template_path`, `template_fullpath` and `ansible_managed`.
-- In a template file, `{% include %}` and `{% import %}` fail: nothing loads a second file during a render.
+- `{% include %}` and `{% import %}` fail, in a template file and in a string. ansible-core loads the file from the playbook directory.
+- A `{% set x %}...{% endset %}` block in a string makes the result a string even when the rest is one expression.
 - The six delimiter options (`variable_start_string` and its five relatives) and an `output_encoding` other than UTF-8 are not supported yet.
 
 ## Performance on large inventories
