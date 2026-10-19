@@ -8141,6 +8141,102 @@
   },
   {
     "case": {
+      "template": ">{% set l = [[]] %}{% set _ = (l | first).append(1) %}{{ l }}"
+    },
+    "result": ">[[]]"
+  },
+  {
+    "case": {
+      "template": ">{% set l = [[]] %}{% set m = l | list %}{% set _ = m[0].append(1) %}{{ l }}{{ m }}"
+    },
+    "result": ">[[]][[1]]"
+  },
+  {
+    "case": {
+      "template": ">{% set l = [[]] %}{% set m = l | reverse | list %}{% set _ = m[0].append(1) %}{{ l }}"
+    },
+    "result": ">[[]]"
+  },
+  {
+    "case": {
+      "template": ">{% set d = {'a': [1]} %}{% set c = d | combine({}) %}{% set _ = c.a.append(2) %}{{ d }}{{ c }}"
+    },
+    "result": ">{'a': [1]}{'a': [1, 2]}"
+  },
+  {
+    "case": {
+      "template": ">{% set d = {'a': [1]} %}{% for v in d.values() %}{% set _ = v.append(2) %}{% endfor %}{{ d }}"
+    },
+    "result": ">{'a': [1]}"
+  },
+  {
+    "case": {
+      "template": ">{% set l = [[1], [2]] %}{% set m = [l] %}{% set _ = l[0].append(9) %}{{ m }}"
+    },
+    "result": ">[[[1, 9], [2]]]"
+  },
+  {
+    "case": {
+      "template": ">{% set l = [1] %}{% set m = [l, l] %}{% set _ = l.append(2) %}{{ m }}"
+    },
+    "result": ">[[1, 2], [1, 2]]"
+  },
+  {
+    "case": {
+      "template": ">{% set l = [1] %}{% set d = {'k': l} %}{% set _ = l.append(2) %}{{ d }}"
+    },
+    "result": ">{'k': [1, 2]}"
+  },
+  {
+    "case": {
+      "template": ">{% set l = [[1]] %}{{ l.remove(l) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: list.remove(x): x not in list"
+  },
+  {
+    "case": {
+      "template": ">{% set l = [[1]] %}{% set _ = l.extend(l) %}{% set _ = l[0].append(2) %}{{ l }}"
+    },
+    "result": ">[[1, 2], [1]]"
+  },
+  {
+    "case": {
+      "template": ">{% set l = [1] %}{% for i in range(5) %}{% set _ = l.append(l.copy()) %}{% endfor %}{{ l | length }}{{ l[5] | length }}{{ l }}"
+    },
+    "result": ">65[1, [1], [1, [1]], [1, [1], [1, [1]]], [1, [1], [1, [1]], [1, [1], [1, [1]]]], [1, [1], [1, [1]], [1, [1], [1, [1]]], [1, [1], [1, [1]], [1, [1], [1, [1]]]]]]"
+  },
+  {
+    "case": {
+      "template": ">{% set l = [1, 2, 1] %}{{ l.index(1) }}{{ l.index(1, 1) }}{{ l.count(1) }}{{ l.count([1]) }}{{ l.count(l) }}"
+    },
+    "result": ">02200"
+  },
+  {
+    "case": {
+      "template": ">{% set l = [[1], [2]] %}{{ l.index([2]) }}{{ l.count([1]) }}{% set _ = l.remove([1]) %}{{ l }}"
+    },
+    "result": ">11[[2]]"
+  },
+  {
+    "case": {
+      "template": ">{% set d = {} %}{{ d.setdefault(d, 1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: unhashable type: '_AnsibleLazyTemplateDict'"
+  },
+  {
+    "case": {
+      "template": ">{% set d = {} %}{{ d.update([[d, 1]]) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: unhashable type: '_AnsibleLazyTemplateDict'"
+  },
+  {
+    "case": {
+      "template": ">{% set d = {} %}{{ d.get(d) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: unhashable type: '_AnsibleLazyTemplateDict'"
+  },
+  {
+    "case": {
       "template": ">{% set _ = d.update({'b': 2}) %}{{ d }}",
       "vars": {
         "d": {

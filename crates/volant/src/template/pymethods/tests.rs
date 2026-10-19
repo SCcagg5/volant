@@ -52,3 +52,52 @@ fn only_a_literal_that_json_carries_back_is_routed() {
     let int_key = Value::from_iter([(Value::from(1), Value::from("a"))]);
     assert!(!is_literal(&int_key));
 }
+
+/// Runs `f` on its own thread and fails when it has not finished in `secs`, so that a hang shows
+/// as a failure and not as a run that never ends.
+fn within<T: Send + 'static>(secs: u64, f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(secs))
+        .expect("the template did not finish")
+}
+
+fn render(template: &'static str) -> Result<serde_json::Value, String> {
+    within(20, move || {
+        crate::testing::templar()
+            .render(template, &serde_json::Map::new())
+            .map_err(|e| e.0)
+    })
+}
+
+/// A list or mapping that is handed to its own method (as the item to remove, or as a key) is
+/// compared and hashed while the method holds it. That used to wait on itself for ever.
+#[test]
+fn a_container_given_to_its_own_method_does_not_wait_on_itself() {
+    let err = render("{% set l = [[1]] %}{{ l.remove(l) }}").unwrap_err();
+    assert!(err.contains("not in list"), "{err}");
+    for template in [
+        "{% set d = {} %}{{ d.setdefault(d, 1) }}",
+        "{% set d = {} %}{{ d.update([[d, 1]]) }}",
+        "{% set d = {} %}{{ d.get(d) }}",
+    ] {
+        let err = render(template).unwrap_err();
+        assert!(err.contains("unhashable type: 'dict'"), "{template}: {err}");
+    }
+    assert_eq!(
+        render(">{% set l = [[1]] %}{% set _ = l.extend(l) %}{% set _ = l[0].append(2) %}{{ l }}"),
+        Ok(json!(">[[1, 2], [1]]"))
+    );
+}
+
+/// A copy of a list that holds copies of it shares them as a graph: twenty-eight rounds used to
+/// take nine seconds, because each copy walked the structure as a tree.
+#[test]
+fn copying_a_list_that_holds_copies_of_itself_is_linear() {
+    let out = render(
+        "{% set l = [1] %}{% for i in range(60) %}{% set _ = l.append(l.copy()) %}{% endfor %}{{ l | length }}",
+    );
+    assert_eq!(out, Ok(json!(61)));
+}
