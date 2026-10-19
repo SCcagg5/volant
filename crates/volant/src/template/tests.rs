@@ -1002,3 +1002,19 @@ fn dict_keeps_integer_keys_beyond_64_bits_apart() {
         json!(1)
     );
 }
+
+/// An iterable longer than the limit is refused, and one at the limit is not.
+#[test]
+fn dict_takes_a_bounded_number_of_pairs_from_one_iterable() {
+    let pairs = |n: i64| -> minijinja::Value {
+        minijinja::Value::from_iter((0..n).map(|i| minijinja::Value::from_iter([i, i])))
+    };
+    let at_limit = globals::build(vec![pairs(3)], 3).unwrap();
+    assert_eq!(at_limit.len(), Some(3));
+    let err = globals::build(vec![pairs(4)], 3).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("dict() takes at most 3 pairs from one iterable"),
+        "{err}"
+    );
+}
