@@ -107,9 +107,14 @@ const STATS_KEY: &str = "ansible_stats";
 /// Keyed on the action's name and never on the keys alone: a managed host's module result can
 /// carry any key, and `add_host` among them is a restricted one that is taken out of its facts.
 /// A failed task, or one of its loop items, applies nothing, as in the reference.
+///
+/// A name whose argument read a value that came from a managed host is data, whatever it holds:
+/// `items` carry which arguments did. A name that holds a template is data too, which the
+/// store sees for itself.
 pub(in crate::executor) fn record_inventory_results(
     vars: &mut VarStore,
     task: &PlayTask,
+    items: &[Item],
     host: &str,
     results: &[(Option<Value>, TaskResult)],
 ) {
@@ -127,7 +132,16 @@ pub(in crate::executor) fn record_inventory_results(
             .filter_map(|v| v.as_str().map(str::to_string))
             .collect()
     };
-    for (_, result) in results.iter().filter(|(_, r)| !r.skipped()) {
+    for (i, (_, result)) in results
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, r))| !r.skipped())
+    {
+        let from_data = |keys: &[&str]| {
+            items
+                .get(i)
+                .is_some_and(|item| keys.iter().any(|k| item.args_untrusted.contains(*k)))
+        };
         match kind {
             "add_host" => {
                 let Some(added) = result.0.get("add_host").and_then(Value::as_object) else {
@@ -141,11 +155,32 @@ pub(in crate::executor) fn record_inventory_results(
                     .and_then(Value::as_object)
                     .cloned()
                     .unwrap_or_default();
-                vars.add_host(name, &names(added.get("groups")), &host_vars);
+                let groups = names(added.get("groups"));
+                vars.add_host(name, &groups, &host_vars);
+                let hosts = if from_data(&["name", "hostname", "host"]) {
+                    vec![name]
+                } else {
+                    Vec::new()
+                };
+                let groups = if from_data(&["groups", "group", "groupname"]) {
+                    groups.iter().map(String::as_str).collect()
+                } else {
+                    Vec::new()
+                };
+                vars.mark_data_names(&hosts, &groups);
             }
             "group_by" => {
                 if let Some(group) = result.0.get("add_group").and_then(Value::as_str) {
-                    vars.add_to_group(host, group, &names(result.0.get("parent_groups")));
+                    let parents = names(result.0.get("parent_groups"));
+                    vars.add_to_group(host, group, &parents);
+                    let mut marked = Vec::new();
+                    if from_data(&["key"]) {
+                        marked.push(group);
+                    }
+                    if from_data(&["parents"]) {
+                        marked.extend(parents.iter().map(String::as_str));
+                    }
+                    vars.mark_data_names(&[], &marked);
                 }
             }
             _ => {

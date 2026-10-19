@@ -33,6 +33,23 @@ pub fn short_name(module: &str) -> &str {
         .unwrap_or(module)
 }
 
+/// The builtin names ansible-core routes to another builtin, as `(name, target)`. Measured on
+/// ansible-core 2.19.12 from `plugin_routing` in `ansible_builtin_runtime.yml`: `yum` is a
+/// redirect to the `dnf` action and has no module or documentation of its own. The test-only
+/// redirects of that file are left out.
+pub const BUILTIN_REDIRECTS: &[(&str, &str)] = &[("yum", "dnf")];
+
+/// The builtin a name runs: [`short_name`], then the redirect ansible-core keeps for it.
+/// `module_defaults` and the facts a task reads or writes follow the target, while the name
+/// a task wrote stays what messages and `ansible_failed_task` show.
+pub fn resolved_name(module: &str) -> &str {
+    let short = short_name(module);
+    BUILTIN_REDIRECTS
+        .iter()
+        .find(|(name, _)| *name == short)
+        .map_or(short, |(_, target)| target)
+}
+
 pub fn native(module: &str) -> Option<&'static ModuleSpec> {
     let short = short_name(module);
     NATIVE_MODULES.iter().find(|m| m.name == short)

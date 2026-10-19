@@ -10,6 +10,37 @@ fn check_raw_keeps_every_other_word_in_the_line() {
     assert_eq!(raw.as_deref(), Some("run.sh a=1 'b c'"));
 }
 
+/// The command line of `command` and `shell`, row by row as `parse_kv(.., check_raw=True)` of
+/// ansible-core 2.19.12 returns it.
+#[rstest::rstest]
+#[case::creates("echo hi creates=/etc/passwd", &[("creates", "/etc/passwd")], Some("echo hi"))]
+#[case::chdir_first("chdir=/etc pwd", &[("chdir", "/etc")], Some("pwd"))]
+#[case::double_quoted("echo hi creates=\"/tmp/a b\"", &[("creates", "/tmp/a b")], Some("echo hi"))]
+#[case::single_quoted("pwd chdir='/tmp/a b'", &[("chdir", "/tmp/a b")], Some("pwd"))]
+#[case::template("echo hi creates={{ p ~ ' x' }}", &[("creates", "{{ p ~ ' x' }}")], Some("echo hi"))]
+#[case::block("echo hi {% if a %}x{% endif %} removes=/y", &[("removes", "/y")], Some("echo hi {% if a %}x{% endif %}"))]
+#[case::other_key("echo foo=bar cmd=x", &[], Some("echo foo=bar cmd=x"))]
+#[case::quoted_other_key("echo 'a=b c' creates=/x", &[("creates", "/x")], Some("echo 'a=b c'"))]
+#[case::escaped_equals("echo a\\=b creates=/x", &[("creates", "/x")], Some("echo a=b"))]
+#[case::spaces_kept("echo  a   b creates=/x", &[("creates", "/x")], Some("echo  a   b"))]
+#[case::newline_kept("echo a\necho b creates=/x", &[("creates", "/x")], Some("echo a\necho b"))]
+#[case::all_options(
+    "x creates=/a removes=/b chdir=/c executable=/bin/bash stdin=in strip_empty_ends=false",
+    &[("creates", "/a"), ("removes", "/b"), ("chdir", "/c"), ("executable", "/bin/bash"), ("stdin", "in"), ("strip_empty_ends", "false")],
+    Some("x")
+)]
+#[case::only_options("creates=/a", &[("creates", "/a")], None)]
+#[case::empty("", &[], None)]
+fn a_command_line_gives_up_only_the_command_options(
+    #[case] line: &str,
+    #[case] options: &[(&str, &str)],
+    #[case] raw: Option<&str>,
+) {
+    let (got, rest) = parse_kv_raw(line).unwrap();
+    assert_eq!(got, pairs(options), "{line}");
+    assert_eq!(rest.as_deref(), raw, "{line}");
+}
+
 fn kv(args: &str) -> Vec<(String, String)> {
     parse_kv(args).unwrap().0
 }

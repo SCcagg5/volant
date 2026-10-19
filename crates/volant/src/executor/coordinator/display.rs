@@ -88,6 +88,23 @@ pub(super) fn switch_header(
     );
 }
 
+/// Files what the coordinator learns from a result when it reads it, and hands the event back: a
+/// failed task that counts fails the host for the exit code. Done on arrival, not when the line
+/// is shown, so that a `clear_host_errors` read in between forgives it. A result held at the
+/// prompt counts nothing here, and the answer does it.
+pub(super) fn arrived(event: Event, stats: &mut Stats) -> Event {
+    if let Event::Result {
+        host,
+        outcome: Outcome::Failed,
+        counts: true,
+        ..
+    } = &event
+    {
+        stats.fail(host);
+    }
+    event
+}
+
 /// Puts one result line in the recap and on the terminal. Anything but an `Event::Result` is
 /// ignored, so both event loops can hand it whatever they hold.
 pub(super) fn report_result(event: Event, stats: &mut Stats, out: &mut Renderer) {
@@ -157,7 +174,7 @@ pub(super) fn report_result(event: Event, stats: &mut Stats, out: &mut Renderer)
     // ansible-core 2.19.12, a play over h1 and h2 delegating every task to h3 recaps those two
     // and h3 is not in the recap at all.
     if counts {
-        stats.record(&host, outcome, result.changed());
+        stats.tally(&host, outcome, result.changed());
     }
     if show {
         if let Some(error) = &error {

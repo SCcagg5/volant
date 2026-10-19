@@ -27,6 +27,9 @@ pub struct HostVars {
     pub untrusted: BTreeSet<String>,
     /// Hosts holding at least one such name, for the `hostvars[other]` path.
     pub untrusted_hosts: Arc<BTreeSet<String>>,
+    /// The variables the items of a loop share, read after `map` and never written: see
+    /// [`HostVars::shared_by_items`]. Empty for a map that stands alone.
+    pub base: Arc<Map<String, Value>>,
 }
 
 /// What a `hostvars` entry holds in place of the implicit host's interpreter until someone reads
@@ -129,6 +132,56 @@ impl HostVars {
             .get(key)
             .or_else(|| self.facts.get(key))
             .or_else(|| self.map.get(key))
+            .or_else(|| self.base.get(key))
+    }
+
+    /// One name as a whole: `ansible_loop` with the list of all the items of an extended loop in
+    /// it, which [`HostVars::get`] leaves out because the loop shares it.
+    pub fn get_whole(&self, key: &str) -> Option<Value> {
+        let value = self.get(key)?;
+        match (key, value, self.base.get(crate::template::ALLITEMS_KEY)) {
+            ("ansible_loop", Value::Object(fields), Some(list)) => {
+                Some(Value::Object(crate::template::with_allitems(fields, list)))
+            }
+            (_, value, _) => Some(value.clone()),
+        }
+    }
+
+    /// Every variable of the host's own map, the shared base first and the map over it.
+    pub fn own_variables(&self) -> std::borrow::Cow<'_, Map<String, Value>> {
+        if self.base.is_empty() {
+            return std::borrow::Cow::Borrowed(&self.map);
+        }
+        let mut all = Map::clone(&self.base);
+        all.extend(self.map.iter().map(|(k, v)| (k.clone(), v.clone())));
+        crate::template::complete_loop(&mut all);
+        std::borrow::Cow::Owned(all)
+    }
+
+    /// Moves the values no render will change into [`HostVars::base`], so that a copy of these
+    /// variables for each item of a loop costs the values left in `map`, not all of them.
+    ///
+    /// The invariant the readers rely on: **`base` never holds a trusted value that contains a
+    /// template.** What a render could still change stays in `map`, which is read first and is
+    /// the layer that is resolved again for each item. What goes to `base` is a value with no
+    /// template in it, or a name that came from a managed host: that is data, and no render
+    /// touches it, whatever text it holds. A reader that treats a name missing from `map` as
+    /// holding nothing to render (the reads of the template context, and the design of the open
+    /// change that renders a variable when another template reads it) is right only while this
+    /// holds. Keep it when `base` gains an entry.
+    pub fn shared_by_items(mut self) -> Self {
+        let mut base = Map::clone(&self.base);
+        let mut kept = Map::new();
+        for (name, value) in std::mem::take(&mut self.map) {
+            if self.untrusted.contains(&name) || !crate::template::holds_template(&value) {
+                base.insert(name, value);
+            } else {
+                kept.insert(name, value);
+            }
+        }
+        self.map = kept;
+        self.base = Arc::new(base);
+        self
     }
 }
 
@@ -141,6 +194,7 @@ impl<'a> From<&'a HostVars> for Vars<'a> {
             facts: Some(&vars.facts),
             untrusted: Some(&vars.untrusted),
             untrusted_hosts: Some(&vars.untrusted_hosts),
+            base: Some(&vars.base),
         }
     }
 }
