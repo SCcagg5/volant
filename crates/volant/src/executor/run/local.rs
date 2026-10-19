@@ -236,7 +236,8 @@ async fn controller_side(
 /// undefined name with `Task failed: ` and the render's error; `if` is a valid name; and nothing
 /// but `cacheable` fails with `No key/value pairs provided, at least one is required for this
 /// action to succeed`, without the prefix. A name is data when its value was, or when its own
-/// render read a managed host.
+/// render read a managed host. A value that still holds a template once rendered is data too,
+/// as for `add_host`: it is text a `raw` block emitted, and no later task renders it again.
 ///
 /// Rendered once per item and kept on it, so that every reader - the module itself, the
 /// conditions, the facts written after the task - sees the same names with the same trust: a key
@@ -261,7 +262,9 @@ pub(super) fn set_fact_names<'a>(
             names.push((
                 key.clone(),
                 name,
-                tainted || item.args_untrusted.contains(key),
+                tainted
+                    || item.args_untrusted.contains(key)
+                    || crate::vars::holds_template(&item.args[key]),
             ));
         }
         if names.is_empty() {
