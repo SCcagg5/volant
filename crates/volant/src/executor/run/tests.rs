@@ -5115,10 +5115,7 @@ fn the_lines_of_output_are_bounded_for_stdout_and_stderr_together() {
         if refused {
             assert!(result.failed(), "{out} and {err} lines");
             let msg = result.0["msg"].as_str().unwrap();
-            assert!(
-                msg.contains("more lines than the limit of 1000000"),
-                "{msg}"
-            );
+            assert!(msg.contains("more lines than the limit of 500000"), "{msg}");
             assert!(!result.0.contains_key("stdout"));
         } else {
             assert_eq!(result.0["stdout_lines"].as_array().unwrap().len(), out);

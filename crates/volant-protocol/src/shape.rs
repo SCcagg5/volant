@@ -12,8 +12,8 @@ use serde::Deserialize;
 
 /// The most values (strings, numbers, literals, arrays, objects and object keys) one message
 /// from a host may hold. A `setup`, `package_facts` or `service_facts` result is tens of
-/// thousands, a `find` of a large tree a few hundred thousand.
-pub const MAX_VALUES: usize = 1_000_000;
+/// thousands, a `find` of a large tree a few hundred thousand. A result at the bound costs about 150 MB.
+pub const MAX_VALUES: usize = 500_000;
 
 /// The deepest nesting one message from a host may have. Real results nest ten levels or fewer;
 /// `serde_json` itself stops at 128.

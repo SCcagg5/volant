@@ -68,8 +68,8 @@ fn checks_both_bounds(#[case] bytes: Vec<u8>, #[case] expected: Option<Excess>) 
 #[test]
 fn the_message_names_the_figure_and_the_limit() {
     assert_eq!(
-        Excess::Values(1_500_000).to_string(),
-        "1500000 values, over the limit of 1000000"
+        Excess::Values(750_000).to_string(),
+        "750000 values, over the limit of 500000"
     );
     assert_eq!(
         Excess::Depth(70).to_string(),

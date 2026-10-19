@@ -105,13 +105,8 @@ const BAD_TASK: &str = "    - command: \"{{ inventory_hostname }}\"\n";
 /// (exit 2). A frame that is not a result and is too long leaves the host unreachable (exit 4),
 /// as any frame the controller cannot accept does.
 #[rstest]
-#[case::too_many_values(
-    "values",
-    2_000_000,
-    2,
-    "has 2000013 values, over the limit of 1000000"
-)]
-#[case::too_many_lines("lines", 3_000_000, 2, "more lines than the limit of 1000000")]
+#[case::too_many_values("values", 2_000_000, 2, "has 2000013 values, over the limit of 500000")]
+#[case::too_many_lines("lines", 3_000_000, 2, "more lines than the limit of 500000")]
 #[case::too_deep("depth", 70_000, 2, "70002 levels of nesting, over the limit of 64")]
 #[case::a_long_log_line(
     "log",

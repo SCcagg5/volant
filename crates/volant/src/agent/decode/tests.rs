@@ -71,15 +71,15 @@ fn a_large_result_inside_the_bounds_is_read(#[case] body: String) {
 #[rstest]
 #[case::one_array(
     format!(r#"{{"x":{}}}"#, array(2_000_000)),
-    "it has 2000011 values, over the limit of 1000000 (4000059 bytes in its frame)"
+    "it has 2000011 values, over the limit of 500000 (4000059 bytes in its frame)"
 )]
 #[case::many_small_objects(
     format!("{{\"x\":[{}{{}}]}}", "{},".repeat(1_100_000)),
-    "values, over the limit of 1000000"
+    "values, over the limit of 500000"
 )]
 #[case::object_keys_count(
     format!("{{{}\"z\":0}}", "\"k\":0,".repeat(600_000)),
-    "values, over the limit of 1000000"
+    "values, over the limit of 500000"
 )]
 #[case::nested_too_deep(
     format!(r#"{{"x":{}{}}}"#, "[".repeat(70_000), "]".repeat(70_000)),
@@ -104,7 +104,7 @@ fn a_result_over_a_bound_becomes_a_failed_task(#[case] body: String, #[case] say
         array(2_000_000)
     )
     .into_bytes(),
-    Some("it has 2000011 values, over the limit of 1000000")
+    Some("it has 2000011 values, over the limit of 500000")
 )]
 fn a_message_that_is_not_a_result_is_cut_short(
     #[case] frame: Vec<u8>,
