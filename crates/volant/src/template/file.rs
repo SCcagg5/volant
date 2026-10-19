@@ -6,7 +6,7 @@
 
 use minijinja::machinery::WhitespaceConfig;
 
-use super::{Templar, TemplateError, Vars, context_of, convert_error, render_str};
+use super::{Templar, TemplateError, Vars, context_of, convert_error, render_str, take_failure};
 
 /// The `template` module's own options, as the reference reads them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,9 +64,13 @@ impl Templar {
             trim_blocks: options.trim_blocks,
         };
         let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
-        let (ctx, _tainted) = context_of(vars.into());
+        let (ctx, _tainted) = context_of(self, vars.into());
         let name = options.name.as_deref().unwrap_or("<string>");
-        let mut rendered = render_str(self, name, &normalized, &ctx, ws).map_err(convert_error)?;
+        let rendered = render_str(self, name, &normalized, &ctx, ws).map_err(convert_error);
+        let mut rendered = match take_failure(&ctx) {
+            Some(error) => return Err(error),
+            None => rendered?,
+        };
         let wanted = trailing_newlines(text);
         let got = trailing_newlines(&rendered);
         if wanted > got {

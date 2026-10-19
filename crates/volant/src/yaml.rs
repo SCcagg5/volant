@@ -5,10 +5,12 @@
 
 mod merge;
 
+use std::borrow::Cow;
 use std::fmt::Write;
 
 use anyhow::{Context, anyhow, bail};
 use saphyr::{Mapping, MarkedYaml, Scalar, Yaml, YamlData, YamlLoader};
+use saphyr_parser::{ScalarStyle, Tag};
 use serde_json::{Map, Value};
 
 /// Loads every document of `text`. Errors name `source`.
@@ -20,13 +22,13 @@ pub fn load<'a>(text: &'a str, source: &str) -> anyhow::Result<Vec<Yaml<'a>>> {
     if holds_nothing(text) {
         return Ok(docs.iter().map(|_| Yaml::Value(Scalar::Null)).collect());
     }
-    let offsets = Offsets::new(text);
-    Ok(docs.into_iter().map(|doc| lower(doc, &offsets)).collect())
+    lower_all(docs, source)
 }
 
 /// Every document of `text` with saphyr's positions, a key written twice keeping its last value.
 fn marked<'a>(text: &'a str, source: &str) -> anyhow::Result<Vec<MarkedYaml<'a>>> {
     let mut loader = YamlLoader::<MarkedYaml>::default();
+    loader.early_parse(false);
     loader.allow_duplicate_keys(true);
     merge::parse(text, source, &mut loader)
         .and_then(|()| loader.error().cloned().map_or(Ok(()), |e| Err(e.into())))
@@ -84,8 +86,7 @@ pub fn load_with_origins<'a>(
     for doc in &marked {
         mapping_starts(doc, &mut starts);
     }
-    let offsets = Offsets::new(text);
-    let docs: Vec<Yaml<'a>> = marked.into_iter().map(|doc| lower(doc, &offsets)).collect();
+    let docs = lower_all(marked, source)?;
     let mut addresses = (Vec::new(), Vec::new());
     for doc in &docs {
         mapping_addresses(doc, &mut addresses);
@@ -163,60 +164,6 @@ fn holds_nothing(text: &str) -> bool {
     })
 }
 
-/// Drops the source positions `MarkedYaml` tracks once loading is done, applying PyYAML's
-/// scalar resolution along the way where it's confirmed to diverge from saphyr's YAML 1.2 core
-/// schema (see `pyyaml_scalar`). Every other function in this module keeps working on the
-/// plain `Yaml` tree it already expected; only `load` needs to know this happened.
-fn lower<'a>(node: MarkedYaml<'a>, offsets: &Offsets<'a>) -> Yaml<'a> {
-    match node.data {
-        YamlData::Value(scalar) => {
-            let start = offsets.byte(node.span.start.index());
-            let end = offsets.byte(node.span.end.index());
-            let raw = offsets.text.get(start..end).unwrap_or_default();
-            Yaml::Value(pyyaml_scalar(scalar, raw))
-        }
-        YamlData::Sequence(items) => {
-            Yaml::Sequence(items.into_iter().map(|n| lower(n, offsets)).collect())
-        }
-        YamlData::Mapping(map) => {
-            let mut out = Mapping::new();
-            for (k, v) in map {
-                out.insert(lower(k, offsets), lower(v, offsets));
-            }
-            Yaml::Mapping(out)
-        }
-        YamlData::Tagged(tag, inner) => Yaml::Tagged(tag, Box::new(lower(*inner, offsets))),
-        YamlData::Alias(id) => Yaml::Alias(id),
-        YamlData::Representation(v, style, tag) => Yaml::Representation(v, style, tag),
-        YamlData::BadValue => Yaml::BadValue,
-    }
-}
-
-/// Where each character of a text starts, in bytes: saphyr's markers count characters, while
-/// `str` slicing needs bytes. A text of ASCII only has one byte for each character and needs no
-/// table; any other text gets one table, built once, so a lookup costs the same for every
-/// scalar however far into the text it lies.
-struct Offsets<'a> {
-    text: &'a str,
-    /// The byte offset of each character, `None` when the text is ASCII.
-    starts: Option<Vec<usize>>,
-}
-
-impl<'a> Offsets<'a> {
-    fn new(text: &'a str) -> Self {
-        let starts = (!text.is_ascii()).then(|| text.char_indices().map(|(i, _)| i).collect());
-        Self { text, starts }
-    }
-
-    /// The byte offset of the `chars`-th character, or the text's length past the last one.
-    fn byte(&self, chars: usize) -> usize {
-        match &self.starts {
-            None => chars.min(self.text.len()),
-            Some(starts) => starts.get(chars).copied().unwrap_or(self.text.len()),
-        }
-    }
-}
-
 /// Every spelling PyYAML reads as `true`. The single source for both the scalar resolver
 /// below and [`bool_from_str`]; the `bool` filter's set is a different one and lives with the
 /// filter (see [`crate::template`]).
@@ -229,111 +176,81 @@ pub const PYYAML_FALSE: &[&str] = &[
     "false", "False", "FALSE", "no", "No", "NO", "off", "Off", "OFF",
 ];
 
-/// Re-resolves a scalar the way ansible-core's PyYAML (YAML 1.1) would. `raw` is the node's
-/// exact source text; quoting it, or writing it as a block scalar, makes `raw` start with
-/// something other than the bare word or digits, so none of the spellings below match and
-/// `scalar` is returned untouched — matching PyYAML, which also only resolves *plain* scalars,
-/// so a deliberately quoted `"yes"` stays the string a playbook wrote.
-///
-/// The last arm is the general form of what used to be a list of one-off exceptions: whenever
-/// PyYAML's own resolvers refuse a plain scalar that saphyr's YAML 1.2 core schema typed as a
-/// number, PyYAML leaves a string, so we do too. Measured against ansible-core 2.19.12, that
-/// covers `08` (no valid octal digit), `0o10` (the `0o` prefix is YAML 1.2 only) and `1e3` or
-/// `1e+3` (PyYAML's float needs a `.` in the mantissa).
-fn pyyaml_scalar<'a>(scalar: Scalar<'a>, raw: &'a str) -> Scalar<'a> {
-    if PYYAML_TRUE.contains(&raw) {
-        return Scalar::Boolean(true);
-    }
-    if PYYAML_FALSE.contains(&raw) {
-        return Scalar::Boolean(false);
-    }
-    if let Some(i) = pyyaml_int(raw) {
-        return Scalar::Integer(i);
-    }
-    if let Some(f) = pyyaml_float(raw) {
-        return Scalar::FloatingPoint(f.into());
-    }
-    if matches!(scalar, Scalar::Integer(_) | Scalar::FloatingPoint(_)) {
-        return Scalar::String(raw.into());
-    }
-    scalar
+/// Every document of `docs` without the source positions `MarkedYaml` tracks, each scalar read
+/// as PyYAML reads it (see [`scalar`]). Errors name `source`, and carry PyYAML's own text.
+fn lower_all<'a>(docs: Vec<MarkedYaml<'a>>, source: &str) -> anyhow::Result<Vec<Yaml<'a>>> {
+    docs.into_iter()
+        .map(lower)
+        .collect::<anyhow::Result<_>>()
+        .with_context(|| format!("{source}: invalid YAML"))
 }
 
-/// PyYAML's YAML 1.1 integer spellings: an optional sign, then `0b` binary, `0x` hexadecimal, a
-/// bare leading `0` for octal, or a decimal starting `1`-`9` (or the single digit `0`). Every
-/// digit run may carry `_` separators. `0o10` is deliberately absent: that prefix arrived with
-/// YAML 1.2 and PyYAML leaves it a string.
-fn pyyaml_int(raw: &str) -> Option<i64> {
-    let (negative, rest) = split_sign(raw);
-    let value = if let Some(digits) = rest.strip_prefix("0b") {
-        digit_run(digits, 2, |b| matches!(b, b'0' | b'1'))?
-    } else if let Some(digits) = rest.strip_prefix("0x") {
-        digit_run(digits, 16, |b| b.is_ascii_hexdigit())?
-    } else if rest == "0" {
-        0
-    } else if let Some(digits) = rest.strip_prefix('0') {
-        digit_run(digits, 8, |b| matches!(b, b'0'..=b'7'))?
-    } else if matches!(rest.as_bytes().first(), Some(b'1'..=b'9')) {
-        digit_run(rest, 10, |b| b.is_ascii_digit())?
-    } else {
-        return None;
-    };
-    Some(if negative { -value } else { value })
-}
-
-/// One run of `radix` digits, `_` separators allowed anywhere in it, as an `i64`. A run that is
-/// empty, holds a digit `ok` refuses, or overflows is no match at all: the caller then falls
-/// back to what saphyr resolved.
-fn digit_run(digits: &str, radix: u32, ok: impl Fn(u8) -> bool) -> Option<i64> {
-    if digits.is_empty() || !digits.bytes().all(|b| ok(b) || b == b'_') {
-        return None;
-    }
-    i64::from_str_radix(&digits.replace('_', ""), radix).ok()
-}
-
-/// PyYAML's YAML 1.1 float spellings: `.inf`, `.nan`, or a mantissa that must contain a `.`,
-/// optionally followed by an exponent whose sign PyYAML **requires**. Measured against
-/// ansible-core 2.19.12: `1.0e+3` is the float 1000.0 while `1.0e3`, `1e3` and `1e+3` are all
-/// strings there.
-fn pyyaml_float(raw: &str) -> Option<f64> {
-    let (negative, rest) = split_sign(raw);
-    if matches!(rest, ".nan" | ".NaN" | ".NAN") {
-        // PyYAML's not-a-number spelling carries no sign.
-        return (!negative).then_some(f64::NAN);
-    }
-    let value = if matches!(rest, ".inf" | ".Inf" | ".INF") {
-        f64::INFINITY
-    } else {
-        let (mantissa, exponent) = match rest.split_once(['e', 'E']) {
-            Some((mantissa, exponent)) => (mantissa, Some(exponent)),
-            None => (rest, None),
-        };
-        let (whole, fraction) = mantissa.split_once('.')?;
-        let digits = |run: &str| run.bytes().all(|b| b.is_ascii_digit() || b == b'_');
-        match whole.as_bytes().first() {
-            // `.5`: nothing before the dot means at least one digit after it.
-            None if fraction.is_empty() || !digits(fraction) => return None,
-            Some(b'0'..=b'9') if !digits(whole) || !digits(fraction) => return None,
-            None | Some(b'0'..=b'9') => {}
-            _ => return None,
-        }
-        if let Some(exponent) = exponent {
-            let signed = exponent.strip_prefix('+').or(exponent.strip_prefix('-'))?;
-            if signed.is_empty() || !signed.bytes().all(|b| b.is_ascii_digit()) {
-                return None;
+/// Drops the source positions `MarkedYaml` tracks once loading is done. Every other function in
+/// this module keeps working on the plain `Yaml` tree it already expected.
+fn lower(node: MarkedYaml<'_>) -> anyhow::Result<Yaml<'_>> {
+    Ok(match node.data {
+        YamlData::Representation(value, style, tag) => read_scalar(value, style, tag)?,
+        YamlData::Value(scalar) => Yaml::Value(scalar),
+        YamlData::Sequence(items) => Yaml::Sequence(
+            items
+                .into_iter()
+                .map(lower)
+                .collect::<anyhow::Result<_>>()?,
+        ),
+        YamlData::Mapping(map) => {
+            let mut out = Mapping::new();
+            for (k, v) in map {
+                out.insert(lower(k)?, lower(v)?);
             }
+            Yaml::Mapping(out)
         }
-        rest.replace('_', "").parse().ok()?
-    };
-    Some(if negative { -value } else { value })
+        YamlData::Tagged(tag, inner) => read_tagged(tag, lower(*inner)?)?,
+        YamlData::Alias(id) => Yaml::Alias(id),
+        YamlData::BadValue => Yaml::BadValue,
+    })
 }
 
-/// Splits an optional leading `+`/`-` off `raw`, reporting whether it was `-`.
-fn split_sign(raw: &str) -> (bool, &str) {
-    match raw.strip_prefix('-') {
-        Some(rest) => (true, rest),
-        None => (false, raw.strip_prefix('+').unwrap_or(raw)),
+/// A scalar with the tag and the style it was written with. An alias of it arrives the same way.
+///
+/// `!unsafe` and `!vault` resolve the text as a plain scalar whatever its quotes are, as
+/// ansible-core's constructor does: `!unsafe "5"` is the integer 5. A `!vault` value must come
+/// out a string.
+fn read_scalar<'a>(
+    value: Cow<'a, str>,
+    style: ScalarStyle,
+    tag: Option<Cow<'a, Tag>>,
+) -> anyhow::Result<Yaml<'a>> {
+    match tag {
+        Some(tag) if tag.handle == "!" && tag.suffix == "unsafe" => {
+            let inner = Yaml::Value(scalar::plain(value).map_err(|e| anyhow!(e))?);
+            Ok(Yaml::Tagged(tag, Box::new(inner)))
+        }
+        Some(tag) if tag.handle == "!" && is_vault(&tag.suffix) => {
+            let inner = scalar::plain(value).map_err(|e| anyhow!(e))?;
+            read_tagged(tag, Yaml::Value(inner))
+        }
+        tag => scalar::read(value, style, tag.as_deref())
+            .map(Yaml::Value)
+            .map_err(|e| anyhow!(e)),
     }
+}
+
+/// A node that carries a tag of its own. Only `!unsafe` and `!vault` are Ansible's.
+fn read_tagged<'a>(tag: Cow<'a, Tag>, inner: Yaml<'a>) -> anyhow::Result<Yaml<'a>> {
+    if tag.handle == "!" && tag.suffix == "unsafe" {
+        return Ok(Yaml::Tagged(tag, Box::new(inner)));
+    }
+    if tag.handle == "!" && is_vault(&tag.suffix) {
+        if !matches!(inner, Yaml::Value(Scalar::String(_))) {
+            bail!("The '{tag}' tag requires a string value.");
+        }
+        return Ok(Yaml::Tagged(tag, Box::new(inner)));
+    }
+    Err(anyhow!(scalar::no_constructor(&tag)))
+}
+
+fn is_vault(suffix: &str) -> bool {
+    suffix == "vault" || suffix == "vault-encrypted"
 }
 
 /// The value under `key` when `node` is a mapping, `None` otherwise or when absent.
@@ -480,19 +397,21 @@ pub fn to_json(node: &Yaml) -> anyhow::Result<Value> {
             }
             Value::Object(out)
         }
-        Yaml::Tagged(tag, inner) if tag.handle == "!" && tag.suffix == "vault" => match &**inner {
+        Yaml::Tagged(tag, inner) if tag.handle == "!" && is_vault(&tag.suffix) => match &**inner {
             Yaml::Value(Scalar::String(s)) => Value::String(vault_data(s)),
             _ => bail!("!vault takes a string"),
         },
         Yaml::Tagged(tag, inner) if tag.handle == "!" && tag.suffix == "unsafe" => {
             unsafe_data(to_json(inner)?)
         }
-        Yaml::Tagged(tag, _) => bail!("unsupported YAML tag {}{}", tag.handle, tag.suffix),
+        Yaml::Tagged(tag, _) => bail!(scalar::no_constructor(tag)),
         Yaml::Alias(_) => bail!("YAML aliases are not supported yet"),
         Yaml::Representation(..) => bail!("unresolved YAML scalar"),
         Yaml::BadValue => bail!("invalid YAML value"),
     })
 }
+
+mod scalar;
 
 #[cfg(test)]
 mod tests;
