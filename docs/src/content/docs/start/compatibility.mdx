@@ -41,7 +41,7 @@ A file that only a dynamic `include_tasks` or `include_role` names is read when 
 | Area | Runs today | Not yet |
 |---|---|---|
 | Plays | `pre_tasks`, roles, `tasks`, `post_tasks`, handlers, `serial`, `strategy` (`linear`, `free`, `host_pinned`, `debug`), `order`, `throttle`, `timeout`, `debugger`, `any_errors_fatal`, `max_fail_percentage`, `ignore_errors`, `ignore_unreachable` | |
-| Tasks | `when`, `loop`, `with_items`, `with_first_found`, `with_fileglob`, `register`, `until`, `retries`, `changed_when`, `failed_when`, `ignore_errors`, `ignore_unreachable`, `any_errors_fatal`, `no_log`, `environment`, `timeout`, `tags`, `async`, `poll`, `module_defaults` | other `with_*` lookups |
+| Tasks | `when`, `loop`, every `with_<lookup>` form, `register`, `until`, `retries`, `changed_when`, `failed_when`, `ignore_errors`, `ignore_unreachable`, `any_errors_fatal`, `no_log`, `environment`, `timeout`, `tags`, `async`, `poll`, `module_defaults` | |
 | Blocks | `block`, `rescue`, `always` | |
 | Reuse | roles and dependencies, `import_tasks`, `import_role`, `import_playbook`, `include_tasks`, `include_role`, `include_vars` | `include_vars: dir` |
 | Delegation | `delegate_to`, `delegate_facts`, `local_action`, `run_once` | |
@@ -60,7 +60,6 @@ A file that only a dynamic `include_tasks` or `include_role` names is read when 
 | A collection module its collection runs through an action plugin, such as `ansible.posix.synchronize` | Volant runs a collection's modules, not its action plugins. | Keep the play under `ansible-playbook` for now. |
 | A collection that is not installed | Volant does not install one during a run. It asks the controller's ansible-core what is installed, before the first connection. | Run `volant runtime install --collections NAME`, or the `ansible-galaxy collection install` command the error names. See [The managed runtime](/reference/runtime/#collections) and [Modules from collections](/internals/python/#modules-from-collections). |
 | No Python with ansible-core on the controller | Volant installs its own on first need, with `curl` or `wget` and `tar`. | Nothing, or `volant runtime install` ahead of time. Without a network, use `volant runtime pack` and `install --from`. |
-| `with_dict` and the other `with_*` forms | Only `with_items`, `with_first_found` and `with_fileglob` have a loop. | Rewrite with `loop` and a filter, such as `loop: "{{ users \| dict2items }}"`. |
 | `apt`, `user`, `group` or `file` under `--check` or `--diff` on a host with no Python | These modules answer through Python on the host when the run asks for a check or a diff. | Install Python on the host, or run the play without `--check` and `--diff`. |
 | `gather_subset` | Not supported yet. | Remove it: the play gets every fact. |
 

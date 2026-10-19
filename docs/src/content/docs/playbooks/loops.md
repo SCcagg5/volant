@@ -18,7 +18,15 @@ description: loop, with_items and loop_control, and how until, retries and delay
 
 `loop` and `with_items` cannot both appear on the same task. `with_items` flattens one level of nested lists and `loop` does not, as in Ansible. Registering a looped task collects a `results` list with one entry per item.
 
-`loop_control` reads `loop_var`, `label`, `index_var`, `pause`, `extended`, `extended_allitems` and `break_when`. A sub-key ansible-core does not know is rejected when the playbook loads. `with_items`, `with_first_found` and `with_fileglob` run; every other `with_*` form is not supported yet: rewrite it with `loop` and a filter. See [Keywords](/reference/keywords/#under-loop_control).
+`loop_control` reads `loop_var`, `label`, `index_var`, `pause`, `extended`, `extended_allitems` and `break_when`. A sub-key ansible-core does not know is rejected when the playbook loads. Every `with_<lookup>` form runs. See [Keywords](/reference/keywords/#under-loop_control) and [`with_` loops](#with_-loops).
+
+## `with_` loops
+
+`with_<name>` is `loop: "{{ lookup('<name>', *terms, wantlist=True) }}"`, and it runs for every lookup plugin ansible-core has: the twenty-five of `ansible.builtin` (`with_dict`, `with_nested`, `with_subelements`, `with_sequence` and the others), the lookups that ansible-core redirects to `community.general` (`with_flattened`, `with_cartesian`, `with_filetree`), a collection's lookup under its full name (`with_community.general.dependent`), and a plugin in a `lookup_plugins/` directory beside the playbook or a role. A builtin lookup is also accepted as `with_ansible.builtin.<name>` and `with_ansible.legacy.<name>`.
+
+The controller's ansible-core says whether a name is a lookup, before the first connection. A `with_` name that is none fails the playbook with `'with_xyz' is not a valid attribute for a Task`, as in Ansible. A task with two loops fails with `duplicate loop in task: <name>`, and a `with_` key with no value with `you must specify a value when using with_<name>`.
+
+A lookup that raises fails the task with the plugin's own sentence. A loop value that is one template reading an undefined variable fails with `'name' is undefined`. A list whose element reads an undefined variable fails with the engine's sentence for it, without the chain that Ansible prints.
 
 ## `with_first_found` and `with_fileglob`
 
