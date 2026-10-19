@@ -25,7 +25,7 @@ Volant reads these per host, from the inventory or from any other variable sourc
 | Variable | Effect |
 | --- | --- |
 | `ansible_connection` | `ssh` (default) or `local` |
-| `ansible_host` | Address to connect to. Defaults to the inventory name. |
+| `ansible_host` | Address to connect to. Defaults to the inventory name. A value that starts with `-` or holds whitespace or a control character is refused before `ssh` runs. |
 | `ansible_port` | `ssh -p`. A quoted number works as well as a bare one. |
 | `ansible_user` | `ssh -l` |
 | `ansible_ssh_private_key_file` | `ssh -i` |

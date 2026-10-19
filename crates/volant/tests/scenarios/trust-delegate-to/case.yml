@@ -1,0 +1,4 @@
+# A delegate named by a result is a host name, never a template. No modes: who runs a task is
+# decided before --check and --diff apply. The payload holds no whitespace: Volant refuses an ssh
+# address with whitespace before connecting, where the reference tries it and fails.
+args: [-i, inv.ini, -e, "payload={{ playbook_dir }}/payload.txt", delegate.yml]

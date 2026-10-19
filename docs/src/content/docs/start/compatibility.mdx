@@ -45,7 +45,7 @@ A file that only a dynamic `include_tasks` or `include_role` names is read when 
 | Blocks | `block`, `rescue`, `always` | |
 | Reuse | roles and dependencies, `import_tasks`, `import_role`, `import_playbook`, `include_tasks`, `include_role`, `include_vars` | `include_vars: dir` |
 | Delegation | `delegate_to`, `delegate_facts`, `local_action`, `run_once` | |
-| Modules | `command`, `shell`, `raw`, controller modules, `copy`, `dnf`, `fetch`, `package`, `reboot`, `service`, `template`, `unarchive`, most ansible-core Python modules, modules from installed collections | a few modules backed by an action plugin: `uri`, `script` and others, and a collection's own action plugins |
+| Modules | `command`, `shell`, `raw`, controller modules, `copy`, `dnf`, `yum`, `fetch`, `package`, `reboot`, `service`, `template`, `unarchive`, most ansible-core Python modules, modules from installed collections | a few modules backed by an action plugin: `uri`, `script` and others, and a collection's own action plugins |
 | Inventories | INI, YAML and TOML files, directories, scripts, `constructed`, `generator` and collection plugins, several `-i`, `group_vars`, `host_vars`, the `jsonfile` fact cache | none left |
 | Connections | `ssh` with keys, an ssh-agent or a password (`-k`, needs OpenSSH 8.4 or later), `local` | the `ansible_password` variable, Windows, network devices |
 | Escalation | `become` through `sudo` or `su`, with or without a password | `doas` and other methods |
@@ -57,7 +57,6 @@ A file that only a dynamic `include_tasks` or `include_role` names is read when 
 | Not supported yet | Why | What you can do today |
 |---|---|---|
 | `uri`, `script` | These modules rely on an action plugin that runs on the controller first, and Volant does not have theirs yet. | Use a module without an action plugin, such as `get_url` or `lineinfile`, or `command` and `shell`. |
-| A collection module its collection runs through an action plugin, such as `ansible.posix.synchronize` | Volant runs a collection's modules, not its action plugins. | Keep the play under `ansible-playbook` for now. |
 | A collection that is not installed | Volant does not install one during a run. It asks the controller's ansible-core what is installed, before the first connection. | Run `volant runtime install --collections NAME`, or the `ansible-galaxy collection install` command the error names. See [The managed runtime](/reference/runtime/#collections) and [Modules from collections](/internals/python/#modules-from-collections). |
 | No Python with ansible-core on the controller | Volant installs its own on first need, with `curl` or `wget` and `tar`. | Nothing, or `volant runtime install` ahead of time. Without a network, use `volant runtime pack` and `install --from`. |
 | `with_dict` and the other `with_*` forms | Only `with_items`, `with_first_found` and `with_fileglob` have a loop. | Rewrite with `loop` and a filter, such as `loop: "{{ users \| dict2items }}"`. |

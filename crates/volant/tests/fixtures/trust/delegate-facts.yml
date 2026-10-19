@@ -1,0 +1,19 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: Read a file whose text looks like a template
+      command: cat {{ payload }}
+      register: r
+    - name: Write a fact onto the delegate
+      set_fact:
+        seen: yes
+      delegate_to: "{{ r.stdout }}"
+      delegate_facts: true
+    - name: Run on the delegate that holds the fact
+      command: id
+      delegate_to: "{{ r.stdout }}"
+      vars:
+        ansible_connection: local
+    - name: Read it back through hostvars
+      debug:
+        msg: "{{ hostvars[r.stdout].seen | default('none') }}"
