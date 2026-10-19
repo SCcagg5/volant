@@ -89,10 +89,16 @@ enum Case {
     Symlink,
     /// The output of a `command`: a path two directories down.
     Nested,
+    /// The output of a `command`: `~/secret.<ext>`, which ansible-core's own plugins expand to
+    /// a file of the controller's home directory.
+    Tilde,
+    /// The output of a `command`: a plain name that exists in the playbook directory, outside
+    /// its `files` and `templates` directories.
+    Bare,
 }
 
 impl Case {
-    const ALL: [Case; 9] = [
+    const ALL: [Case; 11] = [
         Case::Literal,
         Case::Fact,
         Case::Registered,
@@ -102,6 +108,8 @@ impl Case {
         Case::DotDot,
         Case::Symlink,
         Case::Nested,
+        Case::Tilde,
+        Case::Bare,
     ];
 
     fn name(self) -> &'static str {
@@ -115,6 +123,8 @@ impl Case {
             Case::DotDot => "dotdot",
             Case::Symlink => "symlink",
             Case::Nested => "nested",
+            Case::Tilde => "tilde",
+            Case::Bare => "bare",
         }
     }
 }
@@ -132,6 +142,7 @@ struct Fixture {
     play: PathBuf,
     outside: PathBuf,
     out: PathBuf,
+    home: PathBuf,
     system: &'static str,
 }
 
@@ -160,6 +171,8 @@ impl Fixture {
             Case::DotDot => (String::new(), Some(format!("../../../../outside/up.{ext}"))),
             Case::Symlink => (String::new(), Some(format!("link.{ext}"))),
             Case::Nested => (String::new(), Some(format!("sub/dir/nested.{ext}"))),
+            Case::Tilde => (String::new(), Some(format!("~/secret.{ext}"))),
+            Case::Bare => (String::new(), Some(format!("secret.{ext}"))),
         }
     }
 
@@ -174,6 +187,7 @@ impl Fixture {
             Case::DotDot => format!("up.{ext}"),
             Case::Symlink => format!("target.{ext}"),
             Case::Nested => format!("nested.{ext}"),
+            Case::Tilde | Case::Bare => format!("secret.{ext}"),
         }
     }
 
@@ -232,6 +246,7 @@ fn fixture(mode: &str) -> (tempfile::TempDir, Fixture) {
         play: root.join("play"),
         outside: root.join("outside"),
         out: root.join("out"),
+        home: root.join("home"),
         system: if cfg!(target_os = "macos") {
             "Darwin"
         } else {
@@ -265,6 +280,16 @@ fn fixture(mode: &str) -> (tempfile::TempDir, Fixture) {
             )
             .unwrap();
         }
+        write_source(
+            &fx.home.join(format!("secret.{ext}")),
+            plugin,
+            &format!("secret.{ext}"),
+        );
+        write_source(
+            &fx.play.join(format!("secret.{ext}")),
+            plugin,
+            &format!("secret.{ext}"),
+        );
         for name in ["abs", "up", "target"] {
             write_source(
                 &fx.outside.join(format!("{name}.{ext}")),
@@ -311,7 +336,7 @@ fn task(fx: &Fixture, plugin: Plugin, case: Case) -> String {
             let var = format!("n_{}_{}", plugin.name(), case.name());
             write!(
                 out,
-                "- name: \"{id}/name\"\n  command: echo {value}\n  register: {var}\n  changed_when: false\n  check_mode: false\n"
+                "- name: \"{id}/name\"\n  command: echo {value}\n  args: {{expand_argument_vars: false}}\n  register: {var}\n  changed_when: false\n  check_mode: false\n"
             )
             .unwrap();
             format!("{{{{ {var}.stdout }}}}")
@@ -352,6 +377,7 @@ fn run(fx: &Fixture, python: &Path, flags: &[&str]) -> std::process::Output {
     }
     command
         .env("NO_COLOR", "1")
+        .env("HOME", &fx.home)
         .env_remove("COLUMNS")
         .env("VOLANT_RUNTIME", "system")
         .env("VOLANT_PYTHON", python)
@@ -394,10 +420,12 @@ fn expected(mode: &str, fx: &Fixture, plugin: Plugin, case: Case) -> Outcome {
         ("refuse", _) => Outcome::Refused(format!(
             "the '{arg}' of this task was named by a managed host, and a controller file a host chose is never sent"
         )),
-        ("contained", Case::Absolute | Case::DotDot) => Outcome::Refused(format!(
-            "the '{arg}' of this task was named by a managed host, and '{}' is not inside the directories of the playbook or the role (host_named_paths = contained)",
-            named.expect("a host named it")
-        )),
+        ("contained", Case::Absolute | Case::DotDot | Case::Tilde | Case::Bare) => {
+            Outcome::Refused(format!(
+                "the '{arg}' of this task was named by a managed host, and '{}' is not inside the files or templates directories of the playbook or the role (host_named_paths = contained)",
+                named.expect("a host named it")
+            ))
+        }
         ("contained", _) => Outcome::Changed,
         (other, _) => panic!("no such mode: {other}"),
     }
@@ -412,13 +440,14 @@ fn expected(mode: &str, fx: &Fixture, plugin: Plugin, case: Case) -> Outcome {
 #[case::refuse("refuse", &[])]
 #[case::contained_check("contained", &["--check"])]
 #[case::refuse_check("refuse", &["--check"])]
+#[case::contained_diff("contained", &["--diff"])]
 fn a_source_a_host_named_follows_the_mode(#[case] mode: &str, #[case] flags: &[&str]) {
     let Some(python) = python::reference_python() else {
         return;
     };
     let (_dir, fx) = fixture(mode);
     let out = run(&fx, &python, flags);
-    let checking = flags.contains(&"--check");
+    let checking = flags.contains(&"--check") || flags.contains(&"--diff");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     let got = outcomes(&stdout);
@@ -426,6 +455,11 @@ fn a_source_a_host_named_follows_the_mode(#[case] mode: &str, #[case] flags: &[&
     for plugin in Plugin::ALL {
         for case in Case::ALL {
             let id = format!("{}/{}", plugin.name(), case.name());
+            // The written plugins do not expand a `~` as ansible-core does, which is a gap of
+            // its own: only the modes that refuse it are pinned.
+            if mode == "allow" && case == Case::Tilde {
+                continue;
+            }
             let want = expected(mode, &fx, plugin, case);
             let ran = got.get(&id);
             let same = match (checking, &want, ran) {
@@ -455,6 +489,108 @@ fn a_source_a_host_named_follows_the_mode(#[case] mode: &str, #[case] flags: &[&
         "mode {mode}:\n{}\n--- stdout\n{stdout}\n--- stderr\n{stderr}",
         wrong.join("\n")
     );
+}
+
+/// The routes through ansible-core's own plugins that the table does not take: `script` with
+/// `cmd`, `assemble` and an `unarchive` whose `dest` is `~/...`. Under `contained`, a name outside
+/// the files or templates directories is refused on each of them and nothing runs; one inside
+/// them goes through.
+#[rstest]
+#[case::tilde("~/{n}")]
+#[case::absolute("{outside}/{n}")]
+#[case::bare("{n}")]
+#[case::dotdot("../../../../outside/{n}")]
+fn a_name_outside_the_directories_is_refused_on_every_other_route(#[case] shape: &str) {
+    let Some(python) = python::reference_python() else {
+        return;
+    };
+    let (_dir, fx) = fixture("contained");
+    // A directory of fragments and a script, each in the three places a name can point to.
+    for place in [&fx.home, &fx.outside, &fx.play] {
+        std::fs::create_dir_all(place.join("frags")).unwrap();
+        std::fs::write(place.join("frags/a"), "a\n").unwrap();
+        std::fs::write(
+            place.join("marker.sh"),
+            format!("#!/bin/sh\ntouch {}/ran\n", fx.out.display()),
+        )
+        .unwrap();
+    }
+    std::fs::create_dir_all(fx.home.join("unpacked")).unwrap();
+    let named = |n: &str| {
+        shape
+            .replace("{n}", n)
+            .replace("{outside}", &fx.outside.display().to_string())
+    };
+    let tasks = format!(
+        "- name: name\n  command: echo {script}\n  args: {{expand_argument_vars: false}}\n  register: s\n  changed_when: false\n\
+         - name: frags\n  command: echo {frags}\n  args: {{expand_argument_vars: false}}\n  register: f\n  changed_when: false\n\
+         - name: archive\n  command: echo {archive}\n  args: {{expand_argument_vars: false}}\n  register: a\n  changed_when: false\n\
+         - name: script_cmd\n  script: {{cmd: \"{{{{ s.stdout }}}}\"}}\n  ignore_errors: true\n\
+         - name: assemble\n  assemble: {{src: \"{{{{ f.stdout }}}}\", dest: \"{out}/assembled\", remote_src: false}}\n  ignore_errors: true\n\
+         - name: unarchive_tilde_dest\n  unarchive: {{src: \"{{{{ a.stdout }}}}\", dest: \"~/unpacked\"}}\n  ignore_errors: true\n",
+        script = named("marker.sh"),
+        frags = named("frags"),
+        archive = named(&format!("secret.{}", Plugin::Unarchive.ext())),
+        out = fx.out.display(),
+    );
+    std::fs::write(fx.play.join("roles/r/tasks/main.yml"), tasks).unwrap();
+    let out = run(&fx, &python, &[]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let got = outcomes(&stdout);
+    for (task, arg, value) in [
+        ("script_cmd", "cmd", named("marker.sh")),
+        ("assemble", "src", named("frags")),
+        (
+            "unarchive_tilde_dest",
+            "src",
+            named(&format!("secret.{}", Plugin::Unarchive.ext())),
+        ),
+    ] {
+        let want = Outcome::Refused(format!(
+            "the '{arg}' of this task was named by a managed host, and '{value}' is not inside the files or templates directories of the playbook or the role (host_named_paths = contained)"
+        ));
+        assert_eq!(got.get(task), Some(&want), "{task}\n{stdout}");
+    }
+    assert!(!fx.out.join("ran").exists(), "the script ran:\n{stdout}");
+    assert!(!fx.out.join("assembled").exists(), "{stdout}");
+    assert!(!fx.home.join("unpacked/payload").exists(), "{stdout}");
+}
+
+/// A source on the host is not a controller file: `contained` leaves it alone for `assemble`
+/// (whose `remote_src` defaults to true) and for `copy` and `unarchive` with `remote_src`, in
+/// a plain run and under `--check` and `--diff`.
+#[rstest]
+#[case::plain(&[])]
+#[case::check(&["--check"])]
+#[case::diff(&["--diff"])]
+fn a_remote_source_is_never_held_to_the_directories(#[case] flags: &[&str]) {
+    let Some(python) = python::reference_python() else {
+        return;
+    };
+    let (_dir, fx) = fixture("contained");
+    let remote = fx.outside.join("remote");
+    std::fs::create_dir_all(remote.join("frags")).unwrap();
+    std::fs::write(remote.join("frags/a"), "a\n").unwrap();
+    std::fs::write(remote.join("file.txt"), "remote\n").unwrap();
+    let tasks = format!(
+        "- name: name\n  command: echo {remote}\n  register: r\n  changed_when: false\n  check_mode: false\n\
+         - name: assemble\n  assemble: {{src: \"{{{{ r.stdout }}}}/frags\", dest: \"{out}/assembled\"}}\n  ignore_errors: true\n\
+         - name: copy\n  copy: {{src: \"{{{{ r.stdout }}}}/file.txt\", dest: \"{out}/copied\", remote_src: true}}\n  ignore_errors: true\n",
+        remote = remote.display(),
+        out = fx.out.display(),
+    );
+    std::fs::write(fx.play.join("roles/r/tasks/main.yml"), tasks).unwrap();
+    let out = run(&fx, &python, flags);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for (task, product) in [("assemble", "assembled"), ("copy", "copied")] {
+        assert!(
+            !matches!(outcomes(&stdout).get(task), Some(Outcome::Refused(_))),
+            "{task} was refused:\n{stdout}"
+        );
+        if flags.is_empty() {
+            assert!(fx.out.join(product).exists(), "{task}:\n{stdout}");
+        }
+    }
 }
 
 /// A value that is none of the three stops the run before it starts, from the file and from the
