@@ -1,0 +1,23 @@
+- hosts: h1
+  gather_facts: false
+  roles:
+    - q
+  tasks:
+    - name: start
+      debug:
+        msg: "qdef={{ qdef | default('unset') }} rdef={{ rdef | default('unset') }}"
+    - name: in a block
+      block:
+        - name: public
+          include_role:
+            name: r
+            public: true
+      rescue: []
+    - name: after the block
+      debug:
+        msg: "rdef={{ rdef | default('unset') }} rvar={{ rvar | default('unset') }}"
+    - name: from a file
+      include_tasks: inc-public.yml
+    - name: after the file
+      debug:
+        msg: "rdef={{ rdef | default('unset') }}"

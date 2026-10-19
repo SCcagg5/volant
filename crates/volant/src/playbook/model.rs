@@ -163,6 +163,20 @@ impl Default for PlayTask {
     }
 }
 
+/// What an include statement's `apply:` came to when it was read.
+///
+/// The keywords are checked against the attributes of a block, as the reference does, but a key
+/// it refuses is refused when the statement runs and not when the file loads: measured on
+/// ansible-core 2.19.12, `apply: {foo: 1}` prints the statement's banner and then stops the run
+/// at exit 4. So the sentence travels with the statement instead of ending the load.
+#[derive(Debug, Clone)]
+pub enum Apply {
+    /// The keywords every task the statement brings in inherits, in a module-less [`PlayTask`].
+    Keywords(std::sync::Arc<PlayTask>),
+    /// The sentence the reference refuses the keywords with.
+    Refused(std::sync::Arc<str>),
+}
+
 #[derive(Debug, Clone)]
 pub struct PlayTask {
     pub name: String,
@@ -273,6 +287,9 @@ pub struct PlayTask {
     pub deferred: Deferred,
     /// Where the task was written, for the `Origin:` of a failure's error block.
     pub origin: Option<Origin>,
+    /// The `apply:` of an `include_tasks` or `include_role` statement, read at load. Everything
+    /// else carries `None`.
+    pub apply: Option<Apply>,
     /// Where some of its values were written - `until`, `retries`, `delay` and a `debug`'s `var` -
     /// for the cause the reference points at when one of them fails.
     ///
@@ -344,6 +361,7 @@ impl PlayTask {
             delegate_to: None,
             deferred: Deferred::default(),
             origin: None,
+            apply: None,
             value_origins: std::collections::BTreeMap::new(),
         }
     }
