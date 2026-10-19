@@ -160,7 +160,7 @@ The plugin reads the link's key and user (the host variable, `--private-key`, `-
 
 ## A source file a managed host named
 
-A `src` is named by a managed host when its render read something a host contributed: a gathered fact, as in `src: "{{ ansible_os_family }}.j2"`, a registered result, or an item of `with_first_found` built from one. `[volant] host_named_paths` says what `copy`, `template`, `script`, `unarchive` and `assemble` do with it. It applies to the file read on the controller, and under `--check` and `--diff` too.
+A `src` is named by a managed host when its render read something a host contributed: a gathered fact, as in `src: "{{ ansible_os_family }}.j2"`, a registered result, or an item of `with_first_found` built from one. `[volant] host_named_paths` says what `copy`, `template`, `script`, `unarchive` and `assemble` do with it. It applies to the file read on the controller, and under `--check` and `--diff` too. For `template`, a delimiter option (`variable_start_string` and the five others) whose value a host contributed is used under `allow`, as ansible-core uses it, and refused under `contained` and `refuse`. A `#jinja2:` first line in an author's template is read in every mode.
 
 | Value | What the task does |
 |---|---|

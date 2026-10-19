@@ -264,60 +264,55 @@ fn a_template_a_host_named_outside_the_directories_is_refused_when_contained() {
     }
 }
 
-/// What a managed host chose never moves the delimiters: not a delimiter option it named, and
-/// not the `#jinja2:` line of a file it named, unless the file is in the author's directories.
+/// A delimiter whose value came from a managed host is taken under `allow`, as ansible-core takes
+/// it, and refused under the stricter modes.
 #[rstest::rstest]
-#[case::delimiter_option(
-    "x {{ 1 }}
-",
-    json!({"src": "t.j2", "dest": "/tmp/x", "variable_start_string": "[["}),
-    "variable_start_string",
-    HostNamedPaths::Allow,
-    "the 'variable_start_string' of this task was named by a managed host, and a delimiter a host chose is never used"
-)]
-#[case::header_when_allowed(
-    "#jinja2: trim_blocks: False
-x
-",
-    json!({"src": "t.j2", "dest": "/tmp/x"}),
-    "src",
-    HostNamedPaths::Allow,
-    "t.j2 starts with a '#jinja2:' line, which a host-named file may not use"
-)]
-fn a_host_never_moves_the_delimiters(
-    #[case] text: &str,
-    #[case] args: Value,
-    #[case] untrusted: &str,
+#[case::allow(HostNamedPaths::Allow, false)]
+#[case::contained(HostNamedPaths::Contained, true)]
+#[case::refuse(HostNamedPaths::Refuse, true)]
+fn a_delimiter_a_host_chose_is_read_as_the_mode_says(
     #[case] mode: HostNamedPaths,
-    #[case] refusal: &str,
+    #[case] refuse: bool,
 ) {
-    let dir = with_template("t.j2", text);
-    let untrusted: BTreeSet<String> = [untrusted.to_string()].into();
-    let mut plugin = start_mode(mode, &dir, args, &untrusted, &HostVars::default());
-    assert!(refused(plugin.as_mut()).contains(refusal));
-}
-
-/// The same file, named by a host, is read under `contained`: it lies in the author's directory.
-#[test]
-fn a_header_in_the_author_s_directory_is_read_when_contained() {
     let dir = with_template(
         "t.j2",
-        "#jinja2: trim_blocks: False
-x
+        "x [[ 1 ]]
+",
+    );
+    let untrusted: BTreeSet<String> = ["variable_start_string".to_string()].into();
+    let args = json!({"src": "t.j2", "dest": "/tmp/x", "variable_start_string": "[["});
+    let mut plugin = start_mode(mode, &dir, args, &untrusted, &HostVars::default());
+    if refuse {
+        assert_eq!(
+            refused(plugin.as_mut()),
+            "the 'variable_start_string' of this task was named by a managed host, and a delimiter a host chose is never used"
+        );
+    } else {
+        assert_eq!(
+            staged(&sent(plugin.as_mut())),
+            "x 1
+"
+        );
+    }
+}
+
+/// A `#jinja2:` line in a file a host named is read when the file is in the author's directory.
+#[rstest::rstest]
+#[case::allow(HostNamedPaths::Allow)]
+#[case::contained(HostNamedPaths::Contained)]
+fn a_header_in_a_file_a_host_named_is_read(#[case] mode: HostNamedPaths) {
+    let dir = with_template(
+        "t.j2",
+        "#jinja2: variable_start_string:'[['
+x [[ 1 ]]
 ",
     );
     let untrusted: BTreeSet<String> = ["src".to_string()].into();
     let args = json!({"src": "t.j2", "dest": "/tmp/x"});
-    let mut plugin = start_mode(
-        HostNamedPaths::Contained,
-        &dir,
-        args,
-        &untrusted,
-        &HostVars::default(),
-    );
+    let mut plugin = start_mode(mode, &dir, args, &untrusted, &HostVars::default());
     assert_eq!(
         staged(&sent(plugin.as_mut())),
-        "x
+        "x 1
 "
     );
 }

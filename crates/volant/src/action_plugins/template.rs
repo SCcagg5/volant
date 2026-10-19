@@ -162,11 +162,12 @@ fn rendered(ctx: &Context<'_>) -> Result<CopyOf, String> {
         Some("\r\n" | "\\r\\n") => "\r\n",
         Some(_) => return Err("newline_sequence needs to be one of: \n, \r or \r\n".into()),
     };
-    // The delimiters pick which part of the author's template is code. A value a managed host
-    // chose must not move that line.
-    if let Some((name, _)) = DELIMITERS
-        .iter()
-        .find(|(name, _)| ctx.args_untrusted.contains(*name))
+    // The delimiters pick which part of the author's template is code. ansible-core takes a
+    // value a managed host chose, so `allow` does too; the stricter modes refuse it.
+    if ctx.host_named_paths != crate::config::HostNamedPaths::Allow
+        && let Some((name, _)) = DELIMITERS
+            .iter()
+            .find(|(name, _)| ctx.args_untrusted.contains(*name))
     {
         return Err(format!(
             "the '{name}' of this task was named by a managed host, and a delimiter a host chose is never used"
@@ -195,18 +196,6 @@ fn rendered(ctx: &Context<'_>) -> Result<CopyOf, String> {
     }
     let text = String::from_utf8(bytes)
         .map_err(|_| format!("could not read src={} as utf-8", found.display()))?;
-
-    // A file a host named can be any file the controller holds, and a `#jinja2:` line in it would
-    // set how it is parsed. Only the directories of the author (`host_named_paths = contained`)
-    // keep that line the author's own.
-    if ctx.args_untrusted.contains("src")
-        && ctx.host_named_paths != crate::config::HostNamedPaths::Contained
-        && text.starts_with("#jinja2:")
-    {
-        return Err(format!(
-            "the 'src' of this task was named by a managed host, and {src} starts with a '#jinja2:' line, which a host-named file may not use (set host_named_paths = contained to read it from the template directories)"
-        ));
-    }
 
     let vars = template_vars(
         ctx.item_vars,
