@@ -12,6 +12,61 @@ use serde_json::{Map, Value};
 use super::env::chained_attr;
 use super::{ATTR_KEY, CONCAT_KEY, CONTEXT_KEY, ITEM_KEY, QUERY_KEY, TAINT_KEY, Tainted};
 
+/// The name, in the variables an extended loop shares between its items, under which the list of
+/// all the items is kept once. It is no variable: a render never finds it by name, it reads it
+/// through `ansible_loop.allitems`, and `HostVars::own_variables` puts it back into `ansible_loop`.
+pub const ALLITEMS_KEY: &str = "volant::allitems";
+
+/// The variable an extended loop binds.
+const LOOP_KEY: &str = "ansible_loop";
+
+/// The fields of `ansible_loop` that sit before `allitems`, as the reference lists them.
+const BEFORE_ALLITEMS: &str = "revindex0";
+
+/// `fields` with the list of all the items in its place.
+pub fn with_allitems(fields: &Map<String, Value>, all: &Value) -> Map<String, Value> {
+    let mut out = Map::new();
+    for (key, value) in fields {
+        out.insert(key.clone(), value.clone());
+        if key == BEFORE_ALLITEMS {
+            out.insert("allitems".into(), all.clone());
+        }
+    }
+    out.entry("allitems").or_insert_with(|| all.clone());
+    out
+}
+
+/// `ansible_loop` of an extended loop: its own fields, and `allitems` read from the one list the
+/// whole loop shares, converted only when a template asks for it.
+#[derive(Debug)]
+struct LoopView {
+    fields: Map<String, Value>,
+    base: Arc<Map<String, Value>>,
+}
+
+impl Object for LoopView {
+    fn get_value(self: &Arc<Self>, key: &minijinja::Value) -> Option<minijinja::Value> {
+        let key = key.as_str()?;
+        let found = if key == "allitems" {
+            self.base.get(ALLITEMS_KEY)
+        } else {
+            self.fields.get(key)
+        };
+        found.map(minijinja::Value::from_serialize)
+    }
+
+    fn enumerate(self: &Arc<Self>) -> Enumerator {
+        let mut keys = Vec::new();
+        for key in self.fields.keys() {
+            keys.push(minijinja::Value::from(key.as_str()));
+            if key == BEFORE_ALLITEMS {
+                keys.push(minijinja::Value::from("allitems"));
+            }
+        }
+        Enumerator::Values(keys)
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct TaintSink(pub(crate) Tainted);
 
@@ -108,12 +163,24 @@ pub(super) struct Context {
     memo: Memo,
 }
 
+/// Puts the shared list of all the items back into `ansible_loop` and drops the shared entry.
+pub fn complete_loop(all: &mut Map<String, Value>) {
+    let Some(list) = all.shift_remove(ALLITEMS_KEY) else {
+        return;
+    };
+    if let Some(Value::Object(fields)) = all.get(LOOP_KEY) {
+        let whole = with_allitems(fields, &list);
+        all.insert(LOOP_KEY.into(), Value::Object(whole));
+    }
+}
+
 impl Context {
     /// The host's own variables as one map: the base shared by the items of a loop, then the
     /// map over it.
     pub(super) fn flat_vars(&self) -> Map<String, Value> {
         let mut all = self.base.as_deref().cloned().unwrap_or_default();
         all.extend(self.vars.iter().map(|(k, v)| (k.clone(), v.clone())));
+        complete_loop(&mut all);
         all
     }
 }
@@ -123,7 +190,7 @@ impl Object for Context {
         let key = key.as_str()?;
         // Not a variable: the VM looks the root up before the globals, so a variable of that
         // name (`-e '{"volant::concat": 1}'`) would otherwise replace every `~`.
-        if key == CONCAT_KEY || key == QUERY_KEY || key == ITEM_KEY {
+        if key == CONCAT_KEY || key == QUERY_KEY || key == ITEM_KEY || key == ALLITEMS_KEY {
             return None;
         }
         if let Some(attr) = key.strip_prefix(ATTR_KEY) {
@@ -171,6 +238,15 @@ impl Object for Context {
             {
                 return Some(minijinja::Value::from_serialize(value));
             }
+            if key == LOOP_KEY
+                && let (Some(Value::Object(fields)), Some(base)) = (self.vars.get(key), &self.base)
+                && base.contains_key(ALLITEMS_KEY)
+            {
+                return Some(minijinja::Value::from_object(LoopView {
+                    fields: fields.clone(),
+                    base: Arc::clone(base),
+                }));
+            }
             self.vars
                 .get(key)
                 .or_else(|| self.base.as_ref().and_then(|base| base.get(key)))
@@ -185,7 +261,7 @@ impl Object for Context {
             .map(|k| minijinja::Value::from(k.as_str()))
             .collect();
         for key in self.base.iter().flat_map(|b| b.keys()) {
-            if !self.vars.contains_key(key) {
+            if !self.vars.contains_key(key) && key != ALLITEMS_KEY {
                 keys.push(minijinja::Value::from(key.as_str()));
             }
         }
