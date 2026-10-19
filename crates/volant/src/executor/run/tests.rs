@@ -5138,6 +5138,56 @@ h1
     assert_eq!(store.custom_stats().hosts()["h1"]["n"], json!(1));
 }
 
+/// Output of many short lines fails rather than split into millions of strings, `stdout` and
+/// `stderr` together; ordinary lines may pass the bound, one for every 32 bytes.
+#[test]
+fn the_lines_of_output_are_bounded_for_stdout_and_stderr_together() {
+    let max = volant_protocol::shape::MAX_VALUES;
+    let (short, long, longer) = (
+        "
+",
+        format!(
+            "{}
+",
+            "x".repeat(30)
+        ),
+        format!(
+            "{}
+",
+            "x".repeat(31)
+        ),
+    );
+    // (a line of stdout, lines of stdout, lines of stderr, the limit a refusal names)
+    for (line, out, err, refused) in [
+        (short, max, 0, None),
+        (short, max + 1, 0, Some(max)),
+        (short, max / 2, max / 2, None),
+        (short, max / 2, max / 2 + 1, Some(max)),
+        (short, 0, max + 1, Some(max)),
+        (longer.as_str(), 600_000, 0, None),
+        (longer.as_str(), 600_000, 1, Some(600_000)),
+        (long.as_str(), 600_000, 0, Some(581_250)),
+    ] {
+        let mut result = TaskResult(vars(
+            json!({"rc": 0, "stdout": line.repeat(out), "stderr": "
+".repeat(err)}),
+        ));
+        add_output_lines(&mut result);
+        if let Some(limit) = refused {
+            assert!(result.failed(), "{out} and {err} lines");
+            let msg = result.0["msg"].as_str().unwrap();
+            assert!(
+                msg.contains(&format!("more lines than the limit of {limit} ")),
+                "{msg}"
+            );
+            assert!(!result.0.contains_key("stdout"));
+        } else {
+            assert_eq!(result.0["stdout_lines"].as_array().unwrap().len(), out);
+            assert_eq!(result.0["stderr_lines"].as_array().unwrap().len(), err);
+        }
+    }
+}
+
 /// One `add_host` or `group_by` task as `record_inventory_results` sees it.
 struct OriginCase {
     module: &'static str,
