@@ -7,6 +7,8 @@ use std::time::{Duration, SystemTime};
 
 use serde_json::{Map, Value};
 
+#[cfg(unix)]
+use super::key::CONFIG_BOUND;
 use super::key::{configs, expanded, key_from, plugin_files};
 use super::sweep::sweep;
 use super::*;
@@ -737,7 +739,7 @@ fn the_key_reads_only_a_regular_file_and_only_up_to_the_bound() {
     assert_eq!(read(&cwd)[0].1, b"[defaults]\n");
 
     let cwd = place("exact");
-    let text = vec![b'#'; usize::try_from(super::key::CONFIG_BOUND).unwrap()];
+    let text = vec![b'#'; usize::try_from(CONFIG_BOUND).unwrap()];
     fs::write(cwd.join("ansible.cfg"), &text).unwrap();
     assert_eq!(read(&cwd)[0].1, text);
 
