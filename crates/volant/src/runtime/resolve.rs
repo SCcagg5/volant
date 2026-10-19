@@ -204,6 +204,13 @@ pub(crate) fn set_test_python(python: Option<&str>) {
     TEST_PYTHON.with_borrow_mut(|held| *held = python.map(str::to_owned));
 }
 
+/// The flag that keeps the working directory off the interpreter's module path. Without it,
+/// `python -c` and `python -m` import `ansible.py` or `json.py` from the directory the run starts
+/// in, ahead of the real module, as `ansible-playbook` (a script) never does. It leaves
+/// `PYTHONPATH` and the user site alone: they are how a user's own interpreter finds its
+/// ansible-core. Python 3.11 added it, and ansible-core 2.19 needs that version too.
+pub(crate) const NO_CWD_IMPORTS: &str = "-P";
+
 /// Whether `python` imports ansible-core. The probe is the import itself rather than a version
 /// string: an interpreter that cannot import `ansible` cannot build a payload, whatever it reports.
 pub(crate) fn has_ansible(python: &str) -> bool {
@@ -227,7 +234,7 @@ pub(crate) fn has_ansible(python: &str) -> bool {
 /// Whether `python`, started in `dir` (the working directory when `None`), imports `module`.
 pub(super) fn imports(python: &str, module: &str, dir: Option<&Path>) -> bool {
     let mut probe = Command::new(python);
-    probe.args(["-c", &format!("import {module}")]);
+    probe.args([NO_CWD_IMPORTS, "-c", &format!("import {module}")]);
     if let Some(dir) = dir {
         probe.current_dir(dir);
     }
