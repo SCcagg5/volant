@@ -7,7 +7,7 @@ use std::sync::Arc;
 use serde_json::{Map, Value};
 
 use super::load::extend;
-use super::{Scope, VarStore};
+use super::{Added, Scope, VarStore};
 use crate::template::Vars;
 
 /// The variables a render with no host reads. Owned, because the render borrows all of it at once.
@@ -18,6 +18,9 @@ pub(crate) struct PlayView {
     pub shared: Arc<Map<String, Value>>,
     /// Every host's view, once the run has a play behind it.
     pub hostvars: Option<Arc<Map<String, Value>>>,
+    /// The names that are data. Reading one makes the render's result data, which is never
+    /// evaluated again.
+    pub untrusted: BTreeSet<String>,
     pub untrusted_hosts: Arc<BTreeSet<String>>,
 }
 
@@ -28,7 +31,7 @@ impl PlayView {
             hostvars: self.hostvars.as_ref(),
             shared: Some(&self.shared),
             facts: None,
-            untrusted: None,
+            untrusted: Some(&self.untrusted),
             untrusted_hosts: Some(&self.untrusted_hosts),
             base: None,
         }
@@ -55,11 +58,42 @@ impl VarStore {
         extend(&mut vars, &scope.role_vars);
         extend(&mut vars, &self.extra);
         extend(&mut vars, &self.play_magic());
+        let (untrusted, untrusted_hosts) = self.data_names();
         PlayView {
             vars,
             shared: self.shared_values(scope),
             hostvars: with_hostvars.then(|| self.hostvars_base()),
-            untrusted_hosts: self.untrusted_hosts(),
+            untrusted,
+            untrusted_hosts,
         }
+    }
+
+    /// What reading the inventory's names makes data. A host or a group that `add_host` or
+    /// `group_by` made while the playbook ran can be named by text a managed host sent back, so
+    /// once the run has made one, everything that lists names is data: `groups`, the play's
+    /// host lists and `hostvars`, and the hosts made are the hosts whose entry in `hostvars` is.
+    /// This reads the run's own record of what it added, whatever the name looks like.
+    fn data_names(&mut self) -> (BTreeSet<String>, Arc<BTreeSet<String>>) {
+        let mut hosts = self.untrusted_hosts();
+        if self.added.is_empty() {
+            return (BTreeSet::new(), hosts);
+        }
+        let made = Arc::make_mut(&mut hosts);
+        for change in &self.added {
+            match change {
+                Added::Host(name, _) => made.insert(name.clone()),
+                Added::Member(host, _) => made.insert(host.clone()),
+                Added::Child(..) => false,
+            };
+        }
+        let names = [
+            "groups",
+            "hostvars",
+            "ansible_play_hosts",
+            "ansible_play_hosts_all",
+            "ansible_play_batch",
+            "play_hosts",
+        ];
+        (names.iter().map(|n| (*n).to_string()).collect(), hosts)
     }
 }
