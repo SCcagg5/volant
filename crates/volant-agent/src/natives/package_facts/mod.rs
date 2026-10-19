@@ -54,7 +54,6 @@ mod imp {
     use std::collections::{BTreeMap, BTreeSet};
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
-    use std::time::Instant;
 
     use serde_json::{Map, Value};
     use volant_protocol::TaskResult;
@@ -75,7 +74,7 @@ mod imp {
         cancelled: &dyn Fn() -> bool,
     ) -> NativeRun {
         let clock = Clock {
-            deadline: context.timeout.map(|timeout| Instant::now() + timeout),
+            deadline: context.deadline(),
             cancelled,
         };
         match answer(args, &Root::real(), &module_env(context), clock) {

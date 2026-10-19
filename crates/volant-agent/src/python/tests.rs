@@ -1052,6 +1052,25 @@ fn a_module_that_outlives_its_timeout_is_killed() {
     assert!(server.alive());
 }
 
+/// A `timeout` the clock cannot count to is no deadline: the module runs and answers.
+#[test]
+fn a_timeout_past_the_clock_does_not_stop_a_module() {
+    let blob = stub_blob(SLEEP_IF_ASKED);
+    let mut server = Server::start(HOST_PYTHON, blob.path(), &|| false).unwrap();
+    let context = Context {
+        timeout: Some(Duration::from_secs(u64::MAX)),
+        ..Context::default()
+    };
+    let result = done(server.run(
+        &payload("ansible.modules.probe"),
+        &args(json!({})),
+        &context,
+        &|| false,
+    ));
+    assert!(!result.failed(), "{:?}", result.0);
+    assert!(server.alive());
+}
+
 /// A payload that is not cached fails naming it; one no server can start against refuses the
 /// rest of the batch.
 #[test]
