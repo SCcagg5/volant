@@ -54,6 +54,16 @@ sequenceDiagram
 
 [Cross-host batching](/hosts/batching/) is an opt-in setting that lets each host run ahead through tasks that do not depend on the others.
 
+### A play's hosts as a template
+
+`hosts` can be a template, such as `{{ groups['servers'] | first }}` or `{{ target | default('all') }}`. It renders when the play starts, so it sees what the plays before it did with `add_host`, `set_fact` and `meta: refresh_inventory`. A play with no `name` is named by the rendered pattern.
+
+The render has no host. It reads `groups`, the extra variables, the play's `vars:` and `vars_files`, the variables roles export and the magic variables that need no host. It does not read inventory variables, `group_vars` files, facts or `inventory_hostname`, and `hostvars` exists only after a play has run. `ansible_play_hosts_all` lists every host of the inventory, narrowed by `--limit`.
+
+A string is one pattern. A list is a list of patterns. An empty list matches no host and the play is skipped. An undefined variable, an empty string or a result that is not a string stops the run with exit 4 before the banner. `--limit` narrows the rendered hosts afterwards. `--list-hosts`, `--list-tasks` and `--syntax-check` render the same way, with no play behind them.
+
+Text a host sent back is data. A registered result that holds `{{ ... }}` is a pattern of its own words and is not evaluated.
+
 ### Other strategies
 
 `strategy: free` lets every host walk the play at its own pace. A banner is printed whenever the task changes from the one the last line belonged to, so the output follows the hosts, not the task list. Hosts still meet where a step is shared by its keywords (`run_once`, `pause`, `any_errors_fatal`) and at handlers and dynamic includes.
