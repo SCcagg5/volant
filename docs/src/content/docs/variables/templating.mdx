@@ -72,6 +72,7 @@ What differs from CPython:
 - `casefold` is lower case plus `ß` to `ss`. It is not the full Unicode case folding.
 - `isdigit`, `isalpha` and the other tests outside ASCII follow Rust's Unicode tables. `'½'.isdigit()` is true here and false in Python.
 - A format field can read an item (`{0[a]}`, `{a[0]}`) but not an attribute (`{0.real}`).
+- A width, a count or a precision that would make a method build more than 256 MiB of text (`'a'.ljust(10000000000)`, `'{:.300000000f}'.format(x)`) stops the task with an error that names the limit. Python builds the text until the machine runs out of memory. A number too large for an index gives Python's own error, `Python int too large to convert to C ssize_t`.
 - `encode` and `decode` are not available, because Volant has no bytes values.
 - A backslash escape such as `'\n'` inside a template string is read by the template engine. ansible-core 2.19 keeps the two characters. Pass a value in a variable when the text must hold a real newline.
 
