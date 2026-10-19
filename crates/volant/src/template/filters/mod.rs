@@ -261,17 +261,13 @@ pub fn register(
     super::test_plugins::register(env);
     add_test(env, "truthy", |v: Value| truthy(&json(&v)));
     add_test(env, "falsy", |v: Value| !truthy(&json(&v)));
-    add_test(env, "match", |v: Value, pattern: String, kwargs: Kwargs| {
-        regex_test(&v, &pattern, true, kwargs)
-    });
-    add_test(
-        env,
-        "search",
-        |v: Value, pattern: String, kwargs: Kwargs| regex_test(&v, &pattern, false, kwargs),
-    );
-    add_test(env, "regex", |v: Value, pattern: String, kwargs: Kwargs| {
-        regex_test(&v, &pattern, false, kwargs)
-    });
+    for name in ["match", "search", "regex"] {
+        add_test(
+            env,
+            name,
+            move |v: Value, rest: Rest<Value>, kwargs: Kwargs| regex_test(&v, &rest, &kwargs, name),
+        );
+    }
     add_test(env, "contains", |seq: Value, item: Value| {
         seq.try_iter().is_ok_and(|mut it| it.any(|x| x == item))
     });
