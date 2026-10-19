@@ -568,6 +568,216 @@
   },
   {
     "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: &n 5\nb: *n"
+      }
+    },
+    "result": {
+      "a": 5,
+      "b": 5
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: &n yes\nb: [*n, *n]"
+      }
+    },
+    "result": {
+      "a": true,
+      "b": [
+        true,
+        true
+      ]
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: &k key\nm: {*k : 1}"
+      }
+    },
+    "result": {
+      "a": "key",
+      "m": {
+        "key": 1
+      }
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: &n 010\nb: *n"
+      }
+    },
+    "result": {
+      "a": 8,
+      "b": 8
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: &n \"5\"\nb: *n"
+      }
+    },
+    "result": {
+      "a": "5",
+      "b": "5"
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: &n |\n  x\n  y\nb: *n"
+      }
+    },
+    "result": {
+      "a": "x\ny\n",
+      "b": "x\ny\n"
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: !!str 5"
+      }
+    },
+    "result": {
+      "a": "5"
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: !!int \"5\""
+      }
+    },
+    "result": {
+      "a": 5
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: !!float 5"
+      }
+    },
+    "result": {
+      "a": 5.0
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: !!bool \"yes\""
+      }
+    },
+    "result": {
+      "a": true
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: !!null x"
+      }
+    },
+    "result": {
+      "a": null
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: [1:30, 190:20:30, 1:30.5]"
+      }
+    },
+    "result": {
+      "a": [
+        90,
+        685230,
+        90.5
+      ]
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: [+.5, -.5, .5, 5., 1.e+3]"
+      }
+    },
+    "result": {
+      "a": [
+        "+.5",
+        "-.5",
+        0.5,
+        5.0,
+        1000.0
+      ]
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: [010, 08, 0o10, 0x1F, 1_000, 1e3, 1.0e+3]"
+      }
+    },
+    "result": {
+      "a": [
+        8,
+        "08",
+        "0o10",
+        31,
+        1000,
+        "1e3",
+        1000.0
+      ]
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml | to_json }}",
+      "vars": {
+        "s": "a: [2020-01-02, 2020-1-2, 2020-01-02 10:11:12, 2020-01-02T10:11:12Z, 2020-01-02t10:11:12.5+01:00]"
+      }
+    },
+    "result": "{\"a\": [\"2020-01-02\", \"2020-1-2\", \"2020-01-02T10:11:12\", \"2020-01-02T10:11:12+00:00\", \"2020-01-02T10:11:12.500000+01:00\"]}"
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: !custom x"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The filter plugin 'ansible.builtin.from_yaml' failed: could not determine a constructor for the tag '!custom'\n  in \"<unicode string>\", line 1, column 4"
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: !!int abc"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The filter plugin 'ansible.builtin.from_yaml' failed: invalid literal for int() with base 10: 'abc'"
+  },
+  {
+    "case": {
       "template": "{{ missing | default('fallback') }}"
     },
     "result": "fallback"
