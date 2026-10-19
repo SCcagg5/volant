@@ -242,7 +242,7 @@ impl Templar {
 /// The count of literal `\n` characters at the very end of `s`, stopping at the first character
 /// that is not one (a `\r` included): on `"x\r\n\r\n"` this is 1, not 2, which is what makes it
 /// match the reference's own count on the text it was given, before any `\r\n` normalisation.
-fn trailing_newlines(s: &str) -> usize {
+pub(super) fn trailing_newlines(s: &str) -> usize {
     s.chars().rev().take_while(|&c| c == '\n').count()
 }
 
