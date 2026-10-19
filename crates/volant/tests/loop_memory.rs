@@ -54,12 +54,16 @@ fn peak_megabytes(dir: &std::path::Path, playbook: &str) -> u64 {
     }
 }
 
+/// The bound is for a debug build, which the tests use: a release build peaks lower. The runs it
+/// fences off are an order of magnitude apart (about 1 GB before the fix, under 100 MB after).
+const DEBUG_BUILD_BOUND_MB: u64 = 250;
+
 /// A loop walks the `LINES` lines a command printed. Each item used to own a copy of the host's
 /// variables, `r` among them, so the memory was the number of items times the result's size.
 #[test]
 fn a_loop_over_a_long_result_does_not_copy_it_for_every_item() {
     const LINES: usize = 3000;
-    const BOUND_MB: u64 = 250;
+    const BOUND_MB: u64 = DEBUG_BUILD_BOUND_MB;
     let dir = std::env::temp_dir().join(format!("volant-loop-memory-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("the directory is made");
     let playbook = format!(
@@ -70,5 +74,23 @@ fn a_loop_over_a_long_result_does_not_copy_it_for_every_item() {
     assert!(
         peak < BOUND_MB,
         "a loop of {LINES} items over a {LINES}-line result peaked at {peak} MB, the bound is {BOUND_MB} MB"
+    );
+}
+
+/// An extended loop hands every item the list of all the items: one list for the loop, not one
+/// copy per item, and each item still reads the whole list and its own place in it.
+#[test]
+fn an_extended_loop_over_a_long_result_shares_the_list_of_all_items() {
+    const LINES: usize = 3000;
+    let dir = std::env::temp_dir().join(format!("volant-loop-extended-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("the directory is made");
+    let playbook = format!(
+        "- hosts: h1\n  gather_facts: false\n  tasks:\n    - command: seq 1 {LINES}\n      register: r\n    - debug: {{msg: \"{{{{ item }}}}\"}}\n      loop: \"{{{{ r.stdout_lines }}}}\"\n      loop_control: {{label: x, extended: true}}\n      failed_when: (ansible_loop.allitems | length) != {LINES} or ansible_loop.allitems[ansible_loop.index0] != item\n"
+    );
+    let peak = peak_megabytes(&dir, &playbook);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        peak < DEBUG_BUILD_BOUND_MB,
+        "an extended loop of {LINES} items peaked at {peak} MB, the bound is {DEBUG_BUILD_BOUND_MB} MB"
     );
 }

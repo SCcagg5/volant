@@ -18,7 +18,7 @@ mod test_plugins;
 mod vm;
 mod yaml_dump;
 
-pub use context::Vars;
+pub use context::{ALLITEMS_KEY, Vars, complete_loop, with_allitems};
 use context::{Context, TaintSink, context_of};
 pub(crate) use env::{
     add_filter, add_test, add_text_filter, holds_undefined, truthy, undefined_through,

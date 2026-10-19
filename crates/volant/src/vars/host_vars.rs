@@ -100,6 +100,18 @@ impl HostVars {
             .or_else(|| self.base.get(key))
     }
 
+    /// One name as a whole: `ansible_loop` with the list of all the items of an extended loop in
+    /// it, which [`HostVars::get`] leaves out because the loop shares it.
+    pub fn get_whole(&self, key: &str) -> Option<Value> {
+        let value = self.get(key)?;
+        match (key, value, self.base.get(crate::template::ALLITEMS_KEY)) {
+            ("ansible_loop", Value::Object(fields), Some(list)) => {
+                Some(Value::Object(crate::template::with_allitems(fields, list)))
+            }
+            (_, value, _) => Some(value.clone()),
+        }
+    }
+
     /// Every variable of the host's own map, the shared base first and the map over it.
     pub fn own_variables(&self) -> std::borrow::Cow<'_, Map<String, Value>> {
         if self.base.is_empty() {
@@ -107,15 +119,21 @@ impl HostVars {
         }
         let mut all = Map::clone(&self.base);
         all.extend(self.map.iter().map(|(k, v)| (k.clone(), v.clone())));
+        crate::template::complete_loop(&mut all);
         std::borrow::Cow::Owned(all)
     }
 
     /// Moves the values no render will change into [`HostVars::base`], so that a copy of these
     /// variables for each item of a loop costs the values left in `map`, not all of them.
     ///
-    /// Left in `map`: a value that still holds a template, because binding the loop variable
-    /// can make it render, and a value written to a name that came from a managed host stays out
-    /// of it because it is data and no render touches it, whatever text it holds.
+    /// The invariant the readers rely on: **`base` never holds a trusted value that contains a
+    /// template.** What a render could still change stays in `map`, which is read first and is
+    /// the layer that is resolved again for each item. What goes to `base` is a value with no
+    /// template in it, or a name that came from a managed host: that is data, and no render
+    /// touches it, whatever text it holds. A reader that treats a name missing from `map` as
+    /// holding nothing to render (the reads of the template context, and the design of the open
+    /// change that renders a variable when another template reads it) is right only while this
+    /// holds. Keep it when `base` gains an entry.
     pub fn shared_by_items(mut self) -> Self {
         let mut base = Map::clone(&self.base);
         let mut kept = Map::new();
