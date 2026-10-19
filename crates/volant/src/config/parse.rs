@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use super::paths::{expand_home, path_list};
 use super::settings::{
-    boolean, cache_plugin, forks, gathering, host_named_paths, integer, runtime_mode, switch,
-    timeout_secs,
+    boolean, cache_plugin, forks, gathering, host_named_dest_dirs, host_named_paths, integer,
+    runtime_mode, switch, timeout_secs,
 };
 use super::{Config, tag_list};
 
@@ -81,6 +81,9 @@ pub(super) fn parse(text: &str, base: &Path, origin: &str) -> anyhow::Result<Con
                     }
                 }
                 "host_named_paths" => config.host_named_paths = host_named_paths(value, origin)?,
+                "host_named_dest_dirs" => {
+                    config.host_named_dest_dirs = host_named_dest_dirs(value, origin)?;
+                }
                 "native_modules" => {
                     config.native_modules = boolean("VOLANT_NATIVE_MODULES", origin, value)?;
                 }

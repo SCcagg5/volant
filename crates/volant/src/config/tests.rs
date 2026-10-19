@@ -632,3 +632,81 @@ fn volant_host_named_paths_in_the_environment_sets_the_mode() {
         HostNamedPaths::Allow
     );
 }
+
+/// `[volant] host_named_dest_dirs` is a colon-separated list of absolute directories, empty when
+/// absent, and refuses any other entry with the key, the value and the entry.
+#[rstest::rstest]
+#[case::absent("[defaults]\nforks = 3\n", Ok(vec![]))]
+#[case::one("[volant]\nhost_named_dest_dirs = /srv/fetch\n", Ok(vec!["/srv/fetch"]))]
+#[case::two(
+    "[volant]\nhost_named_dest_dirs = /srv/a : /srv/b/\n",
+    Ok(vec!["/srv/a", "/srv/b/"])
+)]
+#[case::blank("[volant]\nhost_named_dest_dirs =\n", Ok(vec![]))]
+#[case::wrong_section("[defaults]\nhost_named_dest_dirs = /srv/a\n", Ok(vec![]))]
+#[case::relative(
+    "[volant]\nhost_named_dest_dirs = fetch\n",
+    Err(
+        "has an invalid value: 'fetch'; expected a colon-separated list of absolute directories (entry 'fetch' is not an absolute path)"
+    )
+)]
+#[case::tilde(
+    "[volant]\nhost_named_dest_dirs = /srv/a:~/fetch\n",
+    Err("(entry '~/fetch' is not an absolute path)")
+)]
+#[case::dotdot(
+    "[volant]\nhost_named_dest_dirs = /srv/a/../b\n",
+    Err("(entry '/srv/a/../b' has a '..' component)")
+)]
+#[case::empty_entry(
+    "[volant]\nhost_named_dest_dirs = /srv/a::/srv/b\n",
+    Err("(entry '' is empty)")
+)]
+#[case::root(
+    "[volant]\nhost_named_dest_dirs = /\n",
+    Err("(entry '/' is the root directory)")
+)]
+fn the_volant_section_names_the_directories_a_host_named_dest_may_use(
+    #[case] text: &str,
+    #[case] expected: Result<Vec<&str>, &str>,
+) {
+    match (parse(text, Path::new("/base"), "ansible.cfg"), expected) {
+        (Ok(config), Ok(dirs)) => {
+            let want: Vec<PathBuf> = dirs.into_iter().map(PathBuf::from).collect();
+            assert_eq!(config.host_named_dest_dirs, want);
+        }
+        (Err(err), Err(says)) => {
+            assert_eq!(crate::stats::error_code(&err), 5, "{err:#}");
+            let said = format!("{err:#}");
+            assert!(said.contains("Config 'VOLANT_HOST_NAMED_DEST_DIRS' from 'ansible.cfg'"));
+            assert!(said.contains(says), "{said}");
+        }
+        (got, expected) => panic!(
+            "got {:?}, expected {expected:?}",
+            got.map(|c| c.host_named_dest_dirs)
+        ),
+    }
+}
+
+/// `VOLANT_HOST_NAMED_DEST_DIRS` replaces the file's list and is refused the same way.
+#[test]
+fn volant_host_named_dest_dirs_in_the_environment_sets_the_list() {
+    unsafe {
+        std::env::set_var("ANSIBLE_CONFIG", "/nonexistent/volant/ansible.cfg");
+        std::env::set_var("VOLANT_HOST_NAMED_DEST_DIRS", "/srv/a:/srv/b");
+    }
+    assert_eq!(
+        Config::load().unwrap().host_named_dest_dirs,
+        [PathBuf::from("/srv/a"), PathBuf::from("/srv/b")]
+    );
+    unsafe { std::env::set_var("VOLANT_HOST_NAMED_DEST_DIRS", "rel") };
+    let err = Config::load().unwrap_err();
+    assert!(
+        format!("{err:#}").contains(
+            "Config 'VOLANT_HOST_NAMED_DEST_DIRS' from 'env: VOLANT_HOST_NAMED_DEST_DIRS' has an invalid value: 'rel'; expected a colon-separated list of absolute directories (entry 'rel' is not an absolute path)"
+        ),
+        "{err:#}"
+    );
+    unsafe { std::env::remove_var("VOLANT_HOST_NAMED_DEST_DIRS") };
+    assert!(Config::load().unwrap().host_named_dest_dirs.is_empty());
+}
