@@ -68,6 +68,10 @@ pub struct Config {
     /// 2.19.12: `[defaults] force_handlers = True` and `--force-handlers` give the same run, down
     /// to the recap.
     pub force_handlers: bool,
+    /// `[defaults] localhost_warning` or `ANSIBLE_LOCALHOST_WARNING`: warn when the inventory
+    /// holds no host and only the implicit `localhost` is left. On by default, as in the
+    /// reference.
+    pub localhost_warning: bool,
     /// `[defaults] show_custom_stats` or `ANSIBLE_SHOW_CUSTOM_STATS`: print what `set_stats`
     /// collected after the recap. Off by default, as in the reference.
     pub show_custom_stats: bool,
@@ -146,6 +150,7 @@ impl Default for Config {
             vault_password_file: None,
             vault_identity_list: Vec::new(),
             force_handlers: false,
+            localhost_warning: true,
             show_custom_stats: false,
             enable_task_debugger: false,
             roles_path: default_roles_path(),
@@ -284,6 +289,11 @@ impl Config {
             && let Some(on) = crate::yaml::bool_from_str(flag.trim())
         {
             config.force_handlers = on;
+        }
+        if let Ok(flag) = std::env::var("ANSIBLE_LOCALHOST_WARNING")
+            && let Some(on) = crate::yaml::bool_from_str(flag.trim())
+        {
+            config.localhost_warning = on;
         }
         if let Ok(flag) = std::env::var("ANSIBLE_SHOW_CUSTOM_STATS")
             && let Some(on) = crate::yaml::bool_from_str(flag.trim())

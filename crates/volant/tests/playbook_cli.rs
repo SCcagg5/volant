@@ -5585,6 +5585,53 @@ fn the_implicit_localhost_runs_under_the_controller_python() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// An inventory with no host leaves only the implicit `localhost`, and the run says so once, as
+/// ansible-core 2.19.12 does. `localhost_warning` silences it, and an inventory that holds a
+/// host never gets it.
+#[rstest::rstest]
+#[case::no_host("", &[], true)]
+#[case::a_host("h1 ansible_connection=local\n", &[], false)]
+#[case::silenced_by_the_environment("", &[("ANSIBLE_LOCALHOST_WARNING", "false")], false)]
+#[case::the_environment_can_ask_for_it("", &[("ANSIBLE_LOCALHOST_WARNING", "true")], true)]
+fn an_inventory_with_no_host_warns_that_only_localhost_is_left(
+    #[case] inventory: &str,
+    #[case] envs: &[(&str, &str)],
+    #[case] warns: bool,
+) {
+    let dir = probe_dir(&format!(
+        "empty-inventory-{}-{}",
+        inventory.len(),
+        envs.len()
+    ));
+    std::fs::write(dir.join("inv.ini"), inventory).expect("an inventory");
+    std::fs::write(
+        dir.join("play.yml"),
+        "- hosts: localhost\n  gather_facts: false\n  tasks:\n    - debug: msg=ok\n",
+    )
+    .expect("the play");
+    let out = volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            dir.join("play.yml").to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(60),
+        envs,
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "the run failed: {stderr}");
+    assert_eq!(
+        stderr.matches(
+            "[WARNING]: provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'"
+        )
+        .count(),
+        usize::from(warns),
+        "{stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A module that answers `<name> says <word>`, as a `library/` holds one.
 fn library_module(dir: &Path, name: &str, field: &str) {
     std::fs::create_dir_all(dir).expect("a library directory");

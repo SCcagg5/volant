@@ -66,7 +66,7 @@ Comments start with `#` or `;`.
 
 The controller is a host under three names: `localhost`, `127.0.0.1` and `::1`. When the inventory defines none of them, Volant makes one implicit host. It has a local connection and the controller's Python as `ansible_python_interpreter`, it is in no group, and `all` does not match it. A play that names it (`hosts: localhost`), a `delegate_to: localhost` and `hostvars['localhost']` all reach it. A `hostvars` loop does not list it.
 
-When the inventory defines one of the three names, that host answers to the other two as well, so `hosts: 127.0.0.1` runs on the inventory's `localhost` with its variables. The first one defined wins.
+When the inventory defines one of the three names, that host answers to the other two as well, so `hosts: 127.0.0.1` runs on the inventory's `localhost` with its variables. The first one defined wins. When the inventory holds no host at all, Volant warns that only `localhost` is available. Set `localhost_warning` to `false` to silence it.
 
 ## Group and host variables
 

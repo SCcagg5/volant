@@ -1,0 +1,5 @@
+# An inventory with no host leaves only the implicit localhost, `all` matches nothing, and the run
+# says so once before the first play.
+runs:
+  - args: [-i, empty.ini, play.yml]
+  - args: [-i, empty.ini, --list-hosts, play.yml]
