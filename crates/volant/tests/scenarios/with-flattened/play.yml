@@ -1,0 +1,29 @@
+- hosts: localhost
+  gather_facts: false
+  vars:
+    names: [x, [y, [z]]]
+  tasks:
+    - name: Nested literal
+      debug:
+        msg: "{{ i }}={{ item }}"
+      with_flattened: [[a, [b]], c]
+      loop_control:
+        label: "L-{{ item }}"
+        index_var: i
+
+    - name: Terms from variables
+      debug:
+        msg: "{{ item }}"
+      with_flattened:
+        - "{{ names }}"
+        - [1, [2]]
+
+    - name: One term that is a template
+      debug:
+        msg: "{{ item }}"
+      with_flattened: "{{ names }}"
+
+    - name: Nothing to walk
+      debug:
+        msg: never
+      with_flattened: []
