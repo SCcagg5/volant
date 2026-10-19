@@ -82,6 +82,47 @@ pub(super) fn host_named_paths(value: &str, origin: &str) -> anyhow::Result<supe
     })
 }
 
+/// `[volant] host_named_dest_dirs`: a colon-separated list of absolute directories, refused when
+/// an entry is empty, relative, written with `~` or `..`, or the root directory (which would
+/// hold every path). An empty value is an empty list. Nothing is looked up here: a directory
+/// that does not exist yet is checked when a `fetch` uses it.
+pub(super) fn host_named_dest_dirs(
+    value: &str,
+    origin: &str,
+) -> anyhow::Result<Vec<std::path::PathBuf>> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(Vec::new());
+    }
+    value
+        .split(':')
+        .map(|entry| {
+            let entry = entry.trim();
+            let path = std::path::Path::new(entry);
+            let why = if entry.is_empty() {
+                "is empty"
+            } else if !path.is_absolute() {
+                "is not an absolute path"
+            } else if path
+                .components()
+                .any(|part| part == std::path::Component::ParentDir)
+            {
+                "has a '..' component"
+            } else if path.components().count() == 1 {
+                "is the root directory"
+            } else {
+                return Ok(path.to_path_buf());
+            };
+            Err(crate::stats::Refusal::at(
+                5,
+                format!(
+                    "Config 'VOLANT_HOST_NAMED_DEST_DIRS' from '{origin}' has an invalid value: '{value}'; expected a colon-separated list of absolute directories (entry '{entry}' {why})"
+                ),
+            ))
+        })
+        .collect()
+}
+
 /// A negative `forks` is clamped to zero, where the single startup check refuses it with the
 /// reference's own words and the same exit 2 a literal zero gets: measured, `forks = -1` exits
 /// 2 with `The number of processes (--forks) must be >= 1`.

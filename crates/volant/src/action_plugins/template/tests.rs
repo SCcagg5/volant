@@ -116,6 +116,7 @@ fn start_mode(
         origin: &origin,
         playbook_dir: dir,
         host_named_paths: mode,
+        host_named_dest_dirs: &[],
         warnings: &mut warnings,
 
         environment: None,

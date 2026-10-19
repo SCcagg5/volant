@@ -485,6 +485,7 @@ async fn run_all(
         force_handlers: args.force_handlers || config.force_handlers,
         batching: config.batching,
         host_named_paths: config.host_named_paths,
+        host_named_dest_dirs: config.host_named_dest_dirs.clone(),
         control_dir: config
             .ssh_control_master
             .then(crate::transport::control_dir)

@@ -17,8 +17,8 @@ pub(crate) use locate::is_world_writable;
 use parse::parse;
 use paths::{default_collections_path, default_roles_path, expand_home, path_list};
 use settings::{
-    boolean, cache_plugin, forks, gathering, host_named_paths, integer, runtime_mode, switch,
-    timeout_secs,
+    boolean, cache_plugin, forks, gathering, host_named_dest_dirs, host_named_paths, integer,
+    runtime_mode, switch, timeout_secs,
 };
 
 /// Ansible's own default for `remote_tmp`, where the agent is cached on a host.
@@ -147,6 +147,10 @@ pub struct Config {
     /// reference does), `contained` or `refuse`. Not a playbook keyword, for the reason
     /// `batching` is not one.
     pub host_named_paths: HostNamedPaths,
+    /// `[volant] host_named_dest_dirs`, or `VOLANT_HOST_NAMED_DEST_DIRS`: the controller
+    /// directories under which a `fetch` writes when a managed host named its `dest`. Empty by
+    /// default, which refuses every such `dest`. Every entry is absolute, with no `..`.
+    pub host_named_dest_dirs: Vec<PathBuf>,
     /// `[volant] native_modules`, or `VOLANT_NATIVE_MODULES`: whether an agent may answer a task
     /// with its native module instead of running the task's Python module. On by default; off
     /// sends every Python task to Python, which is the switch to compare the two.
@@ -198,6 +202,7 @@ impl Default for Config {
             tags_skip: Vec::new(),
             batching: false,
             host_named_paths: HostNamedPaths::Allow,
+            host_named_dest_dirs: Vec::new(),
             native_modules: true,
             runtime: crate::runtime::Mode::Auto,
             ssh_control_master: true,
@@ -376,6 +381,10 @@ impl Config {
         }
         if let Ok(value) = std::env::var("VOLANT_HOST_NAMED_PATHS") {
             config.host_named_paths = host_named_paths(&value, "env: VOLANT_HOST_NAMED_PATHS")?;
+        }
+        if let Ok(value) = std::env::var("VOLANT_HOST_NAMED_DEST_DIRS") {
+            config.host_named_dest_dirs =
+                host_named_dest_dirs(&value, "env: VOLANT_HOST_NAMED_DEST_DIRS")?;
         }
         if let Ok(value) = std::env::var("VOLANT_NATIVE_MODULES") {
             config.native_modules = boolean(
