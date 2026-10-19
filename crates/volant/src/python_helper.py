@@ -856,7 +856,7 @@ def shim():
         module_implementation_preferences = (".py", "")
         _remote_is_local = False
 
-        def __init__(self, ident, shell, play_context):
+        def __init__(self, ident, shell, play_context, ssh_options=None):
             self._ident = ident
             self._shell = shell
             self._play_context = play_context
@@ -867,6 +867,13 @@ def shim():
                 "remote_addr": play_context.remote_addr,
                 "remote_user": play_context.remote_user,
             }
+            if play_context.connection == "ssh":
+                # What an ssh connection answers for the arguments a plugin hands to its own
+                # `ssh`: the host's own, and ansible-core's default for `ssh_args`.
+                options = ssh_options or {}
+                self._options["ssh_args"] = "-C -o ControlMaster=auto -o ControlPersist=60s"
+                self._options["ssh_common_args"] = options.get("ssh_common_args")
+                self._options["ssh_extra_args"] = options.get("ssh_extra_args")
 
         def __getattr__(self, name):
             if name.startswith("__"):
@@ -1070,6 +1077,7 @@ def run_action(ident, request):
         return {"error": {"kind": "not_found", "message": "the handler '%s' was not found" % name}}
     task_vars = dict(request.get("task_vars") or {})
     search_path = task_vars.pop("_volant_search_path", None)
+    ssh_options = task_vars.pop("_volant_ssh_options", None) or {}
     task = None
     try:
         context = PlayContext()
@@ -1108,7 +1116,7 @@ def run_action(ident, request):
         action = plugin_loader.action_loader.get(
             name,
             task=task,
-            connection=parts["Link"](ident, shell, context),
+            connection=parts["Link"](ident, shell, context, ssh_options),
             play_context=context,
             loader=loader,
             templar=templar,

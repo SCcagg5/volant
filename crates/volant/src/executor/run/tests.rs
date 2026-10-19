@@ -1901,10 +1901,12 @@ async fn plugin_item_on<R: Relink<FakeAgent>>(
     let mut stop_broken = false;
     let mut logs = Vec::new();
     let mut batch_id = 0;
+    let link = crate::action_plugins::LinkFacts::default();
     let ran = {
         let mut plugin = crate::action_plugins::start(
             kind,
             crate::action_plugins::Context {
+                link: &link,
                 args: &item.args,
                 args_untrusted: &item.args_untrusted,
                 running_vars: &running,
@@ -3174,9 +3176,7 @@ async fn copy_attempts<C: AgentChannel>(
     let start = PluginStart {
         kind,
         running_vars: &running,
-        delegated: false,
-        escalated: false,
-        local: false,
+        link: &crate::action_plugins::LinkFacts::default(),
         templar: &templar,
         origin: &origin,
         playbook_dir: Path::new("."),

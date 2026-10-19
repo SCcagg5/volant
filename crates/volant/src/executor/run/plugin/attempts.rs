@@ -24,11 +24,10 @@ pub(in crate::executor) struct PluginStart<'a> {
     pub(in crate::executor) kind: crate::action_plugins::Kind,
     /// The variables of the host the module runs on - the delegate's when there is one.
     pub(in crate::executor) running_vars: &'a HostVars,
-    pub(in crate::executor) delegated: bool,
-    /// Whether the task escalates: the link its sub-tasks go over is the escalated one.
-    pub(in crate::executor) escalated: bool,
-    /// Whether that link runs the agent on the controller itself.
-    pub(in crate::executor) local: bool,
+    /// The link the module runs over: whether it escalates, whether it runs the agent on the
+    /// controller itself, the host it is delegated to, and the settings a plugin reads off its
+    /// connection and play context.
+    pub(in crate::executor) link: &'a crate::action_plugins::LinkFacts,
     pub(in crate::executor) templar: &'a Templar,
     pub(in crate::executor) origin: &'a crate::compile::Origin,
     pub(in crate::executor) playbook_dir: &'a std::path::Path,
@@ -82,12 +81,13 @@ pub(in crate::executor) async fn run_plugin_attempts<C: AgentChannel, R: Relink<
             let mut plugin = crate::action_plugins::start(
                 start.kind,
                 crate::action_plugins::Context {
+                    link: start.link,
                     args: &item.args,
                     args_untrusted: &item.args_untrusted,
                     running_vars: start.running_vars,
-                    delegated: start.delegated,
-                    escalated: start.escalated,
-                    local: start.local,
+                    delegated: start.link.delegate.is_some(),
+                    escalated: start.link.escalation.is_some(),
+                    local: start.link.local,
                     item_vars: &item.vars,
                     templar: start.templar,
                     origin: start.origin,

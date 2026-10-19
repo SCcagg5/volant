@@ -1387,6 +1387,74 @@ fn ssh_a_collection_module_runs_from_the_union() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `ansible.posix.synchronize` over a real ssh link. The plugin makes a `local` connection of its
+/// own and runs rsync from the controller, with the host's key: push with `delete` and
+/// `rsync_opts`, pull, a second run that changes nothing, and a check run that writes nothing.
+#[test]
+#[ignore = "needs sshd on localhost, rsync and the pinned collections, run through just ssh-test"]
+fn ssh_synchronize_runs_rsync_from_the_controller() {
+    assert_host_and_controller_pythons_are_distinct();
+    assert_the_pinned_collections_are_installed();
+    let dir = tmp("synchronize");
+    let inv = inventory(&dir, &[("box", "")]);
+    // The plugin reads `hostvars['localhost']`. A run whose inventory lists no localhost gets
+    // the implicit one, which has its own test.
+    std::fs::write(
+        &inv,
+        format!(
+            "{}localhost ansible_connection=local\n",
+            std::fs::read_to_string(&inv).unwrap()
+        ),
+    )
+    .unwrap();
+    let work = dir.join("work");
+    let write = |rel: &str, text: &str| {
+        let path = work.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    };
+    write("src/a.txt", "one");
+    write("src/sub/b.txt", "two");
+    write("src/skipped", "left alone");
+    write("dest/stale.txt", "removed by delete");
+    // The check run reports the change it would make, to a directory that is never made.
+    for (pass, changed) in [("first", 3), ("second", 1)] {
+        let out = volant_within(
+            &[
+                "playbook",
+                "-i",
+                &inv,
+                "-e",
+                &format!("work={}", work.display()),
+                &fixture("ssh/synchronize.yml"),
+            ],
+            Duration::from_secs(120),
+        );
+        let text = both(&out);
+        assert_eq!(out.status.code(), Some(0), "{pass} pass: {text}");
+        assert_recap(&text, "box", changed);
+        assert_eq!(
+            files_under(&work.join("dest")),
+            ["a.txt", "sub/b.txt"],
+            "{pass} pass: dest, with `stale.txt` deleted and `skipped` excluded\n{text}"
+        );
+        assert_eq!(
+            files_under(&work.join("back")),
+            ["a.txt", "sub/b.txt"],
+            "{pass} pass: back\n{text}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(work.join("back/sub/b.txt")).unwrap(),
+            "two"
+        );
+        assert!(
+            !work.join("never").exists(),
+            "{pass} pass: a check run wrote"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Removes a directory as root however the test holding it ends: the escalated tasks, and the
 /// files a test plants as root, leave entries this account cannot remove.
 struct RemovedAsRoot(PathBuf);
