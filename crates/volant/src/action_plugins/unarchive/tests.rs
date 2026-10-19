@@ -200,6 +200,51 @@ fn a_source_a_host_named_is_read_as_the_mode_says(
     }
 }
 
+/// `remote_src` and `copy` are read as ansible-core reads a boolean: a source on the host is not
+/// held to the directories, and the module gets it as written.
+#[rstest::rstest]
+#[case::remote_src_y(json!({"remote_src": "y"}), true)]
+#[case::remote_src_capital_t(json!({"remote_src": "T"}), true)]
+#[case::remote_src_one(json!({"remote_src": 1}), true)]
+#[case::remote_src_one_point_zero(json!({"remote_src": 1.0}), true)]
+#[case::copy_no(json!({"copy": "no"}), true)]
+#[case::copy_n(json!({"copy": "n"}), true)]
+#[case::copy_f(json!({"copy": "F"}), true)]
+#[case::copy_yes(json!({"copy": "yes"}), false)]
+#[case::copy_one(json!({"copy": 1}), false)]
+#[case::remote_src_n(json!({"remote_src": "n"}), false)]
+#[case::remote_src_one_point_zero_text(json!({"remote_src": "1.0"}), false)]
+fn the_remote_source_is_read_as_ansible_core_reads_it(#[case] extra: Value, #[case] remote: bool) {
+    let dir_guard = layout();
+    let dir = dir_guard.path().to_path_buf();
+    let mut task_args = Map::new();
+    task_args.insert("src".into(), json!("/nowhere/a.tgz"));
+    task_args.insert("dest".into(), json!(dir.join("dest").display().to_string()));
+    task_args.extend(extra.as_object().unwrap().clone());
+    let untrusted: BTreeSet<String> = ["src".to_string()].into();
+    let mut plugin = start_mode(HostNamedPaths::Contained, &task_args, &untrusted, &dir);
+    let first = run(plugin.as_mut(), None);
+    assert_eq!(first.module, "stat");
+    let step = plugin.next(Some(TaskResult(
+        json!({"stat": {"exists": true, "isdir": true}})
+            .as_object()
+            .unwrap()
+            .clone(),
+    )));
+    match (step, remote) {
+        (Step::Run(sub), true) => {
+            assert_eq!(sub.module, "unarchive");
+            assert_eq!(sub.args["src"], json!("/nowhere/a.tgz"));
+            assert!(sub.files.is_empty());
+        }
+        (Step::Done(result), false) => {
+            let msg = result.0["msg"].as_str().unwrap();
+            assert!(msg.contains("named by a managed host"), "{msg}");
+        }
+        (other, _) => panic!("remote={remote}, step {other:?}"),
+    }
+}
+
 /// `copy:` folds into `remote_src`, and the two together are refused before any host is asked
 /// anything.
 #[test]

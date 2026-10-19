@@ -129,6 +129,39 @@ fn a_source_a_host_named_is_read_as_the_mode_says(
     }
 }
 
+/// A `remote_src` that ansible-core reads as true makes the `src` a file on the host: it is not
+/// held to the directories, and the module runs alone.
+#[rstest::rstest]
+#[case::y(json!("y"), true)]
+#[case::capital_t(json!("T"), true)]
+#[case::on(json!(" On "), true)]
+#[case::one(json!(1), true)]
+#[case::one_point_zero(json!(1.0), true)]
+#[case::string_one(json!("1"), true)]
+#[case::n(json!("n"), false)]
+#[case::string_one_point_zero(json!("1.0"), false)]
+#[case::two(json!(2), false)]
+fn a_remote_src_is_read_as_ansible_core_reads_it(#[case] remote_src: Value, #[case] remote: bool) {
+    let tmp = scratch();
+    let mut args = Map::new();
+    args.insert("src".into(), json!("/etc/hostname"));
+    args.insert("dest".into(), json!("/tmp/v/h"));
+    args.insert("remote_src".into(), remote_src);
+    let untrusted: BTreeSet<String> = ["src".to_string()].into();
+    let mut plugin = start_mode(HostNamedPaths::Contained, &args, &untrusted, tmp.path());
+    match (plugin.next(None), remote) {
+        (Step::Run(sub), true) => {
+            assert_eq!(sub.module, "copy");
+            assert!(sub.files.is_empty());
+        }
+        (Step::Done(result), false) => {
+            let msg = result.0["msg"].as_str().unwrap();
+            assert!(msg.contains("named by a managed host"), "{msg}");
+        }
+        (other, _) => panic!("remote={remote}, step {other:?}"),
+    }
+}
+
 /// SHA-1 of `hello\n`, as the reference's `stat` reported it for the golden `copy-new`.
 const HELLO_SHA1: &str = "f572d396fae9206628714fb2ce00f72e94f2258f";
 
