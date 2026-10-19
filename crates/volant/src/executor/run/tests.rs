@@ -5489,3 +5489,30 @@ async fn an_include_vars_merge_keeps_the_trust_of_both_sides() {
         }
     }
 }
+
+/// The `FAILED - RETRYING` line of an attempt that asks to be hidden is censored, whether the
+/// attempt is a task's own or a poll's, as the task's `no_log` censors it.
+#[tokio::test]
+async fn a_retry_line_follows_the_censoring_of_the_other_output() {
+    use super::async_job::announce_retry;
+    use crate::executor::coordinator::Event;
+    for (no_log, hides, expected) in [
+        (false, false, false),
+        (false, true, true),
+        (true, false, true),
+        (true, true, true),
+    ] {
+        let mut t = task("include_vars");
+        t.no_log = no_log.then_some(true);
+        let mut attempt = TaskResult(vars(json!({"changed": false, "token": "visible"})));
+        if hides {
+            attempt.0.insert("_ansible_no_log".into(), json!(true));
+        }
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        announce_retry(&tx, "h1", 0, "t".into(), &t, 1, attempt).await;
+        let Some(Event::Retrying { censored, .. }) = rx.recv().await else {
+            panic!("a retry line is sent");
+        };
+        assert_eq!(censored, expected, "no_log {no_log}, hides {hides}");
+    }
+}
