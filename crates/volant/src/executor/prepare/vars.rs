@@ -2,7 +2,7 @@
 //! The variables one host runs a task with.
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value};
 
@@ -29,6 +29,54 @@ use crate::executor::coordinator::Progress;
 )]
 pub(in crate::executor) fn host_vars(
     host: &str,
+    plan: &PlayPlan,
+    task_vars: &Map<String, Value>,
+    role: Option<usize>,
+    include_params: Option<&IncludeParams>,
+    live: &Progress,
+    templar: &Templar,
+    store: &Mutex<VarStore>,
+    origin: &Origin,
+    playbook_dir: &Path,
+) -> HostVars {
+    delegate_host_vars(
+        host,
+        Named::ByTheRun,
+        plan,
+        task_vars,
+        role,
+        include_params,
+        live,
+        templar,
+        store,
+        origin,
+        playbook_dir,
+    )
+}
+
+/// Where the name of a host view came from.
+#[derive(Clone, Copy)]
+pub(super) enum Named {
+    /// The inventory, or the play's own host list.
+    ByTheRun,
+    /// A `delegate_to`. `data` says the render read a value that came from a managed host.
+    ByDelegate { data: bool },
+}
+
+/// `host_vars` for the host a `delegate_to` named. A delegate name is data, and the names derived
+/// from it (`inventory_hostname`, `inventory_hostname_short`) and the `hostvars` entry that
+/// carries it are never rendered, in three cases. The render read a managed host's value. The name
+/// holds a template, wherever it came from: no inventory names a host that way, and the reference
+/// reads it as a host name, prints it and fails to connect to it. Or the host is not in the
+/// inventory the run started from, where `groups` or a variable can hand out text a managed host
+/// returned with nothing in the render to say so.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the driver's whole context, read for one host's variables"
+)]
+pub(in crate::executor) fn delegate_host_vars(
+    host: &str,
+    named: Named,
     plan: &PlayPlan,
     task_vars: &Map<String, Value>,
     role: Option<usize>,
@@ -73,10 +121,22 @@ pub(in crate::executor) fn host_vars(
                 .iter()
                 .flat_map(|p| p.untrusted.iter().cloned()),
         );
-        let untrusted_hosts = store.untrusted_hosts();
+        let mut untrusted_hosts = store.untrusted_hosts();
+        let data = Templar::is_template(host)
+            || match named {
+                Named::ByTheRun => false,
+                Named::ByDelegate { data } => data || store.is_runtime_host(host),
+            };
+        if data {
+            untrusted.extend(["inventory_hostname", "inventory_hostname_short"].map(String::from));
+            let mut hosts = (*untrusted_hosts).clone();
+            hosts.insert(host.to_string());
+            untrusted_hosts = Arc::new(hosts);
+        }
         let layers = store.layered_for_host(host, &scope);
         HostVars {
             map: layers.map,
+            base: Arc::default(),
             hostvars,
             shared: layers.shared,
             facts: layers.facts,

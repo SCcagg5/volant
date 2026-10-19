@@ -1,0 +1,14 @@
+- hosts: h1
+  gather_facts: false
+  environment:
+    PLAY_KEYWORD: from the play
+  tasks:
+    - command: "true"
+      notify: show
+    - meta: flush_handlers
+    - debug:
+        var: shown.stdout
+  handlers:
+    - name: show
+      command: printenv PLAY_KEYWORD
+      register: shown

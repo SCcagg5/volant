@@ -254,7 +254,7 @@ impl SshTarget {
         let mut command = Command::new(&argv[0]);
         command
             .args(&argv[1..])
-            .envs(crate::askpass::environment())
+            .envs(self.askpass_environment()?)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(if stdin.is_some() {

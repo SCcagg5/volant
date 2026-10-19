@@ -218,6 +218,83 @@ fn ssh_vvvv_shows_the_commands_it_runs_and_the_transfer_arguments_stay_inert() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A password variable logs in to the account `VOLANT_SSH_TEST_PASSWORD_USER` names, with
+/// `VOLANT_SSH_TEST_PASSWORD`; the test passes with a message when they are unset.
+#[test]
+#[ignore = "needs sshd on localhost, run through just ssh-test"]
+fn ssh_a_password_variable_logs_in_to_a_password_account() {
+    let (Ok(account), Ok(password)) = (
+        std::env::var("VOLANT_SSH_TEST_PASSWORD_USER"),
+        std::env::var("VOLANT_SSH_TEST_PASSWORD"),
+    ) else {
+        eprintln!(
+            "skipped: VOLANT_SSH_TEST_PASSWORD_USER and VOLANT_SSH_TEST_PASSWORD name no account"
+        );
+        return;
+    };
+    let wrong = format!("not-{password}");
+    let dir = tmp("password");
+    std::fs::write(
+        dir.join("play.yml"),
+        "- hosts: box\n  gather_facts: false\n  tasks:\n    - command: id -un\n      register: who\n    - debug:\n        msg: \"ran as {{ who.stdout }}\"\n",
+    )
+    .unwrap();
+    for (vars, code, says) in [
+        (
+            format!("ansible_password={password}"),
+            0,
+            format!("ran as {account}"),
+        ),
+        (
+            format!("ansible_ssh_pass={password}"),
+            0,
+            format!("ran as {account}"),
+        ),
+        (
+            format!("ansible_ssh_password={password}"),
+            0,
+            format!("ran as {account}"),
+        ),
+        (
+            format!("ansible_password={wrong} ansible_ssh_pass={password}"),
+            0,
+            format!("ran as {account}"),
+        ),
+        (
+            format!("ansible_password={wrong}"),
+            4,
+            "Permission denied".to_string(),
+        ),
+        (String::new(), 4, "Permission denied".to_string()),
+    ] {
+        let inv = dir.join("inventory.ini");
+        std::fs::write(
+            &inv,
+            format!(
+                "box ansible_host=127.0.0.1 ansible_user={account} ansible_ssh_common_args='-F /dev/null -o PubkeyAuthentication=no' {vars}\n"
+            ),
+        )
+        .unwrap();
+        let out = volant(&[
+            "playbook",
+            "-vvvv",
+            "-i",
+            &inv.display().to_string(),
+            &dir.join("play.yml").display().to_string(),
+        ]);
+        let text = both(&out);
+        assert_eq!(out.status.code(), Some(code), "{vars}: {text}");
+        assert!(text.contains(&says), "{vars}: {text}");
+        for secret in [&password, &wrong] {
+            assert!(
+                !text.contains(secret.as_str()),
+                "a password is in the output: {text}"
+            );
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 #[ignore = "needs sshd on localhost, run through just ssh-test"]
 fn ssh_an_outdated_cached_agent_is_replaced() {
@@ -1473,6 +1550,73 @@ fn ssh_a_collection_module_runs_from_the_union() {
         );
         let mode = std::fs::metadata(&ini).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o644, "{pass} pass, mode of test.ini");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `ansible.posix.synchronize` over a real ssh link, rsync run from the controller: push with
+/// `delete` and `rsync_opts`, pull, a second run that changes nothing, a check run that writes none.
+#[test]
+#[ignore = "needs sshd on localhost, rsync and the pinned collections, run through just ssh-test"]
+fn ssh_synchronize_runs_rsync_from_the_controller() {
+    assert_host_and_controller_pythons_are_distinct();
+    assert_the_pinned_collections_are_installed();
+    let dir = tmp("synchronize");
+    let inv = inventory(&dir, &[("box", "")]);
+    // The plugin reads `hostvars['localhost']`. A run whose inventory lists no localhost gets
+    // the implicit one, which has its own test.
+    std::fs::write(
+        &inv,
+        format!(
+            "{}localhost ansible_connection=local\n",
+            std::fs::read_to_string(&inv).unwrap()
+        ),
+    )
+    .unwrap();
+    let work = dir.join("work");
+    let write = |rel: &str, text: &str| {
+        let path = work.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    };
+    write("src/a.txt", "one");
+    write("src/sub/b.txt", "two");
+    write("src/skipped", "left alone");
+    write("dest/stale.txt", "removed by delete");
+    // The check run reports the change it would make, to a directory that is never made.
+    for (pass, changed) in [("first", 3), ("second", 1)] {
+        let out = volant_within(
+            &[
+                "playbook",
+                "-i",
+                &inv,
+                "-e",
+                &format!("work={}", work.display()),
+                &fixture("ssh/synchronize.yml"),
+            ],
+            Duration::from_secs(120),
+        );
+        let text = both(&out);
+        assert_eq!(out.status.code(), Some(0), "{pass} pass: {text}");
+        assert_recap(&text, "box", changed);
+        assert_eq!(
+            files_under(&work.join("dest")),
+            ["a.txt", "sub/b.txt"],
+            "{pass} pass: dest, with `stale.txt` deleted and `skipped` excluded\n{text}"
+        );
+        assert_eq!(
+            files_under(&work.join("back")),
+            ["a.txt", "sub/b.txt"],
+            "{pass} pass: back\n{text}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(work.join("back/sub/b.txt")).unwrap(),
+            "two"
+        );
+        assert!(
+            !work.join("never").exists(),
+            "{pass} pass: a check run wrote"
+        );
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -11,7 +11,7 @@ use crate::agent::{AgentLink, AgentSource};
 
 use super::bootstrap::{Captured, EXIT_SSH_FAILURE, bootstrap_probe_ran};
 use super::control::{
-    SSH_PROGRAM, STOP_MASTER_TIMEOUT, TIMING_ONLY, config_sets_control, dump_hostname, ssh_dump,
+    STOP_MASTER_TIMEOUT, TIMING_ONLY, config_sets_control, dump_hostname, ssh_dump,
 };
 use super::defaults::{BecomeMethod, ConnectError, Escalation, SshTarget};
 use super::escalation::unreachable_message;
@@ -122,7 +122,7 @@ impl SshTarget {
             let Some(path) = &target.control_path else {
                 return;
             };
-            let _ = Command::new(SSH_PROGRAM)
+            let _ = Command::new(&target.own.executable)
                 .args(["-O", "exit", "-o"])
                 .arg(format!("ControlPath={}", path.display()))
                 .arg(&target.address)
@@ -172,9 +172,9 @@ impl SshTarget {
         };
         let argv = self.ssh_argv(&remote);
         super::trace::exec(self, &argv);
-        let child = Command::new(SSH_PROGRAM)
+        let child = Command::new(&argv[0])
             .args(&argv[1..])
-            .envs(crate::askpass::environment())
+            .envs(self.askpass_environment()?)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -291,7 +291,7 @@ impl SshTarget {
         super::trace::exec(self, &argv);
         Command::new(&argv[0])
             .args(&argv[1..])
-            .envs(crate::askpass::environment())
+            .envs(self.askpass_environment()?)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(stderr)

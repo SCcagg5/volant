@@ -10,7 +10,9 @@ use serde_json::{Map, Value};
 use super::facts::no_facts;
 use super::load::{extend, extend_except};
 use super::magic::short_name;
-use super::{HostFacts, Scope, VarStore};
+use super::{Added, HostFacts, Scope, VarStore};
+use crate::template::HOSTVARS_KEYS;
+
 /// One host's variables as `layered_for_host` hands them out.
 #[derive(Debug)]
 pub struct Layers {
@@ -28,6 +30,7 @@ impl VarStore {
     /// that shadows a gathered name answers with the author's value, and a template in it renders.
     pub fn untrusted_of(&self, host: &str, scope: &Scope) -> BTreeSet<String> {
         let mut names = self.untrusted.get(host).cloned().unwrap_or_default();
+        self.data_names_read_by(host, scope, &mut names);
         let Some(gathered) = self.gathered.get(host) else {
             return names;
         };
@@ -50,6 +53,44 @@ impl VarStore {
         names
     }
 
+    /// The names `host` reads that now carry a host name or a group name `add_host` or
+    /// `group_by` took from data: `groups`, the host lists of the play, `group_names`, the two
+    /// `inventory_hostname` names, and the list of `hostvars`' hosts. The read as a whole is
+    /// data, where the reference tags each string. A read of one host through `hostvars[name]`
+    /// is the case of `untrusted_hosts`, so a nested template of any other host still renders.
+    fn data_names_read_by(&self, host: &str, scope: &Scope, names: &mut BTreeSet<String>) {
+        if self.data_hosts.is_empty() && self.data_groups.is_empty() {
+            return;
+        }
+        let listed = |hosts: &[String]| hosts.iter().any(|h| self.data_hosts.contains(h));
+        let all_hosts = self
+            .play_hosts_all
+            .as_deref()
+            .unwrap_or(&scope.all_play_hosts);
+        let reads = [
+            ("groups", true),
+            (HOSTVARS_KEYS, !self.data_hosts.is_empty()),
+            ("inventory_hostname", self.data_hosts.contains(host)),
+            ("inventory_hostname_short", self.data_hosts.contains(host)),
+            (
+                "group_names",
+                self.group_names
+                    .get(host)
+                    .is_some_and(|g| g.iter().any(|n| self.data_groups.contains(n))),
+            ),
+            ("ansible_play_hosts", listed(&scope.play_hosts)),
+            ("ansible_play_hosts_all", listed(all_hosts)),
+            ("ansible_play_batch", listed(&scope.batch_hosts)),
+            ("play_hosts", listed(&scope.batch_hosts)),
+        ];
+        names.extend(
+            reads
+                .into_iter()
+                .filter(|(_, data)| *data)
+                .map(|(name, _)| name.to_string()),
+        );
+    }
+
     /// Hosts holding at least one untrusted name, for the `hostvars[other]` path. Read once per
     /// host and per task, under the store's lock, so it is kept rather than rebuilt: the set is
     /// the size of the inventory and every rebuild allocated a string per host inside the
@@ -64,11 +105,26 @@ impl VarStore {
                 .filter(|(_, names)| !names.is_empty())
                 .map(|(host, _)| host)
                 .chain(self.gathered.keys())
+                .chain(&self.data_hosts)
                 .cloned()
                 .collect(),
         );
         self.untrusted_hosts = Some(Arc::clone(&hosts));
         hosts
+    }
+
+    /// Whether `host` is outside the inventory the run started from: a name nothing declared, or a
+    /// host `add_host` made while the playbook ran. The name of such a host can be text a managed
+    /// host returned, in `groups` or in a variable, with nothing in the render that read it to say so.
+    pub fn is_runtime_host(&self, host: &str) -> bool {
+        !self
+            .groups
+            .get("all")
+            .is_some_and(|all| all.iter().any(|name| name == host))
+            || self
+                .added
+                .iter()
+                .any(|change| matches!(change, Added::Host(name, _) if name == host))
     }
 
     /// The merged view for one host, lowest precedence first: a role's `defaults`, inventory

@@ -52,7 +52,6 @@ mod imp {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
-    use std::time::Instant;
 
     use serde_json::{Map, Value};
     use volant_protocol::TaskResult;
@@ -70,7 +69,7 @@ mod imp {
         cancelled: &dyn Fn() -> bool,
     ) -> NativeRun {
         let clock = Clock {
-            deadline: context.timeout.map(|timeout| Instant::now() + timeout),
+            deadline: context.deadline(),
             cancelled,
         };
         let mut env: BTreeMap<String, String> = std::env::vars_os()

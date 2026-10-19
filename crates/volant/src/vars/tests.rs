@@ -163,6 +163,9 @@ fn every_host_setting_is_stripped_from_gathered_facts() {
         bypasses.is_empty(),
         "read by name outside `host_setting`: {bypasses:?}"
     );
+    // The connection settings are read through the tables of `transport::names`, which the
+    // pattern above cannot see.
+    read.extend(crate::transport::connection_variables().map(str::to_string));
     for known in [
         "ansible_host",
         "ansible_become_password",
@@ -731,6 +734,7 @@ fn every_layer_keeps_its_trust_through_the_layered_view() {
             facts: Some(facts),
             untrusted: Some(&untrusted),
             untrusted_hosts: Some(&untrusted_hosts),
+            base: None,
         });
         let names = [
             "d", "i", "g", "gp", "p", "f", "rv", "t", "sf", "su", "rp", "e", "built", "groups",
@@ -749,6 +753,7 @@ fn every_layer_keeps_its_trust_through_the_layered_view() {
                             facts: Some(facts),
                             untrusted: Some(&soiled),
                             untrusted_hosts: Some(&untrusted_hosts),
+                            base: None,
                         },
                     )
                     .unwrap()
@@ -826,6 +831,7 @@ fn a_gathered_fact_reaches_a_template_lookup() {
                     facts: Some(facts),
                     untrusted: Some(&untrusted),
                     untrusted_hosts: None,
+                    base: None,
                 },
             )
             .unwrap()
@@ -1044,6 +1050,172 @@ h1
     assert!(!store.untrusted_of("n1", &scope(&["n1"])).contains("plain"));
 }
 
+const EVIL: &str = "{{ lookup('pipe','id') }}";
+const BLOCK: &str = "a{% if x %}b{% endif %}";
+const NOTE: &str = "{# note #}";
+
+/// One `add_host` and one read of it.
+struct NameRow {
+    /// The host `add_host` added, and the groups it joined.
+    name: &'static str,
+    groups: &'static [&'static str],
+    /// The host whose template reads, the hosts of its batch and of its whole play.
+    reader: &'static str,
+    batch: &'static [&'static str],
+    whole: &'static [&'static str],
+    /// The lists that taint the read, and whether `hostvars[name]` does.
+    tainted: &'static [&'static str],
+    host_is_data: bool,
+}
+
+const fn name_row(
+    name: &'static str,
+    groups: &'static [&'static str],
+    reader: &'static str,
+    play: &'static [&'static str],
+    tainted: &'static [&'static str],
+    host_is_data: bool,
+) -> NameRow {
+    NameRow {
+        name,
+        groups,
+        reader,
+        batch: play,
+        whole: play,
+        tainted,
+        host_is_data,
+    }
+}
+
+const EVERY_LIST: &[&str] = &[
+    "ansible_play_batch",
+    "ansible_play_hosts",
+    "ansible_play_hosts_all",
+    "groups",
+    crate::template::HOSTVARS_KEYS,
+    "inventory_hostname",
+    "inventory_hostname_short",
+    "play_hosts",
+];
+
+const NAME_ROWS: &[NameRow] = &[
+    name_row("web1", &["web"], "web1", &["web1"], &[], false),
+    name_row("a{b}", &["x}{y"], "a{b}", &["a{b}"], &[], false),
+    name_row(
+        "nh",
+        &[EVIL],
+        "nh",
+        &["nh"],
+        &["group_names", "groups"],
+        false,
+    ),
+    name_row("nh", &[EVIL], "h1", &["h1"], &["groups"], false),
+    name_row(
+        "nh",
+        &[NOTE],
+        "nh",
+        &["nh"],
+        &["group_names", "groups"],
+        false,
+    ),
+    name_row(EVIL, &[], EVIL, &[EVIL], EVERY_LIST, true),
+    name_row(
+        EVIL,
+        &[],
+        "h1",
+        &["h1"],
+        &["groups", crate::template::HOSTVARS_KEYS],
+        true,
+    ),
+    NameRow {
+        whole: &["h1", BLOCK],
+        ..name_row(
+            BLOCK,
+            &[],
+            "h1",
+            &["h1"],
+            &[
+                "ansible_play_hosts_all",
+                "groups",
+                crate::template::HOSTVARS_KEYS,
+            ],
+            true,
+        )
+    },
+];
+
+/// An `add_host` name that still holds a template taints each read of a list that carries it,
+/// and a read of nothing it is in stays clean.
+#[test]
+fn an_add_host_name_that_holds_a_template_is_data_wherever_it_is_read() {
+    const LISTS: [&str; 9] = [
+        "ansible_play_batch",
+        "ansible_play_hosts",
+        "ansible_play_hosts_all",
+        "group_names",
+        "groups",
+        crate::template::HOSTVARS_KEYS,
+        "inventory_hostname",
+        "inventory_hostname_short",
+        "play_hosts",
+    ];
+    for row in NAME_ROWS {
+        let tmp = scratch();
+        let inv = Inventory::parse_ini("[g]\nh1\n").unwrap();
+        let mut store = VarStore::new(&inv, None, tmp.path(), Map::new()).unwrap();
+        let strings = |v: &[&str]| v.iter().map(ToString::to_string).collect::<Vec<_>>();
+        store.add_host(row.name, &strings(row.groups), &Map::new());
+        let at = Scope {
+            play_hosts: strings(row.batch),
+            batch_hosts: strings(row.batch),
+            all_play_hosts: strings(row.whole),
+            ..Scope::default()
+        };
+        let data = store.untrusted_of(row.reader, &at);
+        let got: Vec<&str> = LISTS.into_iter().filter(|n| data.contains(*n)).collect();
+        assert_eq!(
+            got, row.tainted,
+            "{:?} added with {:?}, read by {:?}",
+            row.name, row.groups, row.reader
+        );
+        assert_eq!(
+            store.untrusted_hosts().contains(row.name),
+            row.host_is_data,
+            "{:?} as a host that holds a template",
+            row.name
+        );
+    }
+}
+
+/// `group_by` names a group from a registered result the way `add_host` does: the group, and
+/// each parent, is data when it holds a template, and a read of the lists that carry it taints.
+#[test]
+fn a_group_by_name_that_holds_a_template_is_data_wherever_it_is_read() {
+    let evil = "{{ lookup('pipe','id') }}";
+    for (group, parents) in [(evil, vec![]), ("kind", vec![evil]), ("kind", vec!["a"])] {
+        let tmp = scratch();
+        let inv = Inventory::parse_ini("[g]\nh1\n").unwrap();
+        let mut store = VarStore::new(&inv, None, tmp.path(), Map::new()).unwrap();
+        let parents: Vec<String> = parents.iter().map(ToString::to_string).collect();
+        store.add_to_group("h1", group, &parents);
+        let data = store.untrusted_of("h1", &scope(&["h1"]));
+        let holds = group == evil || parents.iter().any(|p| p == evil);
+        assert_eq!(
+            data.contains("groups"),
+            holds,
+            "groups after {group:?} under {parents:?}"
+        );
+        // A group is not among `hostvars`' keys: a nested template of a host still renders.
+        assert!(
+            !data.contains(crate::template::HOSTVARS_KEYS),
+            "hostvars after {group:?}"
+        );
+        if group == evil {
+            assert!(data.contains("group_names"), "group_names after {group:?}");
+        }
+    }
+}
+
 /// A vaulted vars file is read with the run's secrets; one it cannot read is named.
 #[test]
 fn a_vaulted_vars_file_is_decrypted_or_refused_by_name() {
@@ -1161,4 +1333,43 @@ fn a_role_default_loses_to_the_controller_python_of_the_implicit_localhost() {
         .clone();
     let v = store.for_host("localhost", &sc);
     assert_eq!(v["ansible_python_interpreter"], json!("/ctl/python3"));
+}
+
+/// The variables the items of a loop share leave the templates in the map, keep the text of a
+/// managed host as data, and still answer every read the whole map did.
+#[test]
+fn the_variables_items_share_keep_templates_apart_and_stay_readable() {
+    let mut vars = HostVars::default();
+    vars.map.insert("plain".into(), json!(1));
+    vars.map.insert("built".into(), json!("{{ item }}"));
+    vars.map.insert("printed".into(), json!("{{ 7 * 6 }}"));
+    vars.untrusted.insert("printed".into());
+    let mut vars = vars.shared_by_items();
+    assert!(vars.map.contains_key("built") && vars.map.len() == 1);
+    assert_eq!(vars.get("plain"), Some(&json!(1)));
+    assert_eq!(vars.get("printed"), Some(&json!("{{ 7 * 6 }}")));
+    assert!(vars.untrusted.contains("printed"));
+    assert_eq!(vars.own_variables().len(), 3);
+    // A write lands over the shared value and leaves the share alone.
+    vars.insert("plain".into(), json!(2));
+    assert_eq!(vars.get("plain"), Some(&json!(2)));
+    assert_eq!(vars.base.get("plain"), Some(&json!(1)));
+    let templar = Templar::new(std::env::temp_dir());
+    assert_eq!(
+        templar.render("{{ plain }}-{{ printed }}", &vars).unwrap(),
+        json!("2-{{ 7 * 6 }}")
+    );
+    // A template left in the map that reads the host's text from the share renders it as data
+    // once the item is bound, and is data itself from then on.
+    vars.insert("item".into(), json!("a"));
+    vars.insert("echo".into(), json!("{{ printed }}-{{ item }}"));
+    let (map, untrusted) = templar.resolve_vars_tainted(&vars);
+    assert_eq!(map["built"], json!("a"));
+    assert!(untrusted.contains("echo") && !untrusted.contains("built"));
+    vars.map = map;
+    vars.untrusted = untrusted;
+    assert_eq!(
+        templar.render("{{ echo }}", &vars).unwrap(),
+        json!("{{ 7 * 6 }}-a")
+    );
 }

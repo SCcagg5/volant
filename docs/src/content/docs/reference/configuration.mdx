@@ -17,6 +17,8 @@ Volant reads the same `ansible.cfg` as `ansible-playbook`, and stops at the firs
 
 </Steps>
 
+Volant skips `./ansible.cfg` when the working directory is writable by other users (mode bit `o+w`), as `ansible-playbook` does. Another local user could have put the file there. The sticky bit and the owner of the directory change nothing. Volant prints `[WARNING]: Ansible is being run in a world writable directory (...), ignoring it as an ansible.cfg source.` on standard error and continues with the next file. A file named by `ANSIBLE_CONFIG` is read whatever the mode of the working directory.
+
 For each setting, the environment variable beats the file, and the command-line option beats both. Keys Volant does not use are ignored, as Ansible ignores the ones it does not use.
 
 A file that exists but cannot be read is skipped, and the run continues with the defaults. Volant prints a warning first, which Ansible does not: a file you wrote that the process cannot open deserves a line, and a warning does not change the exit code.
