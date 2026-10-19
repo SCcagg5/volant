@@ -20,10 +20,9 @@ use crate::playbook::PlayTask;
 use crate::roles::RoleSearch;
 
 /// `x` for `x`, `ansible.builtin.x` and `ansible.legacy.x`: the three names one key answers to.
+/// `yum` answers to `dnf`, the action ansible-core redirects it to, in every spelling.
 pub(crate) fn canonical(name: &str) -> &str {
-    name.strip_prefix("ansible.builtin.")
-        .or_else(|| name.strip_prefix("ansible.legacy."))
-        .unwrap_or(name)
+    volant_protocol::modules::resolved_name(name)
 }
 
 /// A `namespace.name` or a module name made of the characters Python identifiers have: what is

@@ -1,0 +1,13 @@
+# A role's `tasks_from`, `vars_from`, `defaults_from` and `handlers_from` name a file inside the
+# matching directory of the role. A name that leaves it is refused when the play is read.
+runs:
+  - args: [inside.yml]
+  - args: [inside-include.yml]
+  - args: [escape-tasks.yml]
+  - args: [escape-vars.yml]
+  - args: [escape-defaults.yml]
+  - args: [escape-handlers.yml]
+  - args: [escape-absolute.yml]
+  - args: [escape-sibling.yml]
+  - args: [escape-link-tasks.yml]
+  - args: [escape-link-vars.yml]

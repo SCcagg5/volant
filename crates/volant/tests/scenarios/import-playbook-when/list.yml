@@ -1,0 +1,4 @@
+- import_playbook: sub.yml
+  when:
+    - true
+    - go | default(true) | bool

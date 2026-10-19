@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use volant_protocol::modules::short_name;
+use volant_protocol::modules::{resolved_name, short_name};
 
 use super::decide::{DYNAMIC_LOOKUPS, not_fact};
 use super::lex::{close, is_word, leading_literal, leading_word, literal};
@@ -69,7 +69,7 @@ impl Scan {
             self.define(&task.loop_var, &Value::Null);
         }
         let literal = |key: &str| task.args.get(key).and_then(Value::as_str);
-        match short_name(&task.module) {
+        match resolved_name(&task.module) {
             // The action plugins that read a fact themselves.
             "package" | "dnf" => self.key("pkg_mgr"),
             "service" => self.key("service_mgr"),

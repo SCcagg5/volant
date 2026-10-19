@@ -1,0 +1,12 @@
+# The `Gathering Facts` task of a play that has tags carries those tags and not `always`: the
+# reference gives it `always` only when the play is untagged.
+runs:
+  - args: [-i, inv.ini, tagged.yml]
+  - args: [-i, inv.ini, --tags, always, tagged.yml]
+  - args: [-i, inv.ini, --skip-tags, always, tagged.yml]
+  - args: [-i, inv.ini, --tags, x, tagged.yml]
+  - args: [-i, inv.ini, --skip-tags, x, tagged.yml]
+  - args: [-i, inv.ini, --tags, y, tagged.yml]
+  - args: [-i, inv.ini, --tags, nothing, tagged.yml]
+  - args: [-i, inv.ini, --list-tasks, tagged.yml]
+needs: [ansible-core]

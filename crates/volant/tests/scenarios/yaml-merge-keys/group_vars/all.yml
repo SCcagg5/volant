@@ -1,0 +1,2 @@
+gv_base: &gv_base {a: 1, b: 2}
+gv_derived: {c: 3, <<: *gv_base, a: 9}

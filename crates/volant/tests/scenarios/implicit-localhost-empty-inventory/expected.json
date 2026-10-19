@@ -1,0 +1,10 @@
+[
+  {
+    "code": 0,
+    "stdout": "\nPLAY [all] *********************************************************************\nskipping: no hosts matched\n\nPLAY [localhost] ***************************************************************\n\nTASK [debug] *******************************************************************\nok: [localhost] => {\n    \"msg\": \"localhost True []\"\n}\n\nPLAY RECAP *********************************************************************\nlocalhost                  : ok=1    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   \n\n"
+  },
+  {
+    "code": 0,
+    "stdout": "\nplaybook: play.yml\n\n  play #1 (all): all\tTAGS: []\n    pattern: ['all']\n    hosts (0):\n\n  play #2 (localhost): localhost\tTAGS: []\n    pattern: ['localhost']\n    hosts (1):\n      localhost\n"
+  }
+]

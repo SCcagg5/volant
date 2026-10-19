@@ -1,0 +1,3 @@
+# Not inside any role. A role must not be able to run this file.
+- debug:
+    msg: "OUTSIDE TASKS RAN"

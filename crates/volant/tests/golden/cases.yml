@@ -590,3 +590,37 @@
 - template: "{{ dict([[1, 'a'], [1.0, 'b'], [true, 'c'], [9223372036854775808, 'd']]) | length }}"
 - template: "{{ dict(vars) | length }}"
   vars: {bad: "{{ nope }}"}
+# A merge key (`<<`) puts the merged pairs first and the explicit keys after them. An explicit key
+# takes the value of a merged key and keeps its place; in a list, an earlier mapping beats a later one.
+- template: "{{ d | to_json }}"
+  vars: {base: &base {a: 1, b: 2}, d: {z: 0, <<: *base, b: 9}}
+- template: "{{ d | to_json }}"
+  vars: {x: &x {k: x, only_x: 1}, y: &y {k: y, only_y: 2}, d: {<<: [*x, *y], own: 3}}
+- template: "{{ d | to_json }}"
+  vars: {inner: &inner {p: 1}, outer: &outer {<<: *inner, q: 2}, d: {<<: *outer, r: 3}}
+- template: "{{ d | to_json }}"
+  vars: {d: {a: 1, <<: {a: 2, b: 3}, <<: {b: 4}}}
+- template: "{{ d | to_json }}"
+  vars: {d: {'<<': {a: 1}, c: 2}}
+- template: "{{ d | to_json }}"
+  vars: {d: {<<: [], <<: {}, a: 1}}
+# A raw block writes text: it is rendered once, however it is read afterwards.
+- template: "{% raw %}{{ x }}{% endraw %}"
+  vars: {x: 5}
+- template: "a{% raw %}{{ x }}{% endraw %}b{{ x }}"
+  vars: {x: 5}
+- template: "{%- raw -%} {{ x }} {%- endraw -%}"
+  vars: {x: 5}
+- template: "{% raw %}{% if x %}{% endraw %}"
+  vars: {x: 5}
+- template: "{{ y }}"
+  vars: {x: 5, y: "{% raw %}{{ x }}{% endraw %}"}
+- template: "{{ z }}"
+  vars: {x: 5, y: "{% raw %}{{ x }}{% endraw %}", z: "{{ y }}"}
+- template: "{{ '{{' }} x {{ '}}' }}"
+  vars: {x: 5}
+- template: "{{ ['{% raw %}{{ x }}{% endraw %}'] }}"
+  vars: {x: 5}
+- template: "{{ r }}|{% raw %}{{ r }}{% endraw %}"
+  untrusted: {r: "{% raw %}{{ x }}{% endraw %}{{ x }}"}
+  vars: {x: 5}

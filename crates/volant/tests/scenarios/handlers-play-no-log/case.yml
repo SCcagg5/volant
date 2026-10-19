@@ -1,0 +1,2 @@
+# A play-level no_log hides the handlers of the play's own handlers list as it hides its tasks and the handlers of its roles. A handler's own no_log wins.
+args: [-i, inv.ini, play.yml]

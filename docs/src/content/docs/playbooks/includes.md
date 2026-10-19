@@ -21,6 +21,14 @@ An `import_tasks` path is looked for next to the importing file first, then in t
 
 `import_playbook` splices the other file's plays where the statement stands, and each imported play keeps the directory of the file it came from. Its file name renders with no variables at all, so `{{ 'sub' }}.yml` works and `{{ nosuchvar }}.yml` does not.
 
+Three keywords of the `import_playbook` entry reach every play of the file:
+
+- `tags` are added to the tags of each imported play, so `--tags` and `--skip-tags` select its tasks and the listings show them.
+- `vars` are added to the variables of each imported play and win over the play's own.
+- `when` is put in front of the conditions of every task, role and block of each imported play, and in front of its fact gathering. It is not evaluated once for the whole import. A false condition still opens each play and still prints a skip for each task and host. Handlers are not conditional.
+
+The other keywords that ansible-core 2.19 accepts on the entry, such as `ignore_errors`, `become` and `environment`, do nothing there, and Volant ignores them the same way. Any other key is refused. A `tags` or a `when` that holds a template is refused too, because Volant has no variables when it loads the playbook.
+
 ## Dynamic includes
 
 Of what the statement itself says, only its `vars:` travel into the included file. Those variables enter at the role-parameter level of the [precedence order](/variables/precedence/), above facts and below `--extra-vars`, and they accumulate through nested includes. The statement's own `tags` stop at the statement, and its `when` is evaluated for the statement alone.
