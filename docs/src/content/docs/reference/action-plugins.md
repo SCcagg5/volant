@@ -123,7 +123,7 @@ Rejected before the host is asked anything: an argument outside the reference's 
 
 ## On the bridge
 
-`add_host`, `assemble`, `async_status`, `gather_facts`, `group_by`, `script`, `set_stats`, `uri` and `wait_for_connection` run ansible-core's own action plugin in the helper, and so does every action plugin a collection ships (`ansible.posix.synchronize` and the plugins that need a Windows host or another connection type excepted; the [parity](/reference/parity/) page counts them). `copy` and `unarchive` take the same road for the two shapes the Rust plugins refuse: `copy` of a directory, and `unarchive` with a `~` in `dest` or `creates`. A `src` a managed host named never takes it: the Rust plugin's refusal stands.
+`add_host`, `assemble`, `async_status`, `gather_facts`, `group_by`, `script`, `set_stats`, `uri` and `wait_for_connection` run ansible-core's own action plugin in the helper, and so does every action plugin a collection ships (the plugins that need a Windows host or another connection type excepted; the [parity](/reference/parity/) page counts them). `copy` and `unarchive` take the same road for the two shapes the Rust plugins refuse: `copy` of a directory, and `unarchive` with a `~` in `dest` or `creates`. A `src` a managed host named never takes it: the Rust plugin's refusal stands.
 
 The plugin asks for what it needs and the controller answers: run this module, run this command, read a variable, make a temporary directory, put this file. Every answer is bounded by the task's `timeout:`. A plugin that never returns, or a helper that dies, fails that task and not the run; a temporary directory the plugin left on the host is removed. `add_host`, `group_by` and `set_stats` need no host and run without a connection. What they return is applied by the executor: new hosts and groups for the next tasks, and the custom stats printed after the recap. A value of `add_host` rendered from a fact stays data: it is kept as a fact of the new host, never as an inventory variable.
 
@@ -139,11 +139,17 @@ Three behaviours differ from the reference on purpose:
 - `wrap_async` is emulated. The module runs to its end when the plugin asks for it, and `async_status` then answers that the job finished. Parallel jobs run one after the other. A job's `async:` limit is judged after the module ran, as `Timeout exceeded`; the module is not interrupted.
 - A command a plugin sends with `sudoable=False` runs on the task's own link, so under `become` it runs escalated.
 
+### A plugin that makes its own connection
+
+`ansible.posix.synchronize` over ssh does not run its module on the host. It makes a `local` connection of its own and runs the module on the controller, where `rsync -e ssh` copies the files to or from the host. The helper gives such a plugin ansible-core's own methods for running a module, and keeps its stand-in connection for the connection the task came with.
+
+The plugin reads the link's key and user (the host variable, `--private-key`, `-u` or `ansible.cfg`), whether the task escalates and as whom (`sudo` becomes `--rsync-path='sudo -u <user> rsync'`), `ansible_port`, `delegate_to` and `ansible_delegated_vars`, and, with `use_ssh_args`, the host's `ansible_ssh_common_args` and `ansible_ssh_extra_args`. `ssh_args` is ansible-core's default, `-C -o ControlMaster=auto -o ControlPersist=60s`: an `ssh_args` set in `ansible.cfg` is not read. `rsync` has to be on the controller and on the host. Push, pull, `delete`, `rsync_opts`, `delegate_to`, `become` with `sudo`, `--check` and `--diff` give the output `ansible-playbook` gives.
+
 ### Known gaps
 
 - Template delimiters (`variable_start_string` and the five others) are not bridged; `template` still refuses them.
 - `wait_for_connection` on a host that is down from the first connection ends `UNREACHABLE` for a plugin item that never got a link; the reference reports `failed` with `timed out waiting for ping module test`.
-- A bridged result that is `unreachable` at the result level (`ansible.posix.synchronize`, whose module the shim refuses) prints as `ok`.
+- A bridged result that is `unreachable` at the result level prints as `ok`.
 - A skipped bridged result carries `"failed": false`.
 - The warnings a plugin writes with `display` go to the helper's standard error, not to the task's output; so does ansible-core's `Error loading plugin` warning for an unknown collection name.
 - A module that `runtime.yml` routes to a differently named action plugin runs under the task's own name.
