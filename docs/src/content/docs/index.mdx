@@ -16,7 +16,7 @@ curl -fsSL https://volant.sh/install.sh | sh
 volant playbook -i inventory.ini site.yml
 ```
 
-Volant is in pre-alpha: it runs real playbooks end to end, but not every playbook yet, and it names anything it does not support yet before it touches a host. [Installation](/start/installation/) and the [quickstart](/start/quickstart/) take it from here, and [Will my playbook run?](/start/compatibility/) checks an existing project in a few seconds.
+Volant is in pre-alpha: it runs real playbooks end to end, but not every playbook yet, and it names most of what it does not support yet before it touches a host. [Installation](/start/installation/) and the [quickstart](/start/quickstart/) take it from here, and [Will my playbook run?](/start/compatibility/) checks an existing project in a few seconds.
 
 ## Where the time goes in Ansible
 
@@ -80,7 +80,7 @@ These figures describe two playbooks on two hosts. Your own numbers depend on yo
 
 Your files stay yours. Volant reads Ansible's YAML and follows its variable precedence and its templating, so there is no new format to learn.
 
-It stops instead of guessing. Anything this release does not support yet is named before the first connection, so a run never reports success after quietly skipping something you asked for.
+It stops instead of guessing. Most of what this release does not support yet is named before the first connection, so a run rarely reports success after quietly skipping something you asked for. The [known gaps](/start/compatibility/#known-gaps) are the exceptions.
 
 It targets Linux over SSH first. The controller runs on Linux or macOS and drives Linux hosts. Windows and network devices come later.
 
@@ -90,4 +90,4 @@ It collects no telemetry and makes no network call other than the ones your play
 
 Volant reproduces [ansible-core 2.19](/decisions/0002-ansible-core-2-19-as-reference/), which this documentation calls *the reference*. A difference from the reference is a bug, unless a page lists it as a deliberate choice under *Differences from Ansible*.
 
-Some features are not there yet: the action plugins and filters of collections, and a few modules that depend on an action plugin, such as `uri` or `script`. The [roadmap](/project/roadmap/) says what comes next.
+Some features are not there yet: custom action, callback and vars plugins, and the [known gaps](/start/compatibility/#known-gaps). The [roadmap](/project/roadmap/) says what comes next.

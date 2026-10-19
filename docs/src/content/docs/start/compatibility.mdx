@@ -5,7 +5,7 @@ description: Check an existing Ansible project against this release in a few sec
 
 import { Steps, Aside } from '@astrojs/starlight/components';
 
-Volant loads the whole ansible-core 2.19 grammar, so your playbook parses here as it parses under Ansible. Whatever this release does not support yet is named before the first connection, and the run stops there. You find out in seconds, and nothing half-runs.
+Volant loads the whole ansible-core 2.19 grammar, so your playbook parses here as it parses under Ansible. Most of what this release does not support yet is named before the first connection, and the run stops there. You find out in seconds. The [known gaps](#known-gaps) below are the exceptions: a run can ignore a setting or give a wrong result there without an error.
 
 ## Check a project
 
@@ -26,9 +26,9 @@ Volant loads the whole ansible-core 2.19 grammar, so your playbook parses here a
    volant playbook -i inventory.ini site.yml --limit test1
    ```
 
-   Anything this release cannot execute stops the run before it connects. The message names the module, the keyword or the value, and the run exits with code 4.
+   Most of what this release cannot execute stops the run before it connects. The message names the module, the keyword or the value, and the run exits with code 4.
 
-3. Fix or wait. Everything not supported yet is listed in [Keywords](/reference/keywords/) or [Modules](/reference/modules/), and most have a workaround below.
+3. Fix or wait. What is not supported yet is listed in [Keywords](/reference/keywords/), [Modules](/reference/modules/) and the [known gaps](#known-gaps) below, and most have a workaround.
 
 </Steps>
 
@@ -45,22 +45,32 @@ A file that only a dynamic `include_tasks` or `include_role` names is read when 
 | Blocks | `block`, `rescue`, `always` | |
 | Reuse | roles and dependencies, `import_tasks`, `import_role`, `import_playbook`, `include_tasks`, `include_role`, `include_vars` | |
 | Delegation | `delegate_to`, `delegate_facts`, `local_action`, `run_once` | |
-| Modules | `command`, `shell`, `raw`, controller modules, `copy`, `dnf`, `yum`, `fetch`, `package`, `reboot`, `service`, `template`, `unarchive`, most ansible-core Python modules, modules from installed collections | a few modules backed by an action plugin: `uri`, `script` and others, and a collection's own action plugins |
+| Modules | `command`, `shell`, `raw`, controller modules, `copy`, `dnf`, `yum`, `fetch`, `package`, `reboot`, `service`, `template`, `unarchive`, `uri`, `script`, most ansible-core Python modules, modules from installed collections and their action plugins | a collection's action plugin that needs Windows or a network device, custom action plugins |
 | Inventories | INI, YAML and TOML files, directories, scripts, `constructed`, `generator` and collection plugins, several `-i`, `group_vars`, `host_vars`, the `jsonfile` fact cache | none left |
-| Connections | `ssh` with keys, an ssh-agent or a password (`-k` or `ansible_password`, needs OpenSSH 8.4 or later), `local` | Windows, network devices |
+| Connections | `ssh` with keys, an ssh-agent or a password (`-k` or `ansible_password`, needs OpenSSH 8.4 or later), `local` | other connection plugins, Windows, network devices |
 | Escalation | `become` through `sudo` or `su`, with or without a password | `doas` and other methods |
-| Templating | Jinja2 with the common Ansible filters, tests and lookups | `!unsafe`, some filters such as `hash` or `password_hash`, filters and lookups from collections |
+| Templating | Jinja2 with the common Ansible filters, tests and lookups, `!unsafe`, filters and lookups from collections | some filter arguments |
 | Run modes | normal runs, [`--check` and `--diff`](/playbooks/check-and-diff/), [vault](/variables/vault/), `--start-at-task`, `--step`, the four listing commands | none left |
 
 ## Common blockers and what to do
 
 | Not supported yet | Why | What you can do today |
 |---|---|---|
-| `uri`, `script` | These modules rely on an action plugin that runs on the controller first, and Volant does not have theirs yet. | Use a module without an action plugin, such as `get_url` or `lineinfile`, or `command` and `shell`. |
+| An action plugin of your own, in `action_plugins/` | Volant runs the action plugins of ansible-core and of installed collections, not yours. | Write a module, or keep the play under `ansible-playbook`. |
 | A collection that is not installed | Volant does not install one during a run. It asks the controller's ansible-core what is installed, before the first connection. | Run `volant runtime install --collections NAME`, or the `ansible-galaxy collection install` command the error names. See [The managed runtime](/reference/runtime/#collections) and [Modules from collections](/internals/python/#modules-from-collections). |
 | No Python with ansible-core on the controller | Volant installs its own on first need, with `curl` or `wget` and `tar`. | Nothing, or `volant runtime install` ahead of time. Without a network, use `volant runtime pack` and `install --from`. |
 | `apt`, `user`, `group` or `file` under `--check` or `--diff` on a host with no Python | These modules answer through Python on the host when the run asks for a check or a diff. | Install Python on the host, or run the play without `--check` and `--diff`. |
-| `gather_subset` | Not supported yet. | Remove it: the play gets every fact. |
 | `!!binary`, a duplicate anchor, an integer beyond 64 bits, or a date or a set as a typed value | The value model has no bytes, no date, no set and no wider integer. A date loads as its ISO text, a `!!set`, `!!omap` or `!!pairs` as the mapping or list it is written as, a wider integer as a string. `!!binary` stops the load, and a second `&anchor` of the same name is accepted. | Write the value as a plain string, list or mapping, and give each anchor its own name. |
+
+## Known gaps
+
+These differ from `ansible-playbook` without a message before the run, or with a message that names something else. Each row says what happens.
+
+| What | What happens |
+|---|---|
+| `callback_plugins/`, `vars_plugins/`, `stdout_callback`, `callbacks_enabled`, `result_format` | Ignored. The output is the default one. |
+| `volant check`, `inventory`, `vault`, `doc`, `config`, `galaxy` and ad-hoc commands | They do not exist. `volant` has `playbook` and `runtime`. |
+
+[Templating](/variables/templating/#not-there-yet) lists the filters and arguments that fail. The [parity page](/reference/parity/) marks a filter `partial` when one of its arguments fails.
 
 If a playbook behaves differently under Volant and `ansible-playbook` without being reported as unsupported, that is a bug. Please [open a compatibility report](https://github.com/lorica-labs/volant/issues/new?template=compat.yml) with a minimal playbook.
