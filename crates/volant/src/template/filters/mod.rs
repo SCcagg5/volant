@@ -154,7 +154,7 @@ pub fn register(
         add_filter(env, "chain", f::chain);
         add_filter(env, "zip", f::zip);
         add_filter(env, "pprint", f::pprint);
-        add_filter(env, "format", f::format);
+        add_filter(env, "format", super::pymethods::format_filter);
     }
     {
         use minijinja::tests as t;

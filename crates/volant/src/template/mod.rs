@@ -94,6 +94,10 @@ const ATTR_KEY: &str = "volant::attr:";
 /// `ATTR_KEY` for a template that changes a list or mapping in place: what it reads is the
 /// mutable form of the value, see [`pymethods::mutable`].
 const MATTR_KEY: &str = "volant::mattr:";
+/// The globals `%` is compiled to call: the second when the right side was written as a tuple,
+/// see [`vm::route_calls`].
+const REM_KEY: &str = "volant::rem";
+const REMT_KEY: &str = "volant::remt";
 /// Prefix of the name a list or mapping literal is routed through in such a template, then the
 /// literal as JSON: minijinja folds a literal of constants into one shared value, and a template
 /// that changes a list needs a new one each time the literal runs.
