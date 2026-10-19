@@ -25,7 +25,7 @@ Every password is tried on every vaulted value, whatever its label.
 
 ## Secrets stay on the controller
 
-A vault password lives in memory in the controller process. It is never written to a command line, to the environment of a child process, to a log, to a result or to the agent link. The connection and escalation passwords follow the same rule. `-k` hands the SSH password to `ssh` through `SSH_ASKPASS` from a private temporary file that is removed at the end of the run. That needs OpenSSH 8.4 or later.
+A vault password lives in memory in the controller process. It is never written to a command line, to the environment of a child process, to a log, to a result or to the agent link. The connection and escalation passwords follow the same rule. `-k` hands the SSH password to `ssh` through `SSH_ASKPASS` from a file in a private directory (mode 0700, named after the process, under `XDG_RUNTIME_DIR` when that is private, else the temporary directory). That needs OpenSSH 8.4 or later. The run removes the directory when it ends, when it stops on SIGINT or SIGTERM, and before it dies of SIGHUP, which ends it with code 129 as it ends ansible-playbook (a SIGHUP ignored at start, as under `nohup`, stays ignored). `SIGKILL` and the out-of-memory killer cannot be handled: they leave the directory, and the next run of the same user removes it once no process holds the lock the run took on the directory. `ssh` closes inherited descriptors before it starts its askpass program, so the password cannot travel on one.
 
 Filters, tests and lookups that run in the Python helper never see the vault password. The vault ones run in the controller process for that reason. See [Filters, tests and lookups in Python](/variables/python-helper/).
 

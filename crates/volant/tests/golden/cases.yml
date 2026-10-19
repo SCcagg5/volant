@@ -493,3 +493,23 @@
 - template: "{% macro q(a) %}m{{ a }}{% endmacro %}{{ q(1) }}"
 - template: "{% macro query(a) %}m{{ a }}{% endmacro %}{{ query(2) }}"
 - template: "{{ lookup('varnames', '[', wantlist=True) }}"
+# A raw block writes text: it is rendered once, however it is read afterwards.
+- template: "{% raw %}{{ x }}{% endraw %}"
+  vars: {x: 5}
+- template: "a{% raw %}{{ x }}{% endraw %}b{{ x }}"
+  vars: {x: 5}
+- template: "{%- raw -%} {{ x }} {%- endraw -%}"
+  vars: {x: 5}
+- template: "{% raw %}{% if x %}{% endraw %}"
+  vars: {x: 5}
+- template: "{{ y }}"
+  vars: {x: 5, y: "{% raw %}{{ x }}{% endraw %}"}
+- template: "{{ z }}"
+  vars: {x: 5, y: "{% raw %}{{ x }}{% endraw %}", z: "{{ y }}"}
+- template: "{{ '{{' }} x {{ '}}' }}"
+  vars: {x: 5}
+- template: "{{ ['{% raw %}{{ x }}{% endraw %}'] }}"
+  vars: {x: 5}
+- template: "{{ r }}|{% raw %}{{ r }}{% endraw %}"
+  untrusted: {r: "{% raw %}{{ x }}{% endraw %}{{ x }}"}
+  vars: {x: 5}

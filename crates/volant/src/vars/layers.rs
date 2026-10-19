@@ -10,7 +10,7 @@ use serde_json::{Map, Value};
 use super::facts::no_facts;
 use super::load::{extend, extend_except};
 use super::magic::short_name;
-use super::{HostFacts, Scope, VarStore};
+use super::{Added, HostFacts, Scope, VarStore};
 use crate::template::HOSTVARS_KEYS;
 
 /// One host's variables as `layered_for_host` hands them out.
@@ -111,6 +111,20 @@ impl VarStore {
         );
         self.untrusted_hosts = Some(Arc::clone(&hosts));
         hosts
+    }
+
+    /// Whether `host` is outside the inventory the run started from: a name nothing declared, or a
+    /// host `add_host` made while the playbook ran. The name of such a host can be text a managed
+    /// host returned, in `groups` or in a variable, with nothing in the render that read it to say so.
+    pub fn is_runtime_host(&self, host: &str) -> bool {
+        !self
+            .groups
+            .get("all")
+            .is_some_and(|all| all.iter().any(|name| name == host))
+            || self
+                .added
+                .iter()
+                .any(|change| matches!(change, Added::Host(name, _) if name == host))
     }
 
     /// The merged view for one host, lowest precedence first: a role's `defaults`, inventory

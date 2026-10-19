@@ -1,0 +1,23 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: Read a file whose text is part of a template
+      command: cat {{ bare }}
+      register: r
+    - name: Make a host out of it
+      add_host:
+        name: "{{ r.stdout }}"
+        groups: [made]
+        ansible_connection: local
+    - name: Delegate to it, with braces built next to its name
+      command: id
+      delegate_to: "{{ groups['made'][0] }}"
+      vars:
+        where: "{{ '{{ ' ~ inventory_hostname ~ ' }}' }}"
+        again: "{{ where }}"
+    - name: Delegate to it, with braces built from its short name
+      command: id
+      delegate_to: "{{ groups['made'][0] }}"
+      vars:
+        where: "{{ '{{ ' ~ inventory_hostname_short ~ ' }}' }}"
+        again: "{{ where }}"

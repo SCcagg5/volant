@@ -3,7 +3,7 @@
 //! the sink that records a read of one.
 
 use std::collections::{BTreeSet, HashMap};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use minijinja::value::{Enumerator, Object};
@@ -162,7 +162,37 @@ pub(super) struct Context {
     pub(super) untrusted: BTreeSet<String>,
     pub(super) untrusted_hosts: BTreeSet<String>,
     tainted: Tainted,
+    /// Set when a pass left text that must stay as it is: see `Templar::render_in`. Not data:
+    /// nothing is refused because of it.
+    literal: AtomicBool,
+    /// How many names the render has read, to tell a pass that read none.
+    reads: AtomicUsize,
     memo: Memo,
+}
+
+/// Starts a render over `ctx`: clears the mark of the last one and returns the reads so far.
+pub(super) fn begin(ctx: &minijinja::Value) -> usize {
+    set_literal(ctx, false);
+    reads(ctx)
+}
+
+/// Records that the render over `ctx` left text that no further pass may render.
+pub(super) fn set_literal(ctx: &minijinja::Value, on: bool) {
+    if let Some(root) = ctx.downcast_object_ref::<Context>() {
+        root.literal.store(on, Ordering::Relaxed);
+    }
+}
+
+/// How many names the renders over `ctx` have read so far.
+pub(super) fn reads(ctx: &minijinja::Value) -> usize {
+    ctx.downcast_object_ref::<Context>()
+        .map_or(0, |root| root.reads.load(Ordering::Relaxed))
+}
+
+/// Whether the render over `ctx` left such text.
+pub(super) fn is_literal(ctx: &minijinja::Value) -> bool {
+    ctx.downcast_object_ref::<Context>()
+        .is_some_and(|root| root.literal.load(Ordering::Relaxed))
 }
 
 /// Puts the shared list of all the items back into `ansible_loop` and drops the shared entry.
@@ -206,6 +236,7 @@ impl Object for Context {
         if key == CONTEXT_KEY {
             return Some(minijinja::Value::from_dyn_object(Arc::clone(self)));
         }
+        self.reads.fetch_add(1, Ordering::Relaxed);
         // Before the memo, never after: a second read of the same name is answered from the
         // cache and would otherwise leave the render looking clean.
         // A `hostvars` the map carries as a plain value lists its hosts on any read, so a host
@@ -347,6 +378,8 @@ pub(super) fn context_of(vars: Vars<'_>) -> (minijinja::Value, Tainted) {
         untrusted: vars.untrusted.cloned().unwrap_or_default(),
         untrusted_hosts: vars.untrusted_hosts.cloned().unwrap_or_default(),
         tainted: Arc::clone(&tainted),
+        literal: AtomicBool::new(false),
+        reads: AtomicUsize::new(0),
         memo: Memo::default(),
     });
     (ctx, tainted)
