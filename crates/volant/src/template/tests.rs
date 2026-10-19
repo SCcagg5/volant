@@ -1240,3 +1240,16 @@ fn a_template_is_a_string_with_an_opening_tag() {
         assert_eq!(Templar::is_template(text), want, "{text:?}");
     }
 }
+
+/// A syntax error far along one line used to overflow the lexer's column counter, which panics in
+/// a debug build. The render must give an error, for any length.
+#[test]
+fn a_very_long_broken_line_is_an_error_not_a_panic() {
+    let t = templar();
+    for unit in ["{#", "{{ ", "{% "] {
+        for count in [32_768, 70_000] {
+            let text = unit.repeat(count);
+            assert!(t.render(&text, &Map::new()).is_err(), "{unit:?} x {count}");
+        }
+    }
+}

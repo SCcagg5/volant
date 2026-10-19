@@ -2,6 +2,8 @@
   gather_facts: false
   vars:
     names: [a, b]
+    num: 5
+    pair: [1, 2]
     text: "{% for i in [1, 2] %}{{ i }},{% endfor %}"
     as_list: "{% set ns = namespace(r=[]) %}{% for i in [1, 2, 3] %}{% set ns.r = ns.r + [i] %}{% endfor %}{{ ns.r }}"
     nothing: "{% if false %}x{% endif %}"
@@ -76,3 +78,28 @@
     - name: it stays text
       debug:
         msg: "{{ host_text.stdout | to_json }}"
+    - name: whitespace control in block scalars
+      set_fact:
+        ws_keep: |
+          {{- num }}
+        ws_strip: |-
+          {{- num -}}
+        ws_after: |
+          {{ num -}}
+        ws_plus: |+
+          {{- num -}}
+
+        ws_fold: >
+          {{ pair -}}
+        ws_fold_strip: >-
+          {{- pair }}
+        ws_plain: |
+          {{ num }}
+        ws_text: |
+          {{- num }} apples
+    - name: read whitespace control
+      debug:
+        msg: "{{ [ws_keep, ws_strip, ws_after, ws_plus, ws_fold, ws_fold_strip, ws_plain, ws_text] | map('type_debug') | list | to_json }} {{ [ws_keep, ws_strip, ws_after, ws_plus, ws_fold, ws_fold_strip, ws_plain, ws_text] | to_json }}"
+    - name: literal comment start
+      debug:
+        msg: "{{ ['{#', '{#' ~ names[0]] | to_json }} x {{ '{#' }} y"

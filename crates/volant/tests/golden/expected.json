@@ -4561,5 +4561,1481 @@
       "when": "{% if true %}true{% endif %}"
     },
     "error": "Task failed: Encountered untrusted template or expression."
+  },
+  {
+    "case": {
+      "template": "{{ '{#' }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "{#"
+  },
+  {
+    "case": {
+      "template": "{{ '{#' ~ s }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "{#abc"
+  },
+  {
+    "case": {
+      "template": "a {{ '{#' }} b",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "a {# b"
+  },
+  {
+    "case": {
+      "template": "{{ 'a{#b' }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "a{#b"
+  },
+  {
+    "case": {
+      "template": "{{ ['{#'] }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": [
+      "{#"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ s ~ '#}' }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "abc#}"
+  },
+  {
+    "case": {
+      "template": "{{ v }}",
+      "vars": {
+        "v": "{{ '{#' }}"
+      }
+    },
+    "result": "{#"
+  },
+  {
+    "case": {
+      "template": "{#",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": null
+  },
+  {
+    "case": {
+      "template": "{#\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": null
+  },
+  {
+    "case": {
+      "template": "{#+",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": null
+  },
+  {
+    "case": {
+      "template": "{#-",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": null
+  },
+  {
+    "case": {
+      "template": "x {#",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "x "
+  },
+  {
+    "case": {
+      "template": "x {#\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "x \n"
+  },
+  {
+    "case": {
+      "template": "x{#-",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "x"
+  },
+  {
+    "case": {
+      "template": "x {#-",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "x"
+  },
+  {
+    "case": {
+      "template": "x{#+",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "x"
+  },
+  {
+    "case": {
+      "template": "{{ x }}{#",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "a\n{#",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "a\n"
+  },
+  {
+    "case": {
+      "template": "{# ",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Syntax error in template: Missing end of comment tag"
+  },
+  {
+    "case": {
+      "template": "x {# ",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Syntax error in template: Missing end of comment tag"
+  },
+  {
+    "case": {
+      "template": "{#x",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Syntax error in template: Missing end of comment tag"
+  },
+  {
+    "case": {
+      "template": "{# x",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Syntax error in template: Missing end of comment tag"
+  },
+  {
+    "case": {
+      "template": "a {#+ b",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Syntax error in template: Missing end of comment tag"
+  },
+  {
+    "case": {
+      "template": "{#{#",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Syntax error in template: Missing end of comment tag"
+  },
+  {
+    "case": {
+      "template": "{# c #}{#",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": null
+  },
+  {
+    "case": {
+      "template": "{{ x }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ x }}\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ x }} ",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "5 "
+  },
+  {
+    "case": {
+      "template": "{{ x }}\n\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "5\n\n"
+  },
+  {
+    "case": {
+      "template": "{{ x }}  \n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "5  \n"
+  },
+  {
+    "case": {
+      "template": "{{ x -}}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ x -}}\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ x -}} ",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ x -}}\n\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ x -}}  \n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{- x }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{- x }}\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{- x }} ",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "5 "
+  },
+  {
+    "case": {
+      "template": "{{- x }}\n\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "5\n\n"
+  },
+  {
+    "case": {
+      "template": "{{- x }}  \n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "5  \n"
+  },
+  {
+    "case": {
+      "template": "{{- x -}}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{- x -}}\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{- x -}} ",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{- x -}}\n\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{- x -}}  \n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": " {{ x }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": " 5"
+  },
+  {
+    "case": {
+      "template": " {{ x }}\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": " 5\n"
+  },
+  {
+    "case": {
+      "template": " {{ x }} ",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": " 5 "
+  },
+  {
+    "case": {
+      "template": " {{ x }}\n\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": " 5\n\n"
+  },
+  {
+    "case": {
+      "template": " {{ x }}  \n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": " 5  \n"
+  },
+  {
+    "case": {
+      "template": " {{ x -}}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": " 5"
+  },
+  {
+    "case": {
+      "template": " {{ x -}}\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": " 5\n"
+  },
+  {
+    "case": {
+      "template": " {{ x -}} ",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": " 5"
+  },
+  {
+    "case": {
+      "template": " {{ x -}}\n\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": " 5\n\n"
+  },
+  {
+    "case": {
+      "template": " {{ x -}}  \n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": " 5\n"
+  },
+  {
+    "case": {
+      "template": " {{- x }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": " {{- x }}\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": " {{- x }} ",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "5 "
+  },
+  {
+    "case": {
+      "template": " {{- x }}\n\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "5\n\n"
+  },
+  {
+    "case": {
+      "template": " {{- x }}  \n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "5  \n"
+  },
+  {
+    "case": {
+      "template": " {{- x -}}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": " {{- x -}}\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": " {{- x -}} ",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": " {{- x -}}\n\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": " {{- x -}}  \n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "\n{{ x }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "\n5"
+  },
+  {
+    "case": {
+      "template": "\n{{ x }}\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "\n5\n"
+  },
+  {
+    "case": {
+      "template": "\n{{ x }} ",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "\n5 "
+  },
+  {
+    "case": {
+      "template": "\n{{ x }}\n\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "\n5\n\n"
+  },
+  {
+    "case": {
+      "template": "\n{{ x }}  \n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "\n5  \n"
+  },
+  {
+    "case": {
+      "template": "\n{{ x -}}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "\n5"
+  },
+  {
+    "case": {
+      "template": "\n{{ x -}}\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "\n5\n"
+  },
+  {
+    "case": {
+      "template": "\n{{ x -}} ",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "\n5"
+  },
+  {
+    "case": {
+      "template": "\n{{ x -}}\n\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "\n5\n\n"
+  },
+  {
+    "case": {
+      "template": "\n{{ x -}}  \n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "\n5\n"
+  },
+  {
+    "case": {
+      "template": "\n{{- x }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "\n{{- x }}\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "\n{{- x }} ",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "5 "
+  },
+  {
+    "case": {
+      "template": "\n{{- x }}\n\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "5\n\n"
+  },
+  {
+    "case": {
+      "template": "\n{{- x }}  \n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "5  \n"
+  },
+  {
+    "case": {
+      "template": "\n{{- x -}}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "\n{{- x -}}\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "\n{{- x -}} ",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "\n{{- x -}}\n\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "\n{{- x -}}  \n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{- l }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": [
+      1,
+      2
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ l -}}\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": [
+      1,
+      2
+    ]
+  },
+  {
+    "case": {
+      "template": "  {{- l -}}  \n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": [
+      1,
+      2
+    ]
+  },
+  {
+    "case": {
+      "template": "{{-x}}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ x-}}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{--x}}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": -5
+  },
+  {
+    "case": {
+      "template": "{{ - x }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": -5
+  },
+  {
+    "case": {
+      "template": "{{- - x }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": -5
+  },
+  {
+    "case": {
+      "template": "{{ x - 1 }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 4
+  },
+  {
+    "case": {
+      "template": "{{- x -}}{{ x }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "55"
+  },
+  {
+    "case": {
+      "template": "{{ x }}{{- x }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "55"
+  },
+  {
+    "case": {
+      "template": "{{ x -}} {{ x }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "55"
+  },
+  {
+    "case": {
+      "template": "{{ x -}}\n{{ x }}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "55"
+  },
+  {
+    "case": {
+      "template": "\n {{- x }}\n{%- if true %}\ny{% endif %}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "5y"
+  },
+  {
+    "case": {
+      "template": "{{- x -}}{# c #}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{# c #}{{- x -}}",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{- 's' -}}\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "s\n"
+  },
+  {
+    "case": {
+      "template": "{{- none -}}\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": null
+  },
+  {
+    "case": {
+      "template": "{{- '' -}}\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": "\n"
+  },
+  {
+    "case": {
+      "template": "{%- if true -%}{{- x -}}{%- endif -%}\n",
+      "vars": {
+        "x": 5,
+        "s": "abc",
+        "l": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": 5
   }
 ]
