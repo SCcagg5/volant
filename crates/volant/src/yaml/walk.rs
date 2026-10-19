@@ -40,22 +40,23 @@ fn is_leaf(node: &MarkedYaml<'_>) -> bool {
     matches!(node.data, YamlData::Value(_) | YamlData::Representation(..))
 }
 
-/// A scalar of the source tree, with PyYAML's reading of it (see `scalar`).
+/// A scalar of the source tree, read as PyYAML reads it from its text, style and tag.
 fn lower_scalar(node: MarkedYaml<'_>) -> anyhow::Result<Yaml<'_>> {
-    match node.data {
-        YamlData::Representation(value, style, tag) => read_scalar(value, style, tag),
-        YamlData::Value(scalar) => Ok(Yaml::Value(scalar)),
-        _ => Ok(Yaml::BadValue),
-    }
+    Ok(match node.data {
+        YamlData::Representation(value, style, tag) => read_scalar(value, style, tag)?,
+        YamlData::Value(scalar) => Yaml::Value(scalar),
+        _ => Yaml::BadValue,
+    })
 }
 
-/// Drops the source positions `MarkedYaml` tracks once loading is done, each scalar read as
-/// PyYAML reads it and each tag checked (see `read_scalar` and `read_tagged`). Every other
-/// function of the crate keeps working on the plain `Yaml` tree it already expected.
-pub(super) fn lower<'a>(root: MarkedYaml<'a>) -> anyhow::Result<Yaml<'a>> {
-    let mut open: Vec<Lowering<'a>> = Vec::new();
+/// Drops the source positions `MarkedYaml` tracks once loading is done, reading each scalar as
+/// PyYAML does (see [`scalar`]). Every other function in this module keeps working on the plain
+/// `Yaml` tree it already expected. A tag with no constructor, or a `!vault` over a value that is
+/// not a string, is an error with PyYAML's own text.
+pub(super) fn lower(root: MarkedYaml<'_>) -> anyhow::Result<Yaml<'_>> {
+    let mut open: Vec<Lowering<'_>> = Vec::new();
     let mut next = Some(root);
-    let mut done: Option<Yaml<'a>> = None;
+    let mut done: Option<Yaml<'_>> = None;
     loop {
         if let Some(node) = next.take() {
             match node.data {
