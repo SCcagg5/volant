@@ -13,6 +13,7 @@ mod file;
 mod filters;
 pub(crate) use filters::python_json;
 mod lookups;
+mod pymethods;
 mod templar;
 mod test_plugins;
 mod vm;
