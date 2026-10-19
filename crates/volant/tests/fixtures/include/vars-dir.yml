@@ -1,6 +1,0 @@
-- hosts: h1
-  gather_facts: false
-  tasks:
-    - name: variables from a whole directory
-      include_vars:
-        dir: somewhere

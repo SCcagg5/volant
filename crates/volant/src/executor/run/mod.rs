@@ -7,6 +7,7 @@ mod batch;
 mod blob;
 mod channel;
 mod controller;
+mod include_vars;
 mod interpreter;
 mod judge;
 mod links;

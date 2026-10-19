@@ -127,6 +127,9 @@ pub(super) async fn report_task(
                 .await;
         }
         let outcome = classify(r, ignores(i), rescuable);
+        // A result that asks to be hidden (`include_vars` of a vaulted file) is censored on its
+        // own, whatever the task's `no_log` says.
+        let censored = censored || r.0.get("_ansible_no_log") == Some(&Value::Bool(true));
         if r.failed() && first_failure.is_none() {
             first_failure = Some(r.clone());
         }
