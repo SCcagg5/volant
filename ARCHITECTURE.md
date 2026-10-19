@@ -103,6 +103,7 @@ The controller keeps one Python helper process for the whole run. It uses ansibl
 | File | What it holds |
 |---|---|
 | `frame.rs`, `messages.rs` | The wire format and the messages. |
+| `shape.rs` | The count of values and levels in a message, and the bounds a host's message keeps. |
 | `modules/` | The native and controller modules and the arguments each one reads, the builtin module list, the action plugins and the generated module reference page. |
 
 ### Documentation and tests
