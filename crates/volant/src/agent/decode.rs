@@ -15,7 +15,10 @@ use volant_protocol::{FromAgent, TaskResult};
 /// The longest frame of a message that is not a task result.
 const MAX_MESSAGE_LEN: usize = 1024 * 1024;
 
-pub(super) fn decode(payload: &[u8]) -> io::Result<FromAgent> {
+/// Whether the controller waits for the answer of task `index` of batch `batch`.
+pub(super) type Pending<'a> = &'a dyn Fn(u64, usize) -> bool;
+
+pub(super) fn decode(payload: &[u8], pending: Pending<'_>) -> io::Result<FromAgent> {
     let len = payload.len();
     match shape::check(payload) {
         Ok(_) if len <= MAX_MESSAGE_LEN => read(payload),
@@ -30,25 +33,32 @@ pub(super) fn decode(payload: &[u8]) -> io::Result<FromAgent> {
         Err(excess) => refuse(
             payload,
             &format!("it has {excess} ({len} bytes in its frame)"),
+            pending,
         ),
     }
 }
 
 /// The answer to a frame that is not parsed, for the reason `why`: a failed task when the frame
-/// is a result, so that its host fails alone, and an unreadable frame otherwise.
-fn refuse(payload: &[u8], why: &str) -> io::Result<FromAgent> {
-    match Head::of(payload) {
-        Some(head) if head.kind == "task_result" => Ok(FromAgent::TaskResult {
-            batch: head.batch,
-            index: head.index,
+/// is a result for a task the controller waits for, so that its host fails alone, and an
+/// unreadable frame otherwise. A result that names no task, or one nobody waits for, would be
+/// dropped as a late answer and leave the run waiting.
+fn refuse(payload: &[u8], why: &str, pending: Pending<'_>) -> io::Result<FromAgent> {
+    if let Some(head) = Head::of(payload)
+        && head.kind == "task_result"
+        && let (Some(batch), Some(index)) = (head.batch, head.index)
+        && pending(batch, index)
+    {
+        return Ok(FromAgent::TaskResult {
+            batch,
+            index,
             result: TaskResult::failed_with(format!("the result of the host is refused: {why}")),
             ran: None,
-        }),
-        _ => Err(refusal(format!(
-            "the agent sent a message of {} bytes that is refused: {why}",
-            payload.len()
-        ))),
+        });
     }
+    Err(refusal(format!(
+        "the agent sent a message of {} bytes that no task waits for and that is refused: {why}",
+        payload.len()
+    )))
 }
 
 fn read(payload: &[u8]) -> io::Result<FromAgent> {

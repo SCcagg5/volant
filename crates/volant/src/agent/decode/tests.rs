@@ -20,7 +20,7 @@ fn failure_of(frame: &[u8]) -> String {
         index,
         result,
         ran,
-    } = decode(frame).unwrap()
+    } = decode(frame, &|_, _| true).unwrap()
     else {
         panic!("a task result");
     };
@@ -37,7 +37,7 @@ fn an_ordinary_result_is_read_as_it_always_was() {
         index,
         result,
         ..
-    } = decode(&frame).unwrap()
+    } = decode(&frame, &|_, _| true).unwrap()
     else {
         panic!("a task result");
     };
@@ -58,7 +58,7 @@ fn a_large_result_inside_the_bounds_is_read(#[case] body: String) {
     };
     let frame = result_frame(&body);
     assert!(shape::check(&frame).is_ok());
-    let FromAgent::TaskResult { result, .. } = decode(&frame).unwrap() else {
+    let FromAgent::TaskResult { result, .. } = decode(&frame, &|_, _| true).unwrap() else {
         panic!("a task result");
     };
     assert!(
@@ -110,7 +110,7 @@ fn a_message_that_is_not_a_result_is_cut_short(
     #[case] frame: Vec<u8>,
     #[case] refused: Option<&str>,
 ) {
-    match (refused, decode(&frame)) {
+    match (refused, decode(&frame, &|_, _| true)) {
         (None, Ok(FromAgent::Log { level, .. })) => assert_eq!(level, LogLevel::Info),
         (Some(says), Err(err)) => {
             assert_eq!(err.kind(), io::ErrorKind::InvalidData);
@@ -133,7 +133,7 @@ fn log_frame(len: usize) -> Vec<u8> {
 #[case::not_an_object(vec![b'['; 100_000])]
 #[case::no_type(format!(r#"{{"x":"{}"}}"#, "y".repeat(100_000)).into_bytes())]
 fn a_large_frame_that_does_not_read_is_an_error(#[case] frame: Vec<u8>) {
-    assert!(decode(&frame).is_err());
+    assert!(decode(&frame, &|_, _| true).is_err());
 }
 
 /// A field that does not read is no way past the 1 MiB rule: a frame whose head does not read is
@@ -153,7 +153,7 @@ fn a_large_frame_that_does_not_read_is_an_error(#[case] frame: Vec<u8>) {
 #[case::a_result_with_a_junk_batch(r#""type":"task_result","batch":1.5,"index":0"#)]
 fn a_long_frame_whose_head_does_not_read_is_cut_short(#[case] fields: &str) {
     let frame = format!(r#"{{{fields},"message":"{}"}}"#, "x".repeat(2 << 20));
-    let err = decode(frame.as_bytes()).unwrap_err();
+    let err = decode(frame.as_bytes(), &|_, _| true).unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     assert!(err.to_string().contains("1048576 byte limit"), "{err}");
 }
@@ -172,7 +172,7 @@ fn the_nesting_of_a_small_frame_is_bounded(#[case] levels: usize, #[case] read: 
     );
     let frame = result_frame(&body);
     assert!(frame.len() < 4096);
-    let FromAgent::TaskResult { result, .. } = decode(&frame).unwrap() else {
+    let FromAgent::TaskResult { result, .. } = decode(&frame, &|_, _| true).unwrap() else {
         panic!("a task result");
     };
     assert_eq!(result.failed(), !read);
@@ -182,5 +182,36 @@ fn the_nesting_of_a_small_frame_is_bounded(#[case] levels: usize, #[case] read: 
             msg.contains("levels of nesting, over the limit of 64"),
             "{msg}"
         );
+    }
+}
+
+/// A result over a bound is a failed task only for the task the controller waits for.
+#[rstest]
+#[case::the_task_waited_for(r#""batch":7,"index":3"#, true)]
+#[case::another_task(r#""batch":7,"index":4"#, false)]
+#[case::a_task_past_the_batch(r#""batch":7,"index":3000"#, false)]
+#[case::another_batch(r#""batch":8,"index":3"#, false)]
+#[case::no_batch(r#""index":3"#, false)]
+#[case::no_index(r#""batch":7"#, false)]
+#[case::neither(r#""other":1"#, false)]
+fn a_refused_result_is_answered_for_a_task_that_waits_for_it(
+    #[case] head: &str,
+    #[case] answered: bool,
+) {
+    let frame = format!(
+        r#"{{"type":"task_result",{head},"result":{{"x":{}}}}}"#,
+        array(2_000_000)
+    );
+    let waits = |batch: u64, index: usize| (batch, index) == (7, 3);
+    match (answered, decode(frame.as_bytes(), &waits)) {
+        (true, Ok(FromAgent::TaskResult { result, .. })) => assert!(result.failed()),
+        (false, Err(err)) => {
+            assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+            assert!(
+                err.to_string().contains("over the limit of 500000"),
+                "{err}"
+            );
+        }
+        (_, other) => panic!("{other:?}"),
     }
 }

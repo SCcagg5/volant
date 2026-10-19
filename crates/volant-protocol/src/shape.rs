@@ -26,9 +26,9 @@ pub struct Head {
     #[serde(rename = "type")]
     pub kind: String,
     #[serde(default)]
-    pub batch: u64,
+    pub batch: Option<u64>,
     #[serde(default)]
-    pub index: usize,
+    pub index: Option<usize>,
 }
 
 impl Head {
