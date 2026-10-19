@@ -12,15 +12,16 @@ use std::collections::HashMap;
 
 use saphyr_parser::{Event, Marker, Parser, ScanError, SpannedEventReceiver};
 
-/// The deepest nesting of collections a document may have. The scanner already stops a flow
-/// collection at 255 levels, and a block collection gets the same limit.
+/// The deepest nesting of collections a document may have: the level ansible-core 2.19.12 loads
+/// a file down to. It stops a file at 490 with `maximum recursion depth exceeded`, whether the
+/// levels are block or flow collections.
 ///
-/// ansible-core 2.19.12 loads a file down to 489 levels and stops it at 490 with `maximum
-/// recursion depth exceeded`; its `from_yaml` reads a text far deeper than that. Volant stops
-/// earlier on purpose. Converting a document takes about 3.6 KB of stack for each level in a
-/// debug build, so 489 levels leave a 2 MiB thread with almost nothing, and no real document
-/// comes close to 255.
-pub(super) const MAX_DEPTH: usize = 255;
+/// Every walk over a document keeps its own stack (see `walk`), so a level costs about 160 bytes
+/// of thread stack, 240 with a tag on it, in a debug build, where a recursive walk cost 3.6 KB
+/// and 5.7 KB. The deepest document converts on 80 to 120 KB. The scanner stops a flow
+/// collection at 255 levels (its counter is a `u8`), so deeper flow collections that
+/// ansible-core loads are refused before this check.
+pub(super) const MAX_DEPTH: usize = 489;
 
 /// The most nodes anchors and aliases may copy in one text. The loader keeps a copy of every
 /// anchored node and makes another at every alias. A text that holds no alias, or that keeps to

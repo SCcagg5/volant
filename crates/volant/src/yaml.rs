@@ -5,11 +5,14 @@
 
 use std::fmt::Write;
 
-use anyhow::{Context, anyhow, bail};
-use saphyr::{Mapping, MarkedYaml, Scalar, Yaml, YamlData, YamlLoader};
-use serde_json::{Map, Value};
+use anyhow::Context;
+use saphyr::{Mapping, MarkedYaml, Scalar, Yaml, YamlLoader};
+use serde_json::Value;
 
 mod limits;
+mod walk;
+
+use walk::{lower, mapping_addresses, mapping_starts};
 
 /// The deepest nesting a YAML text may have, for the code that must read a value back.
 pub(crate) const MAX_DEPTH: usize = limits::MAX_DEPTH;
@@ -112,40 +115,6 @@ type Starts = (
     Vec<(usize, usize)>,
 );
 
-fn mapping_starts(node: &MarkedYaml<'_>, out: &mut Starts) {
-    let at = |n: &MarkedYaml<'_>| (n.span.start.line(), n.span.start.col() + 1);
-    match &node.data {
-        YamlData::Sequence(items) => items.iter().for_each(|n| mapping_starts(n, out)),
-        YamlData::Mapping(map) => {
-            out.0.push(at(node));
-            for (k, v) in map {
-                out.1.push(at(v));
-                out.2.push(at(k));
-                mapping_starts(k, out);
-                mapping_starts(v, out);
-            }
-        }
-        YamlData::Tagged(_, inner) => mapping_starts(inner, out),
-        _ => {}
-    }
-}
-
-fn mapping_addresses(node: &Yaml<'_>, out: &mut (Vec<usize>, Vec<usize>)) {
-    match node {
-        Yaml::Sequence(items) => items.iter().for_each(|n| mapping_addresses(n, out)),
-        Yaml::Mapping(map) => {
-            out.0.push(std::ptr::from_ref(map).addr());
-            for (k, v) in map {
-                out.1.push(std::ptr::from_ref(v).addr());
-                mapping_addresses(k, out);
-                mapping_addresses(v, out);
-            }
-        }
-        Yaml::Tagged(_, inner) => mapping_addresses(inner, out),
-        _ => {}
-    }
-}
-
 /// Whether every line of `text` is blank, a comment or a document marker. Such a stream holds
 /// only empty documents, which PyYAML reads as null; saphyr hands each back as an empty string.
 /// Measured on ansible-core 2.19.12, a vars file holding only `---` and a comment loads as empty.
@@ -162,35 +131,6 @@ fn holds_nothing(text: &str) -> bool {
             .map_or(line, str::trim_start);
         line.is_empty() || line.starts_with('#')
     })
-}
-
-/// Drops the source positions `MarkedYaml` tracks once loading is done, applying PyYAML's
-/// scalar resolution along the way where it's confirmed to diverge from saphyr's YAML 1.2 core
-/// schema (see `pyyaml_scalar`). Every other function in this module keeps working on the
-/// plain `Yaml` tree it already expected; only `load` needs to know this happened.
-fn lower<'a>(node: MarkedYaml<'a>, text: &'a str) -> Yaml<'a> {
-    match node.data {
-        YamlData::Value(scalar) => {
-            let start = char_to_byte(text, node.span.start.index());
-            let end = char_to_byte(text, node.span.end.index());
-            let raw = text.get(start..end).unwrap_or_default();
-            Yaml::Value(pyyaml_scalar(scalar, raw))
-        }
-        YamlData::Sequence(items) => {
-            Yaml::Sequence(items.into_iter().map(|n| lower(n, text)).collect())
-        }
-        YamlData::Mapping(map) => {
-            let mut out = Mapping::new();
-            for (k, v) in map {
-                out.insert(lower(k, text), lower(v, text));
-            }
-            Yaml::Mapping(out)
-        }
-        YamlData::Tagged(tag, inner) => Yaml::Tagged(tag, Box::new(lower(*inner, text))),
-        YamlData::Alias(id) => Yaml::Alias(id),
-        YamlData::Representation(v, style, tag) => Yaml::Representation(v, style, tag),
-        YamlData::BadValue => Yaml::BadValue,
-    }
 }
 
 /// `text`'s byte offset for the `chars`-th character in it: saphyr's markers count characters,
@@ -358,17 +298,19 @@ pub fn bool_from_str(text: &str) -> Option<bool> {
 /// stored as a one-expression template that renders back to its own text through
 /// `volant_unsafe`, which also stops the render from going over the result again. Every string
 /// leaf of a list or mapping is treated the same way; mapping keys are never rendered.
-pub(crate) fn unsafe_data(value: Value) -> Value {
-    match value {
-        Value::String(s) if s.contains("{{") || s.contains("{%") => {
-            Value::String(wrap(&s, "volant_unsafe"))
+pub(crate) fn unsafe_data(mut value: Value) -> Value {
+    let mut open = vec![&mut value];
+    while let Some(node) = open.pop() {
+        match node {
+            Value::String(s) if s.contains("{{") || s.contains("{%") => {
+                *s = wrap(s, "volant_unsafe");
+            }
+            Value::Array(items) => open.extend(items.iter_mut()),
+            Value::Object(map) => open.extend(map.values_mut()),
+            _ => {}
         }
-        Value::Array(items) => Value::Array(items.into_iter().map(unsafe_data).collect()),
-        Value::Object(map) => {
-            Value::Object(map.into_iter().map(|(k, v)| (k, unsafe_data(v))).collect())
-        }
-        other => other,
     }
+    value
 }
 
 /// `text` as data that is never rendered, whatever it holds.
@@ -444,52 +386,7 @@ fn unwrapped(s: &str, filter: &str) -> Option<String> {
 /// Converts a node to JSON. `!vault` and `!unsafe` load as data, see `vault_data` and
 /// `unsafe_data`.
 pub fn to_json(node: &Yaml) -> anyhow::Result<Value> {
-    convert(node, false)
-}
-
-/// [`to_json`]. `inside_unsafe` is set below a `!unsafe`, whose own conversion wraps every string
-/// once: a nested `!unsafe` must not wrap them again, which doubled each string at every level.
-fn convert(node: &Yaml, inside_unsafe: bool) -> anyhow::Result<Value> {
-    Ok(match node {
-        Yaml::Value(Scalar::Null) => Value::Null,
-        Yaml::Value(Scalar::Boolean(b)) => Value::Bool(*b),
-        Yaml::Value(Scalar::Integer(i)) => Value::from(*i),
-        Yaml::Value(Scalar::FloatingPoint(f)) => serde_json::Number::from_f64(f.into_inner())
-            .map_or_else(|| Value::String(f.to_string()), Value::Number),
-        Yaml::Value(Scalar::String(s)) => Value::String(s.to_string()),
-        Yaml::Sequence(items) => Value::Array(
-            items
-                .iter()
-                .map(|item| convert(item, inside_unsafe))
-                .collect::<anyhow::Result<_>>()?,
-        ),
-        Yaml::Mapping(map) => {
-            let mut out = Map::new();
-            for (k, v) in map {
-                let k = k
-                    .as_str()
-                    .ok_or_else(|| anyhow!("mapping keys must be strings"))?;
-                out.insert(k.to_string(), convert(v, inside_unsafe)?);
-            }
-            Value::Object(out)
-        }
-        Yaml::Tagged(tag, inner) if tag.handle == "!" && tag.suffix == "vault" => match &**inner {
-            Yaml::Value(Scalar::String(s)) => Value::String(vault_data(s)),
-            _ => bail!("!vault takes a string"),
-        },
-        Yaml::Tagged(tag, inner) if tag.handle == "!" && tag.suffix == "unsafe" => {
-            let value = convert(inner, true)?;
-            if inside_unsafe {
-                value
-            } else {
-                unsafe_data(value)
-            }
-        }
-        Yaml::Tagged(tag, _) => bail!("unsupported YAML tag {}{}", tag.handle, tag.suffix),
-        Yaml::Alias(_) => bail!("YAML aliases are not supported yet"),
-        Yaml::Representation(..) => bail!("unresolved YAML scalar"),
-        Yaml::BadValue => bail!("invalid YAML value"),
-    })
+    walk::to_json(node)
 }
 
 #[cfg(test)]
