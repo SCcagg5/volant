@@ -692,6 +692,21 @@ fn nested_imports_put_the_outer_condition_first_and_gather_on_the_outermost() {
     "Vars in a PlaybookInclude must be specified as a dictionary."
 )]
 #[case::tags_mapping("  tags: {a: 1}\n", 1, "tags must be specified as a list")]
+#[case::templated_tags(
+    "  tags: ['{{ t }}']\n",
+    4,
+    "'tags' of an 'import_playbook' holds a template"
+)]
+#[case::templated_tags_string("  tags: '{{ t }}'\n", 4, "holds a template")]
+#[case::statement_in_tags("  tags: ['{% if t %}a{% endif %}']\n", 4, "holds a template")]
+#[case::comment_in_tags("  tags: ['a{# b #}']\n", 4, "holds a template")]
+#[case::templated_tags_in_vars("  vars: {tags: '{{ t }}'}\n", 4, "holds a template")]
+#[case::tags_null("  tags:\n", 1, "tags must be specified as a list")]
+#[case::nested_tags(
+    "  tags: [a, [b]]\n",
+    4,
+    "Keyword 'tags' items must be of type 'str' or 'int', not 'list'"
+)]
 #[case::templated_when("  when: '{{ x }}'\n", 4, "holds a template")]
 fn an_import_entry_with_a_bad_keyword_is_refused(
     #[case] keywords: &str,
