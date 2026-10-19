@@ -234,7 +234,8 @@ impl<'a> Lookup<'a> {
 /// Every file found must lie under `<role>/<sub>` once `.` and `..` are folded out of its path.
 /// The check is on the text of the path: a symlink inside the sub-directory that points elsewhere
 /// is followed, as the reference does. A name such as `../../../x` or `/etc/x` is refused with the
-/// reference's own sentence.
+/// reference's own sentence. The path is folded before it is looked up and read, so a `..` after a
+/// link to a directory never climbs out through the link.
 fn files(look: &Lookup) -> anyhow::Result<Option<Vec<PathBuf>>> {
     let base = look.role.join(look.sub);
     if !base.is_dir() {
@@ -246,21 +247,25 @@ fn files(look: &Lookup) -> anyhow::Result<Option<Vec<PathBuf>>> {
     } else {
         extensions.push("");
     }
-    let mut found = Vec::new();
+    // Each file is kept twice: as the entry spells it, for the refusal, and with `.` and `..`
+    // folded out, which is the path that is looked up and read. The reference folds first, so a `..`
+    // after a link to a directory does not climb out through the link.
+    let mut found: Vec<(PathBuf, PathBuf)> = Vec::new();
     for extension in &extensions {
         let mut full = base.join(look.from).into_os_string();
         full.push(extension);
-        let full = PathBuf::from(full);
-        if !full.exists() {
+        let shown = PathBuf::from(full);
+        let real = folded(&shown);
+        if !real.exists() {
             continue;
         }
-        if full.is_dir() {
+        if real.is_dir() {
             if !look.allow_dir {
                 continue;
             }
-            directory_files(&full, &extensions, &mut found)?;
+            directory_files(&shown, &real, &extensions, &mut found)?;
         } else {
-            found.push(full);
+            found.push((shown, real));
         }
         break;
     }
@@ -277,36 +282,41 @@ fn files(look: &Lookup) -> anyhow::Result<Option<Vec<PathBuf>>> {
         return Ok(None);
     }
     let inside = folded(&base);
-    for file in &found {
-        if !folded(file).starts_with(&inside) {
+    for (shown, real) in &found {
+        if !real.starts_with(&inside) {
             bail!(
                 "Failed loading '{}' for role ({}) as it is not inside the expected role path: '{}'",
-                absolute(file).display(),
+                absolute(shown).display(),
                 look.name,
                 absolute(&base).display()
             );
         }
     }
-    Ok(Some(found))
+    Ok(Some(found.into_iter().map(|(_, real)| real).collect()))
 }
 
 /// The files of a directory read as a vars directory: in name order, hidden files and backups
 /// (`~`) skipped, a sub-directory without a dot in its name read in place.
-fn directory_files(dir: &Path, extensions: &[&str], out: &mut Vec<PathBuf>) -> anyhow::Result<()> {
-    let mut names: Vec<String> = std::fs::read_dir(dir)
-        .with_context(|| format!("reading {}", dir.display()))?
+fn directory_files(
+    shown: &Path,
+    real: &Path,
+    extensions: &[&str],
+    out: &mut Vec<(PathBuf, PathBuf)>,
+) -> anyhow::Result<()> {
+    let mut names: Vec<String> = std::fs::read_dir(real)
+        .with_context(|| format!("reading {}", real.display()))?
         .filter_map(Result::ok)
         .filter_map(|e| e.file_name().into_string().ok())
         .filter(|n| !n.starts_with('.') && !n.ends_with('~'))
         .collect();
     names.sort();
     for name in names {
-        let path = dir.join(&name);
+        let (shown, path) = (shown.join(&name), real.join(&name));
         let extension = name.rfind('.').map_or("", |at| &name[at..]);
         if extension.is_empty() && path.is_dir() {
-            directory_files(&path, extensions, out)?;
+            directory_files(&shown, &path, extensions, out)?;
         } else if path.is_file() && (extension.is_empty() || extensions.contains(&extension)) {
-            out.push(path);
+            out.push((shown, path));
         }
     }
     Ok(())
