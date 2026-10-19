@@ -208,6 +208,7 @@ pub(crate) fn compile(
     // path to keep in step with this one.
     let empty = PlayTask {
         tags: play.tags.clone(),
+        when: play.import_when.clone(),
         no_log: play.no_log,
         environment: play.environment.clone(),
         module_defaults: play.module_defaults.clone(),
@@ -251,6 +252,7 @@ pub(crate) fn compile(
             empty.tags.clone()
         },
         run_once: None,
+        when: play.gather_when.clone(),
         args: gather_args(play),
         origin: play.origin.clone(),
         ..empty.clone()
