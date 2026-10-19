@@ -1,0 +1,32 @@
+- hosts: all
+  gather_facts: false
+  vars:
+    x: val
+  tasks:
+    - name: A template with CRLF line ends
+      shell: printf '[[ x ]]\r\n{''{ x }}\r\n' > {{ playbook_dir }}/templates/plain_crlf.j2
+      check_mode: false
+    - name: variable delimiters
+      debug:
+        msg: "{{ lookup('template', 'vars.j2', variable_start_string='[[', variable_end_string=']]') | to_json }}"
+    - name: variable start only
+      debug:
+        msg: "{{ lookup('ansible.builtin.template', 'start_only.j2', variable_start_string='[[') | to_json }}"
+    - name: comment delimiters
+      debug:
+        msg: "{{ lookup('template', 'comments.j2', comment_start_string='<#', comment_end_string='#>') | to_json }}"
+    - name: trim_blocks off
+      debug:
+        msg: "{{ lookup('template', 'blocks.j2', trim_blocks=False) | to_json }}"
+    - name: trim_blocks on
+      debug:
+        msg: "{{ lookup('template', 'blocks.j2', trim_blocks=True) | to_json }}"
+    - name: header
+      debug:
+        msg: "{{ lookup('template', 'header.j2') | to_json }}"
+    - name: header wins over the options
+      debug:
+        msg: "{{ lookup('template', 'header_wins.j2', variable_start_string='<!', variable_end_string='!>') | to_json }}"
+    - name: no start string is plain text
+      debug:
+        msg: "{{ lookup('template', 'plain_crlf.j2', variable_start_string='<<', variable_end_string='>>') | to_json }}"

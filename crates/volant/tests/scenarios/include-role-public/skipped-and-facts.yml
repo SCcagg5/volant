@@ -1,0 +1,30 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: skipped, so nothing is lent
+      include_role:
+        name: r
+        public: true
+      when: false
+    - name: after the skipped include
+      debug:
+        msg: "rdef={{ rdef | default('unset') }} rvar={{ rvar | default('unset') }}"
+    - name: facts beat both layers
+      set_fact:
+        rvar: fact-rvar
+        rdef: fact-rdef
+    - name: public
+      include_role:
+        name: r
+        public: true
+    - name: after the fact
+      debug:
+        msg: "rdef={{ rdef }} rvar={{ rvar }}"
+    - name: public in a loop
+      include_role:
+        name: "{{ item }}"
+        public: true
+      loop: [q]
+    - name: after the loop
+      debug:
+        msg: "qdef={{ qdef | default('unset') }}"

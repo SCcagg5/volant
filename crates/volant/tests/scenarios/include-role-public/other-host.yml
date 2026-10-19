@@ -1,0 +1,11 @@
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: only h1 includes
+      include_role:
+        name: r
+        public: true
+      when: inventory_hostname == 'h1'
+    - name: both hosts read it
+      debug:
+        msg: "{{ inventory_hostname }}: rdef={{ rdef | default('unset') }} rvar={{ rvar | default('unset') }}"

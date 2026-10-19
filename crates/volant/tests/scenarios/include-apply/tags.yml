@@ -1,0 +1,12 @@
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: include with always
+      include_tasks:
+        file: inc.yml
+        apply:
+          tags: [t]
+      tags: [always]
+    - name: plain
+      debug:
+        msg: plain

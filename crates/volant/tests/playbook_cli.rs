@@ -4968,18 +4968,13 @@ fn an_include_that_includes_itself_is_bounded() {
     );
 }
 
-/// `include_tasks` takes `file`, `_raw_params` and `apply`, and `apply` itself is refused: this
-/// release has no layer to put the keywords it carries on.
+/// `include_tasks` takes `file`, `_raw_params` and `apply`, and refuses any other key.
 #[test]
-fn include_tasks_refuses_apply_and_an_unknown_key() {
+fn include_tasks_refuses_an_unknown_key() {
     let dir = probe_dir("include-tasks-options");
     std::fs::write(dir.join("sub.yml"), "- name: T\n  command: echo hi\n")
         .expect("the probe include target is written");
     for (body, message) in [
-        (
-            "- hosts: localhost\n  gather_facts: false\n  tasks:\n    - include_tasks:\n        file: sub.yml\n        apply:\n          become: true\n",
-            "'include_tasks' option 'apply'",
-        ),
         (
             "- hosts: localhost\n  gather_facts: false\n  tasks:\n    - include_tasks:\n        file: sub.yml\n        nosuchkey: true\n",
             "Invalid options for include_tasks: nosuchkey",
