@@ -12,8 +12,9 @@
 //! as, and has no group or other write bit. `remote_tmp` itself is accepted only when other
 //! users cannot rename an entry in it: it belongs to that user, to root, or to the user whom
 //! `sudo` reports in `SUDO_UID` (the login user, who can already act as root), and it is closed
-//! to other writes, or has the sticky bit. A directory that the user owns may be open to its
-//! group, as a umask of 002 makes the home directory and what is under it.
+//! to other writes, or has the sticky bit. A `remote_tmp` that the user owns may be open to its
+//! group when that group is the user's own primary group, as a umask of 002 with a group per
+//! user makes the home directory and what is under it.
 //!
 //! The checks use `ls -ldn`, which POSIX specifies and GNU, BusyBox and BSD `ls` all print the
 //! same way, so no `stat` option that a host may lack is needed.
@@ -24,12 +25,13 @@ use super::shell::shell_word;
 
 /// Shell functions, defined once per command line.
 ///
-/// `ent LINE PATH` reads the mode and the owner out of one line of `ls -ldn` into `m` and `o`,
-/// and leaves them empty when the line is not about `PATH`. `ls -l` shows a link, not what it
+/// `ent LINE PATH` reads the mode, the owner and the group out of one line of `ls -ldn` into `m`,
+/// `o` and `gp`, and leaves them empty when the line is not about `PATH`. `ls -l` shows a link, not what it
 /// points at, so a link has the mode of a link. `okmode TYPE` succeeds when that entry has the
 /// type (`d` or `-`), belongs to `$u` and has no group or other write bit. `oktmp` is the test
-/// for `remote_tmp`, which may also be sticky, or open to the group of its owner when no ACL
-/// shows in the mode (`+`), because a named ACL entry is a write grant to somebody else. `fit TYPE
+/// for `remote_tmp`, which may also be sticky, or open to its group when it belongs to `$u` and
+/// to `$u`'s own primary group and no ACL shows in the mode (`+`), because a named ACL entry is a
+/// write grant to somebody else. `fit TYPE
 /// PATH` runs `ls` for one path and then `okmode`. `say` names a refused path.
 ///
 /// `verify` checks `remote_tmp`, the directory and the program with one `ls`, whose output
@@ -39,11 +41,11 @@ use super::shell::shell_word;
 /// the place of the umask. `sweep` removes the other versions' directories that belong to this
 /// user and that nobody else can write.
 const CHECKS: &str = concat!(
-    r#"ent() { m=; o=; case "$1" in *" $2"|*" $2 -> "*) set -f; set -- $1; set +f; m=$1; o=$3;; esac; }; "#,
+    r#"ent() { m=; o=; gp=; case "$1" in *" $2"|*" $2 -> "*) set -f; set -- $1; set +f; m=$1; o=$3; gp=$4;; esac; }; "#,
     r#"okmode() { case "$m" in "$1"????[!w]??[!w]*) [ "$o" = "$u" ]; return;; esac; return 1; }; "#,
     r#"oktmp() { case "$m" in d*) ;; *) return 1;; esac; "#,
     r#"[ "$o" = "$u" ] || [ "$o" = 0 ] || [ "$o" = "${SUDO_UID:-x}" ] || return 1; "#,
-    r#"case "$m" in d????????[tT]*) return 0;; d???????w*) return 1;; d????w????+) return 1;; d????w*) [ "$o" = "$u" ]; return;; esac; return 0; }; "#,
+    r#"case "$m" in d????????[tT]*) return 0;; d???????w*) return 1;; d????w????+) return 1;; d????w*) [ "$o" = "$u" ] && [ "$gp" = "$(id -g)" ]; return;; esac; return 0; }; "#,
     r#"fit() { ent "$(ls -ldn -- "$2" 2>/dev/null)" "$2"; okmode "$1"; }; "#,
     r#"say() { printf '%s\n' "$1: permissions ${m:-unknown}, owner uid ${o:-unknown}: $2" >&2; }; "#,
     r#"bad_tmp() { say "$rt" "other users could replace the agent directory in it; it must belong to uid $u, to root or to the user who ran sudo, and other users must not be able to write to it unless it has the sticky bit"; }; "#,
@@ -104,5 +106,5 @@ impl SshTarget {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests;

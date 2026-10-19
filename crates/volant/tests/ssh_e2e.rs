@@ -321,10 +321,8 @@ fn ssh_an_outdated_cached_agent_is_replaced() {
     }
 }
 
-/// Another account makes the agent directory first, in a `remote_tmp` that every account can write,
-/// and puts a program in it that prints the version and the hash the probe asks for. That program
-/// must not run, and the failure must name the path. With the directory gone, the run works and
-/// the new directory is private.
+/// An agent directory another account made first, holding a program that answers the probe, is
+/// never run and is named; once it is gone, the run works and makes a private directory.
 #[test]
 #[ignore = "needs sshd on localhost and passwordless sudo, run through just ssh-test"]
 fn ssh_an_agent_directory_made_by_another_account_is_not_run() {

@@ -143,14 +143,30 @@ impl Remote {
     }
 
     /// `script` run with an `ls` that says `remote_tmp` has `mode`, as a file system with ACLs
-    /// does: a named-user ACL shows in the mode column as a group mask and a trailing `+`.
-    fn sh_with_remote_tmp_mode(&self, script: &str, stdin: &[u8], mode: &str) -> Output {
+    /// does: a named-user ACL shows in the mode column as a group mask and a trailing `+`. With
+    /// `foreign_group`, the same `ls` also gives `remote_tmp` a group other than this user's own.
+    fn sh_with_remote_tmp_mode(
+        &self,
+        script: &str,
+        stdin: &[u8],
+        mode: &str,
+        foreign_group: bool,
+    ) -> Output {
         let bin = self.root.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let fake = bin.join("ls");
+        let group = if foreign_group {
+            // SAFETY: `getgid` reads the calling process's own credentials and cannot fail.
+            let other = unsafe { libc::getgid() } + 1;
+            format!(" s/^\\([^ ]* *[^ ]* *[^ ]* *\\)[^ ]*/\\1{other}/;")
+        } else {
+            String::new()
+        };
         std::fs::write(
             &fake,
-            format!("#!/bin/sh\n/bin/ls \"$@\" | sed '/\\/shared\\/$/ s/^[^ ]*/{mode}/'\n"),
+            format!(
+                "#!/bin/sh\n/bin/ls \"$@\" | sed '/\\/shared\\/$/ {{ s/^[^ ]*/{mode}/;{group} }}'\n"
+            ),
         )
         .unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -381,7 +397,7 @@ fn an_ordinary_run_still_caches_and_reuses_the_agent() {
         "a probe changes nothing"
     );
 
-    // `remote_tmp` may be this user's own and open to its group (a umask of 002 makes it so), or
+    // `remote_tmp` may be this user's own and open to its own group (a umask of 002 makes it so), or
     // sticky and open to everybody, as `/tmp` is.
     for parent in [0o775, 0o1777, 0o755] {
         std::fs::set_permissions(remote.shared(), std::fs::Permissions::from_mode(parent)).unwrap();
@@ -406,6 +422,8 @@ fn an_ordinary_run_still_caches_and_reuses_the_agent() {
     // Another version's directory of this user goes. Another user's stays.
     let old = remote.shared().join("volant-agent-0.0.1");
     std::fs::create_dir(&old).unwrap();
+    // Set, not left to the umask: a group-writable directory is kept, and 002 makes it one.
+    std::fs::set_permissions(&old, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::fs::write(old.join("volant-agent"), "old").unwrap();
     let theirs = remote.shared().join("volant-agent-0.0.2");
     std::fs::create_dir(&theirs).unwrap();
@@ -509,19 +527,29 @@ fn a_default_acl_on_remote_tmp_does_not_open_the_directory() {
     );
 }
 
-/// An ACL that names another user or group shows as a group mask and a trailing `+`, so a
-/// `remote_tmp` with group write and a `+` can be written by someone else. Without the `+`, or
-/// with the sticky bit, the same mode is accepted.
+/// Group write on `remote_tmp` is refused under a named ACL (`+`) or a group not the user's own;
+/// the sticky bit makes it safe again.
 #[rstest]
-#[case::a_named_acl_with_write("drwxrwx---+", false)]
-#[case::the_same_without_an_acl("drwxrwx---", true)]
-#[case::a_named_acl_and_the_sticky_bit("drwxrwx--t+", true)]
-fn a_remote_tmp_open_to_a_named_acl_is_refused(#[case] mode: &str, #[case] accepted: bool) {
+#[case::a_named_acl_with_write("drwxrwx---+", false, false)]
+#[case::the_same_without_an_acl("drwxrwx---", false, true)]
+#[case::group_write_for_another_group("drwxrwx---", true, false)]
+#[case::a_named_acl_and_the_sticky_bit("drwxrwx--t+", false, true)]
+fn a_remote_tmp_open_to_a_named_acl_is_refused(
+    #[case] mode: &str,
+    #[case] foreign_group: bool,
+    #[case] accepted: bool,
+) {
     let remote = Remote::new();
     let upload = remote.upload(&good_agent("abc"));
     assert_eq!(upload.status.code(), Some(0), "{:?}", captured(&upload));
-    let probe = remote.sh_with_remote_tmp_mode(&remote.target.probe_command(), b"", mode);
-    let upload = remote.sh_with_remote_tmp_mode(&remote.target.upload_command(3), b"abc", mode);
+    let probe =
+        remote.sh_with_remote_tmp_mode(&remote.target.probe_command(), b"", mode, foreign_group);
+    let upload = remote.sh_with_remote_tmp_mode(
+        &remote.target.upload_command(3),
+        b"abc",
+        mode,
+        foreign_group,
+    );
     if accepted {
         assert!(
             is_this_agent(&captured(&probe), "abc"),
