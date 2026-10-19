@@ -24,33 +24,39 @@ use super::shell::shell_word;
 
 /// Shell functions, defined once per command line.
 ///
-/// `st` reads the mode and the owner of a path into `m` and `o`, with the path not followed when
-/// it is a link, because `ls -l` shows the link itself. `fit TYPE PATH` succeeds when the path
-/// has the type (`d` or `-`), belongs to `$u` and has no group or other write bit. `shared DIR`
-/// is the test for `remote_tmp`, which may also be sticky, or open to the group of its owner.
-/// `say` names a refused path.
-/// `verify` checks `remote_tmp`, the directory and the program, the way every start does.
-/// `prepare` makes the directory for an upload. `sweep` removes the other versions' directories
-/// that belong to this user.
+/// `ent LINE PATH` reads the mode and the owner out of one line of `ls -ldn` into `m` and `o`,
+/// and leaves them empty when the line is not about `PATH`. `ls -l` shows a link, not what it
+/// points at, so a link has the mode of a link. `okmode TYPE` succeeds when that entry has the
+/// type (`d` or `-`), belongs to `$u` and has no group or other write bit. `oktmp` is the test
+/// for `remote_tmp`, which may also be sticky, or open to the group of its owner. `fit TYPE
+/// PATH` runs `ls` for one path and then `okmode`. `say` names a refused path.
+///
+/// `verify` checks `remote_tmp`, the directory and the program with one `ls`, whose output
+/// `judge` reads: `LC_ALL=C` sorts the three paths in that order, because each is a prefix of
+/// the next, and `ent` fails any line that is not about the path it is given. `prepare` makes
+/// the directory for an upload. `sweep` removes the other versions' directories that belong to
+/// this user.
 const CHECKS: &str = concat!(
-    r#"st() { set -f; set -- $(ls -ldn -- "$1" 2>/dev/null); set +f; m=$1; o=$3; }; "#,
-    r#"fit() { st "$2"; case "$m" in "$1"????[!w]??[!w]*) [ "$o" = "$u" ]; return;; esac; return 1; }; "#,
-    r#"shared() { st "$1/"; case "$m" in d*) ;; *) return 1;; esac; "#,
+    r#"ent() { m=; o=; case "$1" in *" $2"|*" $2 -> "*) set -f; set -- $1; set +f; m=$1; o=$3;; esac; }; "#,
+    r#"okmode() { case "$m" in "$1"????[!w]??[!w]*) [ "$o" = "$u" ]; return;; esac; return 1; }; "#,
+    r#"oktmp() { case "$m" in d*) ;; *) return 1;; esac; "#,
     r#"[ "$o" = "$u" ] || [ "$o" = 0 ] || [ "$o" = "${SUDO_UID:-x}" ] || return 1; "#,
     r#"case "$m" in d????????[tT]*) return 0;; d???????w*) return 1;; d????w*) [ "$o" = "$u" ]; return;; esac; return 0; }; "#,
+    r#"fit() { ent "$(ls -ldn -- "$2" 2>/dev/null)" "$2"; okmode "$1"; }; "#,
     r#"say() { printf '%s\n' "$1: permissions ${m:-unknown}, owner uid ${o:-unknown}: $2" >&2; }; "#,
     r#"bad_tmp() { say "$rt" "other users could replace the agent directory in it; it must belong to uid $u, to root or to the user who ran sudo, and other users must not be able to write to it unless it has the sticky bit"; }; "#,
     r#"bad_dir() { say "$d" "it must be a real directory of uid $u with no group or other write bit"; }; "#,
     r#"bad_file() { say "$a" "it must be a regular file of uid $u with no group or other write bit"; }; "#,
-    r#"verify() { shared "$rt" || { bad_tmp; return 1; }; fit d "$d" || { bad_dir; return 1; }; fit - "$a" || { bad_file; return 1; }; }; "#,
-    r#"prepare() { mkdir -p "$rt" || return 1; shared "$rt" || { bad_tmp; return @UNSAFE@; }; "#,
+    r#"judge() { ent "$1" "$rt/"; oktmp || { bad_tmp; return 1; }; ent "$2" "$d"; okmode d || { bad_dir; return 1; }; ent "$3" "$a"; okmode - || { bad_file; return 1; }; }; "#,
+    r#"verify() { LC_ALL=C ls -ldn -- "$rt/" "$d" "$a" 2>/dev/null | { read -r l1; read -r l2; read -r l3; judge "$l1" "$l2" "$l3"; }; }; "#,
+    r#"prepare() { mkdir -p "$rt" || return 1; ent "$(ls -ldn -- "$rt/" 2>/dev/null)" "$rt/"; oktmp || { bad_tmp; return @UNSAFE@; }; "#,
     r#"if [ -L "$d" ] || [ -e "$d" ]; then if ! fit d "$d"; then "#,
     r#"case "$m" in d*) [ "$o" = "$u" ] || { bad_dir; return @UNSAFE@; };; *) bad_dir; return @UNSAFE@;; esac; "#,
     r#"rm -f "$d/volant-agent" "$d"/volant-agent.tmp.* "$d/agent.stderr"; "#,
     r#"rmdir "$d" 2>/dev/null || { bad_dir; return @UNSAFE@; }; mkdir "$d" || return 1; fi; "#,
     r#"else mkdir "$d" || return 1; fi; fit d "$d" || { bad_dir; return @UNSAFE@; }; }; "#,
-    r#"sweep() { for old in "$rt"/volant-agent-*; do [ "$old" = "$d" ] && continue; st "$old"; "#,
-    r#"case "$m" in d*) [ "$o" = "$u" ] && rm -rf "$old";; esac; done; return 0; }; "#,
+    r#"sweep() { for old in "$rt"/volant-agent-*; do [ "$old" = "$d" ] && continue; "#,
+    r#"ent "$(ls -ldn -- "$old" 2>/dev/null)" "$old"; case "$m" in d*) [ "$o" = "$u" ] && rm -rf "$old";; esac; done; return 0; }; "#,
 );
 
 impl SshTarget {
