@@ -1007,6 +1007,116 @@ fn text_prints_containers_none_and_chained_undefined_as_the_reference_does() {
     assert!(t.render("x {{ d.no.sub }}", &v).is_err());
 }
 
+/// What `dict` says when it refuses, in CPython's words. The golden rows only record that the
+/// reference failed; these are the texts it printed.
+#[rstest::rstest]
+#[case::too_long(
+    "{{ dict([['a', 1, 2]]) }}",
+    "dictionary update sequence element #0 has length 3; 2 is required"
+)]
+#[case::too_short(
+    "{{ dict([['a']]) }}",
+    "dictionary update sequence element #0 has length 1; 2 is required"
+)]
+#[case::second_element(
+    "{{ dict([['a', 1], ['b']]) }}",
+    "dictionary update sequence element #1 has length 1; 2 is required"
+)]
+#[case::text(
+    "{{ dict('abcd') }}",
+    "dictionary update sequence element #0 has length 1; 2 is required"
+)]
+#[case::mapping_of_one_key(
+    "{{ dict([{'a': 1}]) }}",
+    "dictionary update sequence element #0 has length 1; 2 is required"
+)]
+#[case::element_not_a_sequence(
+    "{{ dict([1]) }}",
+    "cannot convert dictionary update sequence element #0 to a sequence"
+)]
+#[case::unhashable_list("{{ dict([[[1], 2]]) }}", "unhashable type: 'list'")]
+#[case::unhashable_mapping("{{ dict([[{'a': 1}, 2]]) }}", "unhashable type: 'dict'")]
+#[case::number("{{ dict(5) }}", "'int' object is not iterable")]
+#[case::float("{{ dict(1.5) }}", "'float' object is not iterable")]
+#[case::boolean("{{ dict(true) }}", "'bool' object is not iterable")]
+#[case::none("{{ dict(none) }}", "'NoneType' object is not iterable")]
+#[case::none_key(
+    "{{ dict([[none, 1]]) | to_json }}",
+    "a dict key of type 'NoneType' is not supported"
+)]
+#[case::fractional_key(
+    "{{ dict([[1.5, 1]]) }}",
+    "a dict key of type 'float' is not supported"
+)]
+#[case::infinite_key(
+    "{{ dict([[1e400, 1]]) }}",
+    "a dict key of type 'float' is not supported"
+)]
+#[case::endless_iterable(
+    "{{ dict(range(1000000000000)) }}",
+    "cannot convert dictionary update sequence element #0 to a sequence"
+)]
+#[case::endless_element(
+    "{{ dict([range(1000000000000)]) }}",
+    "dictionary update sequence element #0 has length 1000000000000; 2 is required"
+)]
+#[case::two_arguments("{{ dict([], []) }}", "dict expected at most 1 argument, got 2")]
+fn dict_refuses_in_the_words_of_python(#[case] text: &str, #[case] want: &str) {
+    let err = templar().render(text, &Map::new()).unwrap_err();
+    assert!(err.0.contains(want), "{text}: {err}");
+}
+
+#[test]
+fn dict_of_an_undefined_value_is_an_undefined_read() {
+    let t = templar();
+    assert!(
+        t.render("{{ dict(nope) }}", &Map::new())
+            .unwrap_err()
+            .is_undefined()
+    );
+    assert!(
+        t.render("{{ dict([nope]) }}", &Map::new())
+            .unwrap_err()
+            .is_undefined()
+    );
+}
+
+/// Integers beyond 64 bits are separate keys, and one that is the same number as another spelled
+/// differently is not: `1`, `1.0` and `true` are one key.
+#[test]
+fn dict_keeps_integer_keys_beyond_64_bits_apart() {
+    let t = templar();
+    let length = |text: &str| t.render(text, &Map::new()).unwrap();
+    assert_eq!(
+        length("{{ dict([[18446744073709551616, 'a'], [18446744073709551617, 'b']]) | length }}"),
+        json!(2)
+    );
+    assert_eq!(
+        length("{{ dict([[18446744073709551616, 'a'], [18446744073709551616, 'b']]) | length }}"),
+        json!(1)
+    );
+    assert_eq!(
+        length("{{ dict([[1, 'a'], [1.0, 'b'], [true, 'c']]) | length }}"),
+        json!(1)
+    );
+}
+
+/// An iterable longer than the limit is refused, and one at the limit is not.
+#[test]
+fn dict_takes_a_bounded_number_of_pairs_from_one_iterable() {
+    let pairs = |n: i64| -> minijinja::Value {
+        minijinja::Value::from_iter((0..n).map(|i| minijinja::Value::from_iter([i, i])))
+    };
+    let at_limit = globals::build(vec![pairs(3)], 3).unwrap();
+    assert_eq!(at_limit.len(), Some(3));
+    let err = globals::build(vec![pairs(4)], 3).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("dict() takes at most 3 pairs from one iterable"),
+        "{err}"
+    );
+}
+
 /// A `raw` block or a string constant writes text the reference renders once. Rows of
 /// `(template, result)`, rendered as written and then as the value of a variable.
 #[test]

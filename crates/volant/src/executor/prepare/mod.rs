@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value, json};
 use volant_protocol::TaskResult;
+use volant_protocol::modules::short_name;
 
 use crate::compile::Step;
 use crate::playbook::{Flag, python_repr};
@@ -15,6 +16,7 @@ use crate::vars::{HostVars, VarStore};
 
 use super::coordinator::Progress;
 
+mod carry;
 mod connect;
 mod escalation;
 mod item;
@@ -28,8 +30,9 @@ pub(in crate::executor) use item::{
 };
 pub(in crate::executor) use plan::{Gate, PlayPlan, Strategy};
 pub(in crate::executor) use vars::host_vars;
-use vars::{Named, delegate_host_vars};
+use vars::{Named, delegate_host_vars, merged_vars, resolved};
 
+use carry::Carry;
 use connect::{connect_for, delegate_for};
 use escalation::{become_for, remove_omit};
 use item::{check_gather_subset, environment_for, flag_for, ignore_errors_for, notify_for};
@@ -56,18 +59,38 @@ pub(super) fn prepare(
         .expect("vars lock")
         .playbook_dir()
         .to_path_buf();
-    let base = host_vars(
-        host,
-        plan,
-        &task.vars,
-        step.role,
-        step.include_params.as_deref(),
-        live,
-        templar,
-        store,
-        &step.origin,
-        &playbook_dir,
-    );
+    // A looped `set_fact` hands what it sets to the items after it, so it keeps the variables
+    // before they resolve each other: see `carry`.
+    let carries = task.loop_items.is_some() && short_name(&task.module) == "set_fact";
+    let (base, mut carry) = if carries {
+        let merged = merged_vars(
+            host,
+            Named::ByTheRun,
+            plan,
+            &task.vars,
+            step.role,
+            step.include_params.as_deref(),
+            live,
+            store,
+            &step.origin,
+            &playbook_dir,
+        );
+        (resolved(merged.clone(), templar), Some(Carry::new(merged)))
+    } else {
+        let base = host_vars(
+            host,
+            plan,
+            &task.vars,
+            step.role,
+            step.include_params.as_deref(),
+            live,
+            templar,
+            store,
+            &step.origin,
+            &playbook_dir,
+        );
+        (base, None)
+    };
     // Every item of a loop starts from these variables. They are shared rather than copied
     // into each item, so that the memory of a loop does not grow with the size of what the host
     // holds, a registered result for one.
@@ -138,7 +161,9 @@ pub(super) fn prepare(
     let mut notify_failures = 0;
     let mut first_notify_error: Option<TemplateError> = None;
     for (index, element) in elements.iter().cloned().enumerate() {
-        let mut vars = base.clone();
+        let mut vars = carry
+            .as_ref()
+            .map_or_else(|| base.clone(), |c| c.vars(&base));
         if let Some(el) = &element {
             if items_from_host {
                 vars.insert_untrusted(task.loop_var.clone(), el.clone());
@@ -219,7 +244,7 @@ pub(super) fn prepare(
             // the render's words before the conditional could report it, which the reference's
             // `finalize_task_arg` for `assert` does not do.
             //
-            let raw = if volant_protocol::modules::short_name(&task.module) == "assert" {
+            let raw = if short_name(&task.module) == "assert" {
                 let mut raw = task.args.clone();
                 raw.remove("that");
                 std::borrow::Cow::Owned(raw)
@@ -331,6 +356,16 @@ pub(super) fn prepare(
             set_fact_names: std::sync::OnceLock::new(),
             notify,
         });
+        if let (Some(carry), Some(item)) = (&mut carry, items.last_mut()) {
+            carry.take(item, templar);
+            // The reference renders `loop_control.label` after the item ran, so it reads the
+            // facts the item just set.
+            if let (Some(template), Some(_)) = (&task.loop_label, &item.element) {
+                let mut after = item.vars.clone();
+                carry.lay_over(&mut after);
+                item.label = Some(display(&templar.render(template, &after)?));
+            }
+        }
     }
     // Every item failing to render its `notify` is the task's own failure.
     if let Some(err) = first_notify_error.filter(|_| notify_failures == items.len()) {

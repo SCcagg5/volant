@@ -1,0 +1,5 @@
+- hosts: h1
+  gather_facts: false
+  roles: [r1]
+  tasks:
+    - debug: {var: x}
