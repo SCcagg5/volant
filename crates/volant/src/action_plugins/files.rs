@@ -100,11 +100,32 @@ pub(crate) fn check_host_named(
             if inside_task_directories(origin, playbook_dir, subdir, name) {
                 Ok(())
             } else {
-                Err(format!(
-                    "the '{arg}' of this task was named by a managed host, and '{name}' is not inside the files or templates directories of the playbook or the role (host_named_paths = contained)"
-                ))
+                Err(contained_refusal(arg, name))
             }
         }
+    }
+}
+
+/// The refusal of the `contained` mode for the argument `arg` named `name`.
+pub(crate) fn contained_refusal(arg: &str, name: &str) -> String {
+    format!(
+        "the '{arg}' of this task was named by a managed host, and '{name}' is not inside the files or templates directories of the playbook or the role (host_named_paths = contained)"
+    )
+}
+
+/// A value as ansible-core's `boolean(value, strict=False)` reads it: `y`, `yes`, `on`, `1`,
+/// `true` and `t` in any case and with spaces around, the numbers 1 and 1.0, and `true` are
+/// true; everything else, `no`, `n`, `0`, `1.0` as text and `2` included, is false.
+pub(crate) fn ansible_bool(value: &serde_json::Value) -> bool {
+    use serde_json::Value;
+    match value {
+        Value::Bool(b) => *b,
+        Value::String(text) => matches!(
+            text.trim().to_lowercase().as_str(),
+            "y" | "yes" | "on" | "1" | "true" | "t"
+        ),
+        Value::Number(number) => number.as_f64() == Some(1.0),
+        _ => false,
     }
 }
 

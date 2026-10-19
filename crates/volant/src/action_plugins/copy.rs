@@ -16,7 +16,7 @@ use serde_json::{Map, Value};
 use volant_protocol::TaskResult;
 use volant_protocol::encoding::sha1_hex;
 
-use super::files::{blob_of, check_host_named, fits, not_found, search_paths};
+use super::files::{ansible_bool, blob_of, check_host_named, fits, not_found, search_paths};
 use super::{Context, Plugin, Step, Sub, lost};
 use crate::executor::as_bool_value;
 
@@ -70,7 +70,9 @@ pub(super) fn unwritten(ctx: &Context<'_>) -> bool {
     let Some(src) = text(args, "src") else {
         return false;
     };
-    if !args.get("content").is_none_or(Value::is_null) || flag(args, "remote_src", false) {
+    if !args.get("content").is_none_or(Value::is_null)
+        || args.get("remote_src").is_some_and(ansible_bool)
+    {
         return false;
     }
     let searched = search_paths(ctx.origin, ctx.playbook_dir, "files", src);
@@ -122,7 +124,7 @@ fn source(ctx: &Context<'_>) -> Result<Option<CopyOf>, String> {
         }
         (Some(src), None) => src,
     };
-    if flag(args, "remote_src", false) {
+    if args.get("remote_src").is_some_and(ansible_bool) {
         return Ok(None);
     }
     check_host_named(

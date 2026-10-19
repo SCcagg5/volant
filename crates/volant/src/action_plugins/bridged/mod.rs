@@ -19,10 +19,10 @@ use serde_json::{Map, Value, json};
 use tokio::sync::Notify;
 use volant_protocol::TaskResult;
 
-use super::files::check_host_named;
+use super::files::{ansible_bool, check_host_named, contained_refusal};
 use super::{Context, Plugin, Step, Sub, lost};
 use crate::bridge::{Ask, BridgeError, Reply};
-use crate::executor::as_bool_value;
+use crate::config::HostNamedPaths;
 
 mod asks;
 mod helpers;
@@ -149,9 +149,11 @@ fn check_sources(name: &str, ctx: &Context<'_>) -> Result<(), String> {
             .and_then(Value::as_str)
             .unwrap_or_default()
     };
-    let remote = match ctx.args.get("remote_src") {
-        Some(value) => as_bool_value(value).unwrap_or(false),
-        None => name == "assemble",
+    // `unarchive` reads `copy: no` as `remote_src: yes` when `remote_src` is not given.
+    let remote = match (ctx.args.get("remote_src"), ctx.args.get("copy")) {
+        (Some(value), _) => ansible_bool(value),
+        (None, Some(copy)) if name == "unarchive" => !ansible_bool(copy),
+        (None, _) => name == "assemble",
     };
     if !remote {
         check("src", text("src"))?;
@@ -165,8 +167,20 @@ fn check_sources(name: &str, ctx: &Context<'_>) -> Result<(), String> {
         }
     }
     for arg in ["_raw_params", "cmd"] {
-        // A script's file is the first word of its line.
-        let first = shlex::split(text(arg))
+        // A script's file is the first word of its line, as Python's `shlex.split` reads it.
+        // The `shlex` crate reads a word that starts with `#` as a comment, so a line that opens
+        // with one is held to `contained` by the word as written.
+        let line = text(arg).trim();
+        if line.starts_with('#') {
+            let word = line.split_whitespace().next().unwrap_or_default();
+            if ctx.host_named_paths == HostNamedPaths::Contained && ctx.args_untrusted.contains(arg)
+            {
+                return Err(contained_refusal(arg, word));
+            }
+            check(arg, word)?;
+            continue;
+        }
+        let first = shlex::split(line)
             .and_then(|words| words.into_iter().next())
             .unwrap_or_default();
         check(arg, &first)?;

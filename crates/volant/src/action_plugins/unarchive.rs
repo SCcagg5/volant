@@ -22,7 +22,7 @@ use serde_json::{Map, Value};
 use volant_protocol::TaskResult;
 
 use super::copy::{failing, stat, stat_of};
-use super::files::{blob_of, check_host_named, fits, not_found, search_paths};
+use super::files::{ansible_bool, blob_of, check_host_named, fits, not_found, search_paths};
 use super::{Context, Plugin, Step, Sub, lost};
 use crate::compile::Origin;
 use crate::config::HostNamedPaths;
@@ -88,13 +88,13 @@ pub(super) fn unwritten(ctx: &Context<'_>) -> bool {
 impl Unarchive {
     fn new(ctx: &Context<'_>) -> Result<Self, String> {
         let mut args = ctx.args.clone();
-        let mut remote_src = flag(&args, "remote_src", false);
+        let mut remote_src = args.get("remote_src").is_some_and(ansible_bool);
         // The reference's checks, in its order and in its words.
         if let Some(copy) = args.remove("copy") {
             if args.contains_key("remote_src") {
                 return Err("parameters are mutually exclusive: ('copy', 'remote_src')".into());
             }
-            remote_src = !as_bool_value(&copy).unwrap_or(true);
+            remote_src = !ansible_bool(&copy);
             args.insert("remote_src".into(), Value::Bool(remote_src));
         }
         let (Some(_), Some(dest)) = (text(&args, "src"), text(&args, "dest")) else {
