@@ -10,7 +10,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, watch};
 use volant_protocol::modules::short_name;
 use volant_protocol::{BatchOutcome, TaskResult};
 
-use crate::action_plugins::{Kind, LinkFacts};
+use crate::action_plugins::LinkFacts;
 use crate::agent::{AgentLink, AgentSource};
 use crate::compile::{StepKind, after_failure, first, rescue_target};
 use crate::inventory::Host;
@@ -20,7 +20,7 @@ use crate::python::ModulePayload;
 use crate::render::Dump;
 use crate::template::{Templar, TemplateError};
 use crate::transport::{ConnectError, Escalation, Transport};
-use crate::vars::{HostVars, VarStore};
+use crate::vars::VarStore;
 
 use super::coordinator::{Event, MetaEffect, Progress, escalated_links, render_name};
 use super::debugger::{self, Hold};
@@ -43,7 +43,10 @@ use notified::{announce_notified, saved_lines};
 mod boundaries;
 mod messages;
 mod notified;
+mod pinned;
+mod plugin;
 mod redo;
+mod rendered;
 mod throttle;
 mod timings;
 mod unreachable;
@@ -52,6 +55,9 @@ mod waits;
 pub(in crate::executor) use boundaries::{Definitions, mark_boundaries};
 use boundaries::{calls_lookup, meets, strict, writes_facts};
 pub(crate) use boundaries::{expressions, strings, task_strings};
+use pinned::Turn;
+use plugin::{PluginBatch, plugin_step};
+use rendered::{Rendered, render_keywords, step_at};
 pub(in crate::executor) use throttle::Turn as ThrottleTurn;
 use timings::file_timings;
 use unreachable::{ignore_the_batch, ignore_unreachable};
@@ -370,6 +376,9 @@ pub(super) async fn drive_host(
         let mut batch_action: Option<PluginBatch> = None;
         let mut batch_throttle: Option<u64> = None;
         let mut deferred_error: Option<(usize, TemplateError)> = None;
+        // The steps of this batch whose templated keywords were rendered for this host, by step.
+        // Everything that reads a step of the batch again after the loop reads these copies.
+        let mut rendered = Rendered::new();
         // The last step of the batch, when where the host goes after it is not yet decided.
         // See the `Prepared::Remote` arm: a step a rescue would catch cannot say what it steps
         // over until its own result is in.
@@ -483,6 +492,11 @@ pub(super) async fn drive_host(
                 if driver.progress.borrow().aborted {
                     failed = true;
                     break 'run;
+                }
+                // The coordinator settled a `run_once` template for this step while the hosts
+                // met in front of it, and published the list again: read it before going on.
+                if !Arc::ptr_eq(&c, &plan.steps()) {
+                    break;
                 }
             }
             // `--step`: one answer for the whole batch, asked in front of the task. A task the
@@ -685,7 +699,7 @@ pub(super) async fn drive_host(
                     Vec::new()
                 } else {
                     let mut warnings = Vec::new();
-                    let (groups, shown, waited) = resolve_include(
+                    let (groups, shown, waited, copy) = resolve_include(
                         &c,
                         step,
                         kind,
@@ -722,8 +736,9 @@ pub(super) async fn drive_host(
                             .await;
                     }
                     let rescuable = !handlers_only && rescue_target(&c, pos).is_some();
+                    let said = copy.as_deref().map_or(task, |c| &c.task);
                     if let Some(result) =
-                        report_include(&tx, &name, pos, task, &shown, rescuable, groups.is_empty())
+                        report_include(&tx, &name, pos, said, &shown, rescuable, groups.is_empty())
                             .await
                     {
                         failed |= !rescuable;
@@ -916,6 +931,19 @@ pub(super) async fn drive_host(
             else {
                 break 'run;
             };
+            // The keywords written as templates, rendered for this host now that its `when` held.
+            let prepared = render_keywords(
+                step,
+                pos,
+                &name,
+                prepared,
+                &mut rendered,
+                (&plan, &live, &store),
+                (&templar, &tx),
+            )
+            .await;
+            let step = step_at(&c, &rendered, pos);
+            let task = &step.task;
             match prepared {
                 Err(err) => {
                     deferred_error = Some((pos, err));
@@ -1481,8 +1509,9 @@ pub(super) async fn drive_host(
             // `no_log`: the connection is opened for that task, and each of the four failures
             // below happens with it still unreported. Measured on ansible-core 2.19.12, the
             // reference censors the `UNREACHABLE!` line of a `no_log` task, reason and all.
-            unreachable_censored = c.steps[batch[0].0].task.censors();
-            unreachable_origin = c.steps[batch[0].0].task.origin.clone();
+            let head = &step_at(&c, &rendered, batch[0].0).task;
+            unreachable_censored = head.censors();
+            unreachable_origin = head.origin.clone();
             unreachable_delegate = batch_delegate.clone();
             unreachable_index = Some(batch[0].0);
             // A throttled task is alone in its batch. Its host takes its turn before a fork, so
@@ -1551,9 +1580,7 @@ pub(super) async fn drive_host(
             // does, rather than the host being unreachable from the first connect.
             let connected = match connected {
                 Err(ConnectError::Unreachable(_))
-                    if crate::action_plugins::waits_for_connection(
-                        &c.steps[batch[0].0].task.module,
-                    ) =>
+                    if crate::action_plugins::waits_for_connection(&head.module) =>
                 {
                     match AgentLink::dead() {
                         Ok(dead) => {
@@ -1583,7 +1610,7 @@ pub(super) async fn drive_host(
                 // exit 0).
                 Err(ConnectError::Become(msg)) => {
                     let index = batch[0].0;
-                    let mut task = c.steps[index].task.clone();
+                    let mut task = step_at(&c, &rendered, index).task.clone();
                     task.ignore_errors = Some(crate::playbook::Flag::Fixed(false));
                     // Measured for `Incorrect su password` (scout case `c5w`): the reference
                     // raises it from its connection, so the result is `changed: false` and a
@@ -1627,7 +1654,7 @@ pub(super) async fn drive_host(
                     continue 'run;
                 }
                 Err(err) => {
-                    if c.steps[batch[0].0].task.ignores_unreachable() {
+                    if head.ignores_unreachable() {
                         // The turn goes back before the host waits for anyone: `advance` can
                         // wait for a verdict that depends on a host this gate is holding up.
                         drop(gate);
@@ -1638,7 +1665,7 @@ pub(super) async fn drive_host(
                             &mut driver,
                             &tx,
                             &name,
-                            &c,
+                            head,
                             batch[0].0,
                             err.to_string(),
                             batch_delegate.as_deref(),
@@ -1707,7 +1734,7 @@ pub(super) async fn drive_host(
                         continue 'run;
                     }
                 };
-                let step = &c.steps[*index];
+                let step = step_at(&c, &rendered, *index);
                 let interpreters = link.interpreters().to_vec();
                 // Out of the map while the plugin holds it, so that a plugin reconnecting can
                 // drop the host's other links, and back in once the task is done, fresh or not.
@@ -1882,7 +1909,7 @@ pub(super) async fn drive_host(
             } else if let Some(plans) = batch_retry.clone() {
                 decided = true;
                 let (index, items) = &batch[0];
-                let task = &c.steps[*index].task;
+                let task = &step_at(&c, &rendered, *index).task;
                 names = items
                     .iter()
                     .map(|item| retry_name(task, &item.vars, &templar))
@@ -2082,7 +2109,7 @@ pub(super) async fn drive_host(
                 let mut tasks = Vec::new();
                 let mut origin = Vec::new();
                 for (bi, (index, items)) in batch.iter().enumerate() {
-                    let task = &c.steps[*index].task;
+                    let task = &step_at(&c, &rendered, *index).task;
                     // Per step, never per batch: a task's own `vars:` may name an interpreter,
                     // and a batch holds whatever shares a connection, not whatever shares an
                     // interpreter. Reading the batch's first step for all of them would run one
@@ -2157,7 +2184,7 @@ pub(super) async fn drive_host(
                 .get(&key)
                 .and_then(|link| link.interpreters().first().cloned());
             for (bi, (index, items)) in batch.iter().enumerate() {
-                let task = &c.steps[*index].task;
+                let task = &step_at(&c, &rendered, *index).task;
                 let mut results = Vec::new();
                 let mut labels = Vec::new();
                 let mut reached = true;
@@ -2368,7 +2395,9 @@ pub(super) async fn drive_host(
                     // host stays. The dead link is dropped so the next step connects again.
                     if !any_reported
                         && failed_at.is_none()
-                        && c.steps[batch[0].0].task.ignores_unreachable()
+                        && step_at(&c, &rendered, batch[0].0)
+                            .task
+                            .ignores_unreachable()
                     {
                         links.remove(&key);
                         checked.remove(&key);
@@ -2376,7 +2405,7 @@ pub(super) async fn drive_host(
                             &mut driver,
                             &tx,
                             &name,
-                            &c,
+                            &step_at(&c, &rendered, batch[0].0).task,
                             batch[0].0,
                             msg,
                             batch_delegate.as_deref(),
@@ -2414,13 +2443,17 @@ pub(super) async fn drive_host(
         if failed_at.is_none()
             && let Some((index, err)) = deferred_error
         {
-            let task = &c.steps[index].task;
+            let task = &step_at(&c, &rendered, index).task;
             // The reference's own prefix on the `msg` of a task that dies before it runs - a
             // `when` it cannot evaluate, arguments it cannot render. Measured: a failing `when`
             // reports `Task failed: Error while evaluating conditional: ...`, so a playbook
             // testing `'Task failed' in result.msg` must still see it. `failed_when` does not get
             // it: there the reference leaves `msg` empty and fills `failed_when_result`.
             let mut result = failed_result(&err);
+            // A keyword that did not render fails the task as an unchanged one, `run_once` apart.
+            if rendered.contains_key(&index) && !err.0.contains("'run_once'") {
+                result.0.insert("changed".into(), Value::Bool(false));
+            }
             if let Some(causes) = debugger::causes(task, &err.0)
                 .or_else(|| throttle::causes(task, &err.0))
                 .or_else(|| super::prepare::undefined_causes(task, &err.0))
@@ -2502,28 +2535,6 @@ pub(super) async fn drive_host(
         .await;
 }
 
-/// The one step of a batch an action plugin backs, or the controller error that ends the host
-/// when the batch holds anything else: the plugin branch runs one step, so a second one would be
-/// reported by nobody and never run.
-fn plugin_step<T>(batch: &[(usize, T)]) -> Result<&(usize, T), String> {
-    match batch {
-        [only] => Ok(only),
-        _ => Err(format!(
-            "a task backed by an action plugin has to be alone in its batch, and this one holds steps {:?}",
-            batch.iter().map(|(index, _)| index).collect::<Vec<_>>()
-        )),
-    }
-}
-
-/// What a batch whose one task an action plugin backs needs to run it.
-struct PluginBatch {
-    kind: Kind,
-    /// The interpreter the host the module runs on asked for, read off its variables.
-    asked: Option<String>,
-    /// That host's name and variables, when it is a delegate.
-    delegate: Option<(String, HostVars)>,
-}
-
 /// Everything one host's driver carries from one step to the next: who it is, what it is
 /// walking, and the watches every wait below opens on.
 ///
@@ -2553,30 +2564,6 @@ impl Driver<'_> {
     /// Whether the run has been interrupted.
     fn stopped(&self) -> bool {
         *self.stop.borrow()
-    }
-}
-
-/// A `host_pinned` host's place in the queue for forks. Dropping it hands the place to the next
-/// host, so a host that leaves before it queued - interrupted, or panicked - holds nobody up.
-struct Turn<'a> {
-    gate: &'a watch::Sender<usize>,
-    mine: usize,
-    passed: bool,
-}
-
-impl Turn<'_> {
-    fn pass(&mut self) {
-        if !std::mem::replace(&mut self.passed, true) {
-            let next = self.mine + 1;
-            self.gate
-                .send_modify(|reached| *reached = (*reached).max(next));
-        }
-    }
-}
-
-impl Drop for Turn<'_> {
-    fn drop(&mut self) {
-        self.pass();
     }
 }
 

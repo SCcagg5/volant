@@ -9,12 +9,11 @@ use volant_protocol::modules::{import_module, include_module, is_known, short_na
 use crate::keywords::{block_keyword, handler_keyword, loop_control_keyword, task_keyword};
 use crate::yaml::{field, to_json};
 
+use super::deferred::{Deferred, boolean_or_template, seconds_or_template};
 use super::fields::{
-    condition, conditions, debugger, mapping, module_args, names, seconds, tags, throttle, timeout,
+    condition, conditions, debugger, mapping, module_args, names, tags, throttle, timeout,
 };
-use super::keywords::{
-    META, action_statement, boolean, connect_keywords, delegation, escalation, flag,
-};
+use super::keywords::{META, action_statement, connect_keywords, delegation, escalation, flag};
 use super::load::task_list;
 use super::model::{Block, PlayTask};
 use super::origin::{key_origin, task_origin, value_origin};
@@ -44,8 +43,16 @@ pub(super) fn parse_block(yaml: &Yaml) -> anyhow::Result<Block> {
         }
     }
     let context = format!("block '{name}': ");
-    let (r#become, become_user) = escalation(yaml, &context)?;
-    let (delegate_facts, delegate_to) = delegation(yaml, &context)?;
+    let mut deferred = Deferred::default();
+    let (r#become, become_user) = escalation(yaml, &context, &mut deferred)?;
+    let (delegate_facts, delegate_to) = delegation(yaml, &context, &mut deferred)?;
+    let timeout = timeout(yaml, &context, &mut deferred)?;
+    let no_log = boolean_or_template(yaml, "no_log", &mut deferred.no_log)?;
+    let run_once = boolean_or_template(yaml, "run_once", &mut deferred.run_once)?;
+    let any_errors_fatal =
+        boolean_or_template(yaml, "any_errors_fatal", &mut deferred.any_errors_fatal)?;
+    let ignore_unreachable =
+        boolean_or_template(yaml, "ignore_unreachable", &mut deferred.ignore_unreachable)?;
     Ok(Block {
         body: task_list(field(yaml, "block"), "block")?,
         rescue: task_list(field(yaml, "rescue"), "rescue")?,
@@ -54,7 +61,7 @@ pub(super) fn parse_block(yaml: &Yaml) -> anyhow::Result<Block> {
             name,
             tags: tags(yaml, &context)?,
             ignore_errors: flag(yaml, "ignore_errors")?,
-            timeout: timeout(yaml, &context)?,
+            timeout,
             throttle: throttle(yaml)?,
             debugger: debugger(yaml, &context)?,
             vars: mapping(yaml, "vars", &context)?,
@@ -63,17 +70,18 @@ pub(super) fn parse_block(yaml: &Yaml) -> anyhow::Result<Block> {
             become_user,
             connect: connect_keywords(yaml, &context)?,
             notify: names(yaml, "notify", &context)?,
-            no_log: boolean(yaml, "no_log")?,
+            no_log,
             environment: environment(yaml, &context)?,
             module_defaults: module_defaults(yaml, &context)?,
             collections: collections(yaml, &context)?,
             check_mode: flag(yaml, "check_mode")?,
             diff: flag(yaml, "diff")?,
-            run_once: boolean(yaml, "run_once")?,
-            any_errors_fatal: boolean(yaml, "any_errors_fatal")?,
-            ignore_unreachable: boolean(yaml, "ignore_unreachable")?,
+            run_once,
+            any_errors_fatal,
+            ignore_unreachable,
             delegate_facts,
             delegate_to,
+            deferred,
             ..PlayTask::empty()
         },
     })
@@ -232,10 +240,12 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
         }
     }
     let context = format!("task '{label}': ");
+    let mut deferred = Deferred::default();
     let ignore_errors = flag(yaml, "ignore_errors")?;
-    let timeout = timeout(yaml, &context)?;
-    let async_val = seconds(yaml, "async", &context)?.unwrap_or(0);
-    let poll = seconds(yaml, "poll", &context)?;
+    let timeout = timeout(yaml, &context, &mut deferred)?;
+    let async_val =
+        seconds_or_template(yaml, "async", &context, &mut deferred.async_val)?.unwrap_or(0);
+    let poll = seconds_or_template(yaml, "poll", &context, &mut deferred.poll)?;
     let throttle = throttle(yaml)?;
     let debugger = debugger(yaml, &context)?;
     let vars = mapping(yaml, "vars", &context)?;
@@ -284,8 +294,14 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
     if with_items {
         loop_with = None;
     }
-    let (r#become, become_user) = escalation(yaml, &context)?;
-    let (delegate_facts, mut delegate_to) = delegation(yaml, &context)?;
+    let (r#become, become_user) = escalation(yaml, &context, &mut deferred)?;
+    let (delegate_facts, mut delegate_to) = delegation(yaml, &context, &mut deferred)?;
+    let no_log = boolean_or_template(yaml, "no_log", &mut deferred.no_log)?;
+    let run_once = boolean_or_template(yaml, "run_once", &mut deferred.run_once)?;
+    let any_errors_fatal =
+        boolean_or_template(yaml, "any_errors_fatal", &mut deferred.any_errors_fatal)?;
+    let ignore_unreachable =
+        boolean_or_template(yaml, "ignore_unreachable", &mut deferred.ignore_unreachable)?;
     // `local_action` runs on the controller whatever `delegate_to` says: measured, the line reads
     // `h1 -> localhost` with both written.
     if local {
@@ -354,17 +370,18 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
         until: conditions(yaml, "until", &context)?,
         retries: field(yaml, "retries").map(to_json).transpose()?,
         delay: field(yaml, "delay").map(to_json).transpose()?,
-        no_log: boolean(yaml, "no_log")?,
+        no_log,
         environment: environment(yaml, &context)?,
         module_defaults: module_defaults(yaml, &context)?,
         collections: collections(yaml, &context)?,
         check_mode: flag(yaml, "check_mode")?,
         diff: flag(yaml, "diff")?,
-        run_once: boolean(yaml, "run_once")?,
-        any_errors_fatal: boolean(yaml, "any_errors_fatal")?,
-        ignore_unreachable: boolean(yaml, "ignore_unreachable")?,
+        run_once,
+        any_errors_fatal,
+        ignore_unreachable,
         delegate_facts,
         delegate_to,
+        deferred,
         origin: task_origin(map),
         value_origins,
     })

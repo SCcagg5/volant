@@ -20,15 +20,18 @@ mod carry;
 mod connect;
 mod escalation;
 mod item;
+mod late;
 mod loops;
 mod plan;
 mod vars;
 
 pub(in crate::executor) use escalation::retry_name;
+pub(in crate::executor) use item::strict_boolean;
 pub(in crate::executor) use item::{
     FINALIZING, Item, NOTIFY_FAILED, Prepared, failed_result, failure_text, pause_of,
     undefined_name,
 };
+pub(in crate::executor) use late::{hide_after_failure, resolve, strategy_reads_as_true};
 pub(in crate::executor) use plan::{Gate, PlayPlan, Strategy};
 pub(in crate::executor) use vars::host_vars;
 use vars::{Named, delegate_host_vars, merged_vars, resolved};
@@ -382,6 +385,7 @@ pub(super) fn prepare(
     }
     let delegate = delegate_for(task, &base, templar)?;
     if is_local(&task.module) || crate::action_plugins::controller_side(&task.module) {
+        late::check_become(task, plan, &base, templar)?;
         return Ok(Prepared::Local(items, delegate.map(|(name, _)| name)));
     }
     let connect = Box::new(connect_for(task, &base, templar)?);
