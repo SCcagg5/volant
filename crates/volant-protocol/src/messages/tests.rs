@@ -70,9 +70,8 @@ fn a_result_fails_by_the_reference_s_own_rule() {
     );
 }
 
-/// A task is failed by `failed_when_result` when its result carries one, measured against
-/// ansible-core 2.19.12: a result whose `until` ran out has `failed: true` and still passes under
-/// `failed_when: false`. Among a loop's results, the ones that carry it decide for the task.
+/// `failed_when_result` decides a task when a result carries one (ansible-core 2.19.12): retries
+/// that ran out pass under `failed_when: false`, and in a loop only the carriers decide.
 #[test]
 fn a_task_fails_by_failed_when_result_when_it_has_one() {
     let results = |shapes: &[Value]| -> Vec<TaskResult> {
