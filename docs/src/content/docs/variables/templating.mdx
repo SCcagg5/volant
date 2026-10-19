@@ -76,7 +76,38 @@ What differs from CPython:
 - `encode` and `decode` are not available, because Volant has no bytes values.
 - A backslash escape such as `'\n'` inside a template string is read by the template engine. ansible-core 2.19 keeps the two characters. Pass a value in a variable when the text must hold a real newline.
 
-`.keys()`, `.values()`, `.items()` and `.get()` on a mapping and `.count()` on a list come from `minijinja-contrib`'s Python compatibility layer.
+### Lists and mappings
+
+`list` and `dict` methods run too: `append`, `extend`, `insert`, `remove`, `pop`, `sort`, `reverse`, `index`, `count`, `copy` and `clear` on a list, and `get`, `keys`, `values`, `items`, `pop`, `popitem`, `setdefault`, `update`, `copy`, `clear` and `fromkeys` on a mapping. `keys()`, `values()` and `items()` give lists. `sort` takes `reverse`, and `key` only as `none`. The usual ways to write a change are `{% set _ = items.append(x) %}` and `{{ items.append(x) or '' }}`: the method changes the list and answers `none`.
+
+A template changes a list or mapping in place, and other names for the same value see the change:
+
+```jinja
+{% set seen = [] %}
+{% for host in groups['web'] %}{% set _ = seen.append(host) %}{% endfor %}
+{% set alias = seen %}{% set _ = alias.append('db') %}
+{{ seen }}   {# every web host, then db #}
+```
+
+This follows Python and ansible-core 2.19, which agree on these cases (each is a row of the golden corpus):
+
+- A value read from a variable is a copy for the string being rendered. A play variable `x` that a template changes with `x.append(1)` is changed for that template only. The next task, the next field of the same task and the next template read it as it was. There is no change to a variable that outlasts the render.
+- Inside one template, `b = a` names one list, and a change through `b` shows in `a`. `b = a | list` and `b = a.copy()` make a new list.
+- A list or mapping inside another is reached by `x[0]`, `x.key` and `for item in x` as the same object, so `d.a.append(1)` changes `d`. A value stored by `append`, `extend`, `insert`, `update` or `setdefault` is a copy, and so are the values that `get`, `items`, `values` and `copy` answer.
+- `d.setdefault('k', []).append(1)` changes `d`. `v = d.setdefault('k', [])` followed by `v.append(1)` changes `d` here, and does not in ansible-core.
+
+What differs from ansible-core:
+
+- A list or mapping that a template passes to a macro, `namespace()` or another call is the same object in Volant. ansible-core passes a copy, so a macro that changes its argument changes the caller's list only here.
+- ansible-core 2.19 keeps the error of a call whose result is never read. `{% set _ = [1].remove(5) %}` is no error there. It is one here.
+- A list that `a + b` or a slice `a[1:]` built cannot be changed: write `(a + b) | list`. The error says so.
+- A list that a call has just built and that no variable holds, such as `(x | list).append(1)`, is changed as a copy: the call answers as Python does, and nothing else changes.
+- A list that grows inside a `{% for %}` over itself is read up to its length at the start of the loop.
+- `{% do %}` is accepted here and refused by ansible-core 2.19, which does not enable `jinja2.ext.do`. Use `{% set _ = ... %}` in a template that has to run on both.
+- `items()` and `popitem()` give lists where Python gives tuples, so they print as `['a', 1]` and not `('a', 1)`.
+- `sort(key=...)` with a function is not available.
+
+`.get()`, `.keys()`, `.values()` and `.items()` on other mapping-like values, such as `hostvars` and the loop variable, come from `minijinja-contrib`'s Python compatibility layer.
 
 `difference`, `intersect` and `union` build a Python `set` in ansible-core, whose order is its own: small integers happen to come out sorted, and strings come out in an order that changes with `PYTHONHASHSEED` from one run to the next. Volant sorts the result when every element is an integer, which matches every integer case measured, and otherwise keeps the order in which the elements first appeared. On strings, that order is not guaranteed to match a given run of ansible-core.
 
