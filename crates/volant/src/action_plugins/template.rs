@@ -17,18 +17,24 @@ use super::copy::{CopyOf, copy_bytes, failing, local_mode};
 use super::files::{check_host_named, not_found, search_paths};
 use super::{Context, Plugin};
 use crate::executor::as_bool_value;
-use crate::template::{FileRender, Vars};
+use crate::template::{FileRender, Syntax, Vars};
 use crate::vars::HostVars;
 
-/// The delimiters Jinja reads, with the default each one has. A template written for others is
-/// refused rather than rendered as if it used these.
-const DELIMITERS: &[(&str, &str)] = &[
-    ("variable_start_string", "{{"),
-    ("variable_end_string", "}}"),
-    ("block_start_string", "{%"),
-    ("block_end_string", "%}"),
-    ("comment_start_string", "{#"),
-    ("comment_end_string", "#}"),
+mod encoding;
+use encoding::encode;
+
+/// The `Syntax` field one delimiter option sets.
+type Field = fn(&mut Syntax) -> &mut String;
+
+/// The six delimiter options with the `Syntax` field each one sets, in the order the reference
+/// checks the types of its string options and then the fields of its overrides.
+const DELIMITERS: [(&str, Field); 6] = [
+    ("block_start_string", |s| &mut s.block_start),
+    ("block_end_string", |s| &mut s.block_end),
+    ("variable_start_string", |s| &mut s.variable_start),
+    ("variable_end_string", |s| &mut s.variable_end),
+    ("comment_start_string", |s| &mut s.comment_start),
+    ("comment_end_string", |s| &mut s.comment_end),
 ];
 
 /// The template's own options, which the reference takes out before `copy` sees the arguments.
@@ -62,8 +68,50 @@ fn string_arg(args: &Map<String, Value>, name: &str) -> Option<String> {
     }
 }
 
+/// A boolean option as the reference reads it with `boolean(strict=False)`: a word that is not
+/// a boolean is false, and only an absent option takes the default.
 fn flag(args: &Map<String, Value>, name: &str, default: bool) -> bool {
-    args.get(name).and_then(as_bool_value).unwrap_or(default)
+    args.get(name)
+        .map_or(default, |v| as_bool_value(v).unwrap_or(false))
+}
+
+/// The six delimiter options, in the reference's words when one is wrong. The reference turns a
+/// number into text, refuses a list or a mapping, and reads an empty value as none, which its
+/// overrides then refuse.
+fn syntax_of(args: &Map<String, Value>) -> Result<Syntax, String> {
+    let mut syntax = Syntax::default();
+    let mut given: Vec<(&str, Option<String>)> = Vec::new();
+    for (name, _) in DELIMITERS {
+        given.push((
+            name,
+            match args.get(name) {
+                None => continue,
+                Some(Value::Null) => None,
+                Some(Value::String(s)) => Some(s.clone()).filter(|s| !s.is_empty()),
+                Some(Value::Bool(b)) => Some(if *b { "True" } else { "False" }.into()),
+                Some(v @ (Value::Array(_) | Value::Object(_))) => {
+                    return Err(format!(
+                        "Invalid value provided for 'string': {}",
+                        crate::playbook::python_repr(v)
+                    ));
+                }
+                Some(number) => Some(number.to_string()),
+            },
+        ));
+    }
+    for (name, field) in DELIMITERS {
+        match given.iter().find(|(n, _)| *n == name) {
+            Some((_, Some(value))) => field(&mut syntax).clone_from(value),
+            Some((_, None)) => {
+                return Err(format!(
+                    "TemplateOverrides.{name} must be <class 'str'> instead of <class 'NoneType'>"
+                ));
+            }
+            None => {}
+        }
+    }
+    syntax.check_starts().map_err(str::to_string)?;
+    Ok(syntax)
 }
 
 /// A copy of the item's variables, its provenance kept, with the four the plugin adds.
@@ -114,24 +162,19 @@ fn rendered(ctx: &Context<'_>) -> Result<CopyOf, String> {
         Some("\r\n" | "\\r\\n") => "\r\n",
         Some(_) => return Err("newline_sequence needs to be one of: \n, \r or \r\n".into()),
     };
-    if let Some((name, _)) = DELIMITERS
-        .iter()
-        .find(|(name, default)| string_arg(args, name).is_some_and(|v| v != *default))
+    // The delimiters pick which part of the author's template is code. ansible-core takes a
+    // value a managed host chose, so `allow` does too; the stricter modes refuse it.
+    if ctx.host_named_paths != crate::config::HostNamedPaths::Allow
+        && let Some((name, _)) = DELIMITERS
+            .iter()
+            .find(|(name, _)| ctx.args_untrusted.contains(*name))
     {
         return Err(format!(
-            "argument '{name}' is not supported yet on 'template'"
+            "the '{name}' of this task was named by a managed host, and a delimiter a host chose is never used"
         ));
     }
-    if let Some(encoding) = string_arg(args, "output_encoding").filter(|e| !e.is_empty())
-        && !matches!(
-            encoding.to_ascii_lowercase().replace('_', "-").as_str(),
-            "utf-8" | "utf8"
-        )
-    {
-        return Err(format!(
-            "output_encoding '{encoding}' is not supported yet on 'template': only utf-8 is"
-        ));
-    }
+    let syntax = syntax_of(args)?;
+    let encoding = string_arg(args, "output_encoding").filter(|e| !e.is_empty());
     check_host_named(
         ctx.host_named_paths,
         ctx.args_untrusted,
@@ -165,12 +208,15 @@ fn rendered(ctx: &Context<'_>) -> Result<CopyOf, String> {
         trim_blocks: flag(args, "trim_blocks", true),
         lstrip_blocks: flag(args, "lstrip_blocks", false),
         newline_sequence: newline_sequence.into(),
+        syntax,
         name: Some(src.clone()),
+        ..FileRender::default()
     };
     let out = ctx
         .templar
         .render_file(&text, Vars::from(&vars), &options)
         .map_err(|err| format!("could not render {src}: {err}"))?;
+    let bytes = encode(&out, encoding.as_deref().unwrap_or("utf-8"))?;
 
     let mut args: Map<String, Value> = args
         .iter()
@@ -181,7 +227,7 @@ fn rendered(ctx: &Context<'_>) -> Result<CopyOf, String> {
         args.insert("mode".into(), Value::String(local_mode(found)?));
     }
     Ok(CopyOf {
-        bytes: out.into_bytes(),
+        bytes,
         basename: found
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
