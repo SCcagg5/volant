@@ -420,7 +420,7 @@ impl Templar {
         any: &mut bool,
     ) -> Value {
         match value {
-            Value::String(s) if Self::is_template(s) => {
+            Value::String(s) if Self::is_stored_template(s) => {
                 let out = self
                     .render_in(s, ctx, tainted)
                     .unwrap_or_else(|_| value.clone());

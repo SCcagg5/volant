@@ -7,7 +7,7 @@ use minijinja::machinery::WhitespaceConfig;
 use serde_json::Value;
 
 use super::file::trailing_newlines;
-use super::vm::{Node, convert_error, render_counted, single_expression};
+use super::vm::{LONG_LINE, Node, convert_error, render_counted, single_expression};
 use super::{Templar, TemplateError};
 
 impl Templar {
@@ -18,6 +18,23 @@ impl Templar {
         while let Some(at) = rest.find('{') {
             if matches!(rest.as_bytes().get(at + 1), Some(b'{' | b'%' | b'#')) {
                 return true;
+            }
+            rest = &rest[at + 1..];
+        }
+        false
+    }
+
+    /// Whether a string that is already stored, as a variable or a fact, is to be rendered when it
+    /// is read: it holds `{{` or `{%`, or a comment that closes. A `{#` with no `#}` after it is
+    /// left alone, because text an expression made (`{{ 'x{#' }}`) looks like that and is data:
+    /// the reference does not render it again.
+    pub(crate) fn is_stored_template(text: &str) -> bool {
+        let mut rest = text;
+        while let Some(at) = rest.find('{') {
+            match rest.as_bytes().get(at + 1) {
+                Some(b'{' | b'%') => return true,
+                Some(b'#') if rest[at + 2..].contains("#}") => return true,
+                _ => {}
             }
             rest = &rest[at + 1..];
         }
@@ -60,7 +77,9 @@ impl Templar {
             // The lexer of the reference stops quietly when a comment opens at the very end of
             // the source. A `{#` only counts for that when it opens one, which is why the render
             // is tried first: `{{#` is a syntax error.
-            Err(err) if err.0.contains("unexpected end of comment") => {
+            Err(err)
+                if err.0.contains("unexpected end of comment") || err.0.contains(LONG_LINE) =>
+            {
                 let cut = without_open_comment(body);
                 if cut.len() == body.len() {
                     Err(err)

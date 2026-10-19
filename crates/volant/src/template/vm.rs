@@ -39,7 +39,7 @@ pub(super) fn unwrap_unsafe(value: &mut Value) -> bool {
 /// Whether any string inside a value still carries a template marker.
 pub(crate) fn holds_template(value: &Value) -> bool {
     match value {
-        Value::String(s) => Templar::is_template(s),
+        Value::String(s) => Templar::is_stored_template(s),
         Value::Array(items) => items.iter().any(holds_template),
         Value::Object(map) => map.values().any(holds_template),
         _ => false,
@@ -305,6 +305,10 @@ pub(super) fn render_counted(
     Ok((out, emitted))
 }
 
+/// What a render says when the lexer of minijinja failed on a line it cannot report on.
+pub(super) const LONG_LINE: &str =
+    "the template has a syntax error on a line too long to be reported";
+
 /// Runs the lexer and the parser of minijinja, and turns a panic of theirs into an error. Its
 /// lexer counts the columns of a line in sixteen bits, and a syntax error 65,535 characters into
 /// a line overflows that counter, which panics in a debug build. Text from a playbook must not
@@ -312,12 +316,8 @@ pub(super) fn render_counted(
 fn no_panic<T>(
     compile: impl FnOnce() -> Result<T, minijinja::Error>,
 ) -> Result<T, minijinja::Error> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(compile)).unwrap_or_else(|_| {
-        Err(minijinja::Error::new(
-            ErrorKind::SyntaxError,
-            "the template has a syntax error on a line too long to be reported",
-        ))
-    })
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(compile))
+        .unwrap_or_else(|_| Err(minijinja::Error::new(ErrorKind::SyntaxError, LONG_LINE)))
 }
 
 /// `env.compile_expression(expr)?.eval(ctx)`, with `~` routed through [`concat()`].
