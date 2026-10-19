@@ -56,9 +56,8 @@ fn the_kill_moment_is_the_first_step_past_the_limit_for_every_small_limit() {
     }
 }
 
-/// The reference takes any integer as `async`. A limit of a century, of `i64::MAX` or of
-/// `u64::MAX` seconds is a job that is not killed, and working out when must not take time
-/// that grows with the limit.
+/// The reference takes any integer as `async`: a huge limit is a job that is not killed, and
+/// working out when must not take time that grows with the limit.
 #[rstest::rstest]
 #[case::century(3_153_600_000)]
 #[case::i64_max(i64::MAX as u64)]
