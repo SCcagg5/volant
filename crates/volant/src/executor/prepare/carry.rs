@@ -142,6 +142,26 @@ mod tests {
     use super::{Carry, mentions};
     use crate::vars::HostVars;
 
+    /// An item starts from the host's resolved variables, and only the variables built from a
+    /// carried name go back to their templates: the others are not copied from the unresolved map.
+    #[test]
+    fn the_variables_an_item_renders_again_are_the_ones_built_from_a_carried_name() {
+        let mut merged = HostVars::default();
+        merged.map.insert("built".into(), json!("{{ x }}"));
+        merged.map.insert("other".into(), json!("{{ 1 + 1 }}"));
+        let mut base = HostVars::default();
+        base.map.insert("built".into(), json!("old"));
+        base.map.insert("other".into(), json!(2));
+        let mut carry = Carry::new(merged);
+        carry.facts.insert("x".into(), json!(1));
+        carry.reach.insert("x".into());
+        carry.follow();
+        let vars = carry.vars(&base);
+        assert_eq!(vars.get("built"), Some(&json!("{{ x }}")));
+        assert_eq!(vars.get("other"), Some(&json!(2)));
+        assert_eq!(vars.get("x"), Some(&json!(1)));
+    }
+
     /// A variable built from a variable built from a carried name is followed as well.
     #[test]
     fn a_variable_two_hops_from_a_carried_name_is_followed() {
