@@ -350,6 +350,15 @@ fn a_bad_merge_value_is_a_constructor_error() {
             "a: &s\n  - 1\nd: {<<: [*s]}\n",
             "while constructing a mapping\n  in \"t.yml\", line 3, column 4\nexpected a mapping for merging, but found sequence\n  in \"t.yml\", line 1, column 4",
         ),
+        // Columns count characters, not bytes.
+        (
+            "é: 1\na: &s foo\nd: {é: 2, <<: *s}\n",
+            "while constructing a mapping\n  in \"t.yml\", line 3, column 4\nexpected a mapping or list of mappings for merging, but found scalar\n  in \"t.yml\", line 2, column 4",
+        ),
+        (
+            "é: 1\nd: {<<: [1, é]}\n",
+            "while constructing a mapping\n  in \"t.yml\", line 2, column 4\nexpected a mapping for merging, but found scalar\n  in \"t.yml\", line 2, column 10",
+        ),
         // A tag counts as part of the node too.
         (
             "d: {<<: !!str foo}\n",
