@@ -1510,3 +1510,180 @@ fn the_variables_items_share_keep_templates_apart_and_stay_readable() {
         json!("{{ 7 * 6 }}-a")
     );
 }
+
+/// What a directory read gives, in order: the files and the variables. The tree holds mixed-case
+/// names, hidden entries, `sub` and `sub-b`, a nested directory and a text file.
+#[rstest::rstest]
+#[case::directories_by_path_then_files_by_name(0.0, None, &[], &["yaml", "yml", "json"], true,
+    &["A.yml", "a.yaml", "b.json", ".hid/h.yml", "sub/s.yml", "sub-b/x.yml", "sub/deep/d.yml"][..])]
+#[case::depth_one_is_the_directory_itself(1.0, None, &[], &["yaml", "yml", "json"], true,
+    &["A.yml", "a.yaml", "b.json"][..])]
+#[case::depth_two(2.0, None, &[], &["yaml", "yml", "json"], true,
+    &["A.yml", "a.yaml", "b.json", ".hid/h.yml", "sub/s.yml", "sub-b/x.yml"][..])]
+#[case::a_negative_depth_reads_nothing(-1.0, None, &[], &["yaml", "yml", "json"], true, &[][..])]
+#[case::a_fractional_depth_is_compared_as_it_is(1.5, None, &[], &["yaml", "yml", "json"], true,
+    &["A.yml", "a.yaml", "b.json"][..])]
+#[case::files_matching_searches_the_name(0.0, Some("^[ab]"), &[], &["yaml", "yml", "json"], true,
+    &["a.yaml", "b.json"][..])]
+#[case::files_matching_does_not_see_the_path(0.0, Some("sub"), &[], &["yaml", "yml", "json"], true, &[][..])]
+#[case::ignore_files_is_anchored_at_the_end(0.0, None, &["a", r".*\.json"], &["yaml", "yml", "json"], true,
+    &["A.yml", "a.yaml", ".hid/h.yml", "sub/s.yml", "sub-b/x.yml", "sub/deep/d.yml"][..])]
+#[case::extensions_replace_the_default(0.0, None, &[], &["yml"], true,
+    &["A.yml", ".hid/h.yml", "sub/s.yml", "sub-b/x.yml", "sub/deep/d.yml"][..])]
+#[case::extensions_are_compared_with_their_case(0.0, None, &[], &["YML"], true, &[][..])]
+#[case::an_extension_written_with_its_dot_matches_nothing(0.0, None, &[], &[".yml"], true, &[][..])]
+fn a_directory_is_read_in_the_references_order(
+    #[case] depth: f64,
+    #[case] matching: Option<&str>,
+    #[case] ignore: &[&str],
+    #[case] extensions: &[&str],
+    #[case] ignore_unknown: bool,
+    #[case] expected: &[&str],
+) {
+    let tmp = scratch();
+    for (rel, text) in [
+        ("A.yml", "a_upper: 1\n"),
+        ("a.yaml", "a_lower: 1\n"),
+        ("b.json", "{\"b\": 1}\n"),
+        ("notes.txt", "free text\n"),
+        (".hid/h.yml", "h: 1\n"),
+        ("sub/s.yml", "s: 1\n"),
+        ("sub/deep/d.yml", "d: 1\n"),
+        ("sub-b/x.yml", "x: 1\n"),
+    ] {
+        write(tmp.path(), rel, text);
+    }
+    let scan = Scan::new(
+        matching,
+        Ok(ignore.iter().map(ToString::to_string).collect()),
+        extensions.iter().map(|e| json!(e)).collect(),
+        ignore_unknown,
+    )
+    .unwrap()
+    .with_depth(depth);
+    let top = tmp.path().to_str().unwrap();
+    let read = include_dir(top, &scan).ok().expect("the directory reads");
+    let shown: Vec<String> = read
+        .files
+        .iter()
+        .map(|f| f.strip_prefix(&format!("{top}/")).unwrap().to_string())
+        .collect();
+    assert_eq!(shown, expected);
+    assert_eq!(read.facts.len(), expected.len());
+    assert!(!read.encrypted);
+}
+
+/// A later file replaces the keys of an earlier one whole, and a file with nothing in it adds
+/// nothing and is still listed.
+#[test]
+fn a_later_file_replaces_whole_values() {
+    let tmp = scratch();
+    write(tmp.path(), "1.yml", "k: {a: 1}\nlist: [1]\nonly: 1\n");
+    write(tmp.path(), "2.yml", "k: {b: 2}\nlist: [2]\n");
+    write(tmp.path(), "3.yml", "# nothing\n");
+    let scan = Scan::new(None, Ok(vec![]), ["yml"].map(|e| json!(e)).to_vec(), false).unwrap();
+    let read = include_dir(tmp.path().to_str().unwrap(), &scan)
+        .ok()
+        .expect("the directory reads");
+    assert_eq!(
+        Value::Object(read.facts),
+        json!({"k": {"b": 2}, "list": [2], "only": 1})
+    );
+    assert_eq!(read.files.len(), 3);
+}
+
+/// What goes wrong in a directory, as the reference words it: a returned failure keeps the
+/// variables read before it, a raised one leaves no result.
+#[rstest::rstest]
+#[case::extension_without_the_skip(&["a.yml", "sub/b.yml", "sub/c.txt"], "sub/c.txt does not have a valid extension: yaml, yml, json", &["a.yml", "sub/b.yml"], json!({"a": 1}))]
+#[case::not_a_mapping(&["a.yml", "sub/list.yml"], "sub/list.yml must be stored as a dictionary/hash", &["a.yml"], json!({"a": 1}))]
+#[case::a_scalar_is_not_a_mapping(&["scalar.yml"], "scalar.yml must be stored as a dictionary/hash", &[], json!({}))]
+fn a_directory_that_cannot_be_read_says_why(
+    #[case] names: &[&str],
+    #[case] message: &str,
+    #[case] files: &[&str],
+    #[case] facts: Value,
+) {
+    let tmp = scratch();
+    for name in names {
+        let text = match *name {
+            n if n.ends_with("list.yml") => "- 1\n",
+            n if n.ends_with("scalar.yml") => "42\n",
+            n if n.ends_with(".txt") => "text\n",
+            n if n.ends_with("b.yml") => "b: 1\n",
+            _ => "a: 1\n",
+        };
+        write(tmp.path(), name, text);
+    }
+    let top = tmp.path().to_str().unwrap();
+    let scan = Scan::new(
+        None,
+        Ok(vec![]),
+        ["yaml", "yml", "json"].map(|e| json!(e)).to_vec(),
+        false,
+    )
+    .unwrap();
+    let Err(Failure::Returned {
+        message: got,
+        facts: kept,
+        files: read,
+        ..
+    }) = include_dir(top, &scan)
+    else {
+        panic!("the module answers this failure");
+    };
+    assert_eq!(got, format!("{top}/{message}"));
+    assert_eq!(Value::Object(kept), facts);
+    let want: Vec<String> = files.iter().map(|f| format!("{top}/{f}")).collect();
+    assert_eq!(read, want);
+}
+
+/// Python's sentence for a pattern its `re` module refuses, with the position it counts.
+#[rstest::rstest]
+#[case("(", Some("missing ), unterminated subpattern at position 0"))]
+#[case("a(b(c)", Some("missing ), unterminated subpattern at position 1"))]
+#[case("ab)", Some("unbalanced parenthesis at position 2"))]
+#[case("x[ab", Some("unterminated character set at position 1"))]
+#[case("[]a", Some("unterminated character set at position 0"))]
+#[case("*a", Some("nothing to repeat at position 0"))]
+#[case("a|+", Some("nothing to repeat at position 2"))]
+#[case("(?:a)+", None)]
+#[case(r"\(a", None)]
+#[case("[(]a", None)]
+#[case("a*?", None)]
+fn a_pattern_python_refuses_is_worded_as_python_words_it(
+    #[case] pattern: &str,
+    #[case] expected: Option<&str>,
+) {
+    assert_eq!(
+        include_dir::python_regex_error(pattern).as_deref(),
+        expected
+    );
+}
+
+/// `os.path.join`: an absolute tail wins, a trailing slash is not doubled, `..` is kept.
+#[rstest::rstest]
+#[case("/a", "b", "/a/b")]
+#[case("/a/", "b", "/a/b")]
+#[case("/a", "/b", "/b")]
+#[case("/a/x", "../y", "/a/x/../y")]
+#[case("", "b", "b")]
+fn paths_join_as_python_joins_them(#[case] head: &str, #[case] tail: &str, #[case] want: &str) {
+    assert_eq!(join_path(head, tail), want);
+}
+
+/// An `ignore_files` pattern is compiled when a file is tested against it, so a directory with
+/// nothing to test passes and one with a file fails with the reference's sentence, as a cause.
+#[test]
+fn an_ignore_pattern_that_is_no_regular_expression_fails_at_the_first_file() {
+    let tmp = scratch();
+    let top = tmp.path().to_str().unwrap();
+    let scan = || Scan::new(None, Ok(vec!["(".into()]), vec![json!("yml")], false).expect("a scan");
+    assert!(include_dir(top, &scan()).is_ok());
+    write(tmp.path(), "a.yml", "a: 1\n");
+    let Err(Failure::Raised { text, chain }) = include_dir(top, &scan()) else {
+        panic!("the action raises this failure");
+    };
+    assert_eq!(text, "Invalid regular expression: (");
+    assert!(matches!(chain, Chain::Cause));
+}

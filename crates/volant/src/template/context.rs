@@ -9,9 +9,13 @@ use std::sync::{Arc, Mutex};
 use minijinja::value::{Enumerator, Object};
 use serde_json::{Map, Value};
 
+mod read;
+
 use super::env::chained_attr;
+use super::templar::Templar;
 use super::{
     ATTR_KEY, CONCAT_KEY, CONTEXT_KEY, HOSTVARS_KEYS, ITEM_KEY, QUERY_KEY, TAINT_KEY, Tainted,
+    TemplateError,
 };
 use crate::inventory::is_localhost;
 
@@ -69,6 +73,8 @@ impl Object for LoopView {
         Enumerator::Values(keys)
     }
 }
+
+pub(super) use read::take_failure;
 
 #[derive(Debug)]
 pub(crate) struct TaintSink(pub(crate) Tainted);
@@ -136,17 +142,29 @@ impl<'a> From<&'a Map<String, Value>> for Vars<'a> {
 struct Memo(Mutex<HashMap<String, minijinja::Value>>);
 
 impl Memo {
+    pub(super) fn lookup(&self, key: &str) -> Option<minijinja::Value> {
+        self.0.lock().expect("template memo").get(key).cloned()
+    }
+
+    /// Not held across the conversion: resolving a variable renders a template that reads other
+    /// variables, and those reads come back here.
+    pub(super) fn store(&self, key: &str, value: &minijinja::Value) {
+        self.0
+            .lock()
+            .expect("template memo")
+            .insert(key.to_string(), value.clone());
+    }
+
     pub(super) fn get(
         &self,
         key: &str,
         convert: impl FnOnce() -> Option<minijinja::Value>,
     ) -> Option<minijinja::Value> {
-        let mut cache = self.0.lock().expect("template memo");
-        if let Some(value) = cache.get(key) {
-            return Some(value.clone());
+        if let Some(value) = self.lookup(key) {
+            return Some(value);
         }
         let value = convert()?;
-        cache.insert(key.to_string(), value.clone());
+        self.store(key, &value);
         Some(value)
     }
 }
@@ -169,6 +187,19 @@ pub(super) struct Context {
     /// How many names the render has read, to tell a pass that read none.
     reads: AtomicUsize,
     memo: Memo,
+    templar: Templar,
+    /// The names whose value is being rendered now, in the order the reads nested.
+    resolving: Mutex<Vec<String>>,
+    /// Names whose rendered value was built from something a managed host wrote. A read of one is
+    /// as much a read of host data as a read of the name it was built from.
+    soiled: Mutex<BTreeSet<String>>,
+    /// Whether the text of a variable reads only what the playbook wrote, name by name.
+    author_only: Mutex<HashMap<String, bool>>,
+    /// Whether `soiled` holds a name, so that a render that resolved nothing never takes its lock.
+    any_soiled: AtomicBool,
+    /// Set when `failed` is: the first error a nested render raised that the read cannot carry.
+    failure: Mutex<Option<TemplateError>>,
+    failed: AtomicBool,
 }
 
 /// Starts a render over `ctx`: clears the mark of the last one and returns the reads so far.
@@ -242,58 +273,24 @@ impl Object for Context {
         // cache and would otherwise leave the render looking clean.
         // A `hostvars` the map carries as a plain value lists its hosts on any read, so a host
         // name that came from a managed host taints every read of it.
-        if self.untrusted.contains(key)
+        let untrusted = self.untrusted.contains(key);
+        if untrusted
+            || (self.any_soiled.load(Ordering::Relaxed)
+                && self.soiled.lock().expect("template soiled").contains(key))
             || (key == "hostvars"
                 && self.hostvars.is_none()
                 && self.untrusted.contains(HOSTVARS_KEYS))
         {
             self.tainted.store(true, Ordering::Relaxed);
         }
-        self.memo.get(key, || {
-            // A map that carries a `hostvars` key of its own - a fixture, a recorded scope -
-            // keeps being read from the map when no view came with it, so the two sources never
-            // disagree about which one answers.
-            if key == "hostvars"
-                && let Some(hostvars) = &self.hostvars
-            {
-                return Some(minijinja::Value::from_object(Hostvars {
-                    hosts: Arc::clone(hostvars),
-                    listed: self.shared.clone(),
-                    untrusted_hosts: self.untrusted_hosts.clone(),
-                    keys_untrusted: self.untrusted.contains(HOSTVARS_KEYS),
-                    tainted: Arc::clone(&self.tainted),
-                    memo: Memo::default(),
-                }));
-            }
-            // Before the host's own map, never after: these are the inventory-wide values, and
-            // they used to be merged into that map last, so they beat a fact of the same name.
-            // A loop variable or a registered name that collides with one of them is not here
-            // to be found: `HostVars::insert` drops it from the host's shared map as it writes.
-            if let Some(shared) = &self.shared
-                && let Some(value) = shared.get(key)
-            {
-                return Some(minijinja::Value::from_serialize(value));
-            }
-            // Between the two: the facts that answer, the ones no layer of the map outranks.
-            if let Some(facts) = &self.facts
-                && let Some(value) = facts.get(key)
-            {
-                return Some(minijinja::Value::from_serialize(value));
-            }
-            if key == LOOP_KEY
-                && let (Some(Value::Object(fields)), Some(base)) = (self.vars.get(key), &self.base)
-                && base.contains_key(ALLITEMS_KEY)
-            {
-                return Some(minijinja::Value::from_object(LoopView {
-                    fields: fields.clone(),
-                    base: Arc::clone(base),
-                }));
-            }
-            self.vars
-                .get(key)
-                .or_else(|| self.base.as_ref().and_then(|base| base.get(key)))
-                .map(minijinja::Value::from_serialize)
-        })
+        if let Some(value) = self.memo.lookup(key) {
+            return Some(value);
+        }
+        let (value, keep) = self.read(key, untrusted)?;
+        if keep {
+            self.memo.store(key, &value);
+        }
+        Some(value)
     }
 
     fn enumerate(self: &Arc<Self>) -> Enumerator {
@@ -391,7 +388,7 @@ impl Object for Hostvars {
     }
 }
 
-pub(super) fn context_of(vars: Vars<'_>) -> (minijinja::Value, Tainted) {
+pub(super) fn context_of(templar: &Templar, vars: Vars<'_>) -> (minijinja::Value, Tainted) {
     let tainted: Tainted = Arc::new(AtomicBool::new(false));
     let ctx = minijinja::Value::from_object(Context {
         vars: vars.map.clone(),
@@ -405,6 +402,13 @@ pub(super) fn context_of(vars: Vars<'_>) -> (minijinja::Value, Tainted) {
         literal: AtomicBool::new(false),
         reads: AtomicUsize::new(0),
         memo: Memo::default(),
+        templar: templar.clone(),
+        resolving: Mutex::new(Vec::new()),
+        soiled: Mutex::new(BTreeSet::new()),
+        author_only: Mutex::new(HashMap::new()),
+        any_soiled: AtomicBool::new(false),
+        failure: Mutex::new(None),
+        failed: AtomicBool::new(false),
     });
     (ctx, tainted)
 }

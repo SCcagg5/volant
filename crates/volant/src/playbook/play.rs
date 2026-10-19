@@ -31,6 +31,7 @@ pub(super) fn parse_play(yaml: &Yaml, dir: &Path) -> anyhow::Result<Play> {
             bail!("'{key}' is not a valid attribute for a Play");
         }
     }
+    let host_list = matches!(field(yaml, "hosts"), Some(Yaml::Sequence(_)));
     let host_patterns = match field(yaml, "hosts") {
         Some(Yaml::Value(Scalar::String(s))) => vec![s.to_string()],
         // Every entry, or none: `filter_map` here dropped a non-string entry and ran the play
@@ -105,6 +106,8 @@ pub(super) fn parse_play(yaml: &Yaml, dir: &Path) -> anyhow::Result<Play> {
         name,
         hosts,
         host_patterns,
+        host_list,
+        nameless: false,
         tags: tags(yaml, "")?,
         gather_facts,
         gather_written: gather_written.is_some(),

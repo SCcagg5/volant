@@ -12,10 +12,11 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
 use saphyr::{MarkedYaml, Scalar, YamlLoader};
-use saphyr_parser::{Event, Parser, ScalarStyle, Span, SpannedEventReceiver, Tag};
+use saphyr_parser::{Event, ScalarStyle, Span, SpannedEventReceiver, Tag};
 
-/// Feeds `loader` the events of `text`. A text that cannot hold a merge key (it needs the two
-/// characters `<<`) goes straight to the parser and skips this module's cost.
+/// Feeds `loader` the events of `text`, within the limits of `limits`. A text that cannot hold a
+/// merge key (it needs the two characters `<<`) goes straight to the loader and skips this
+/// module's cost.
 pub(super) fn parse<'a>(
     text: &'a str,
     source: &str,
@@ -24,9 +25,7 @@ pub(super) fn parse<'a>(
     if text.contains("<<") {
         load(text, source, loader)
     } else {
-        Parser::new_from_str(text)
-            .load(loader, true)
-            .map_err(Into::into)
+        super::limits::feed(text, loader).map_err(Into::into)
     }
 }
 
@@ -45,7 +44,7 @@ pub(super) fn load<'a>(
         anchors: HashMap::new(),
         error: None,
     };
-    Parser::new_from_str(text).load(&mut tree, true)?;
+    super::limits::feed(text, &mut tree)?;
     if let Some(message) = tree.error {
         anyhow::bail!(message);
     }
@@ -357,24 +356,32 @@ fn unique<'a>(pairs: Vec<(Item<'a>, Item<'a>)>) -> Vec<(Item<'a>, Item<'a>)> {
     out
 }
 
-/// Plays `item` back as the events it came from.
+/// Plays `item` back as the events it came from. The walk keeps its own stack, as a document may
+/// nest as deep as `limits` allows and a recursive walk would fill a worker thread's stack.
 fn play<'a>(item: Item<'a>, to: &mut YamlLoader<'a, MarkedYaml<'a>>) {
-    match item {
-        Item::Leaf(event, span) => to.on_event(event, span),
-        Item::Seq(head, items, end) => {
-            to.on_event(Event::SequenceStart(head.anchor, head.tag), head.span);
-            for item in items {
-                play(item, to);
+    enum Step<'a> {
+        Node(Item<'a>),
+        End(Event<'a>, Span),
+    }
+    let mut steps = vec![Step::Node(item)];
+    while let Some(step) = steps.pop() {
+        match step {
+            Step::End(event, span) | Step::Node(Item::Leaf(event, span)) => {
+                to.on_event(event, span);
             }
-            to.on_event(Event::SequenceEnd, end);
-        }
-        Item::Map(head, pairs, end) => {
-            to.on_event(Event::MappingStart(head.anchor, head.tag), head.span);
-            for (key, value) in pairs {
-                play(key, to);
-                play(value, to);
+            Step::Node(Item::Seq(head, items, end)) => {
+                to.on_event(Event::SequenceStart(head.anchor, head.tag), head.span);
+                steps.push(Step::End(Event::SequenceEnd, end));
+                steps.extend(items.into_iter().rev().map(Step::Node));
             }
-            to.on_event(Event::MappingEnd, end);
+            Step::Node(Item::Map(head, pairs, end)) => {
+                to.on_event(Event::MappingStart(head.anchor, head.tag), head.span);
+                steps.push(Step::End(Event::MappingEnd, end));
+                for (key, value) in pairs.into_iter().rev() {
+                    steps.push(Step::Node(value));
+                    steps.push(Step::Node(key));
+                }
+            }
         }
     }
 }

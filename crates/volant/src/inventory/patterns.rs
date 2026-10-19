@@ -199,7 +199,7 @@ pub(super) fn split_subscript(term: &str) -> Option<(&str, Subscript)> {
         !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
     };
     if is_signed_digits(inner) {
-        return Some((base, Subscript::Index(inner.parse().ok()?)));
+        return Some((base, Subscript::Index(saturating(inner))));
     }
     let sep = inner.find([':', '-'])?;
     let (start, end) = (&inner[..sep], &inner[sep + 1..]);
@@ -210,9 +210,20 @@ pub(super) fn split_subscript(term: &str) -> Option<(&str, Subscript)> {
     let end = if end.is_empty() {
         None
     } else {
-        Some(end.parse().ok()?)
+        Some(saturating(end))
     };
-    Some((base, Subscript::Range(start.parse().ok()?, end)))
+    Some((base, Subscript::Range(saturating(start), end)))
+}
+
+/// The integer `digits` spell, with an optional leading `-`. Python's integers have no end, so a
+/// number past this one's still orders against a host count as it would there: it is clamped to
+/// the largest or the smallest value, which no inventory is that long to tell from the real one.
+fn saturating(digits: &str) -> i64 {
+    digits.parse().unwrap_or(if digits.starts_with('-') {
+        i64::MIN
+    } else {
+        i64::MAX
+    })
 }
 
 /// Ansible's `_apply_subscript`: a Python-style negative index wraps from the end; a range's
@@ -231,9 +242,12 @@ pub(super) fn apply_subscript(names: &[String], sub: Subscript) -> Vec<String> {
                 Vec::new()
             }
         }
+        // The reference reads an end of `0` as no end at all and takes the one host `start` names,
+        // so `[1:0]` is `[1]`.
+        Subscript::Range(start, Some(0)) => apply_subscript(names, Subscript::Index(start)),
         Subscript::Range(start, end) => {
             let start = start.clamp(0, len);
-            let stop = (end.unwrap_or(len - 1) + 1).clamp(0, len);
+            let stop = end.unwrap_or(len - 1).saturating_add(1).clamp(0, len);
             if start >= stop {
                 Vec::new()
             } else {

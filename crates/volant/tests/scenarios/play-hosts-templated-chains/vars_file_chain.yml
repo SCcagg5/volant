@@ -1,0 +1,10 @@
+- hosts: "{{ a }}"
+  gather_facts: false
+  vars:
+    a: "{{ from_file }}"
+    pick: w1
+  vars_files:
+    - vars.yml
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }}"

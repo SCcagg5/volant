@@ -1,0 +1,104 @@
+# The first host of a group.
+- hosts: "{{ (groups['servers'] | first) }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ ansible_play_hosts }} {{ ansible_play_hosts_all }}"
+
+# An extra variable with a default.
+- hosts: "{{ target | default('k3s_servers') }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ ansible_play_hosts }}"
+
+# A list result.
+- hosts: "{{ groups['k3s_servers'] | default([]) }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ ansible_play_hosts }}"
+
+# An empty list, and a group nobody has: nothing matches, with no error.
+- hosts: "{{ groups['nosuchgroup'] | default([]) }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: never
+
+# A constant expression.
+- hosts: "{{ 'nh' }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }}"
+
+# Play variables, and a vars_files entry, are both read.
+- name: Play variables
+  hosts: "{{ pick }}"
+  gather_facts: false
+  vars:
+    pick: web
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ ansible_play_hosts }}"
+
+- name: Variables file
+  hosts: "{{ from_file }}"
+  gather_facts: false
+  vars_files:
+    - vars.yml
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }}"
+
+# A string is one pattern, a comma or a colon inside it is the pattern's own.
+- hosts: "{{ groups['servers'] | join(':') }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ ansible_play_hosts }}"
+
+- hosts: "{{ groups['k3s_servers'][:1] | join(',') }},{{ groups['web'][-1] }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ ansible_play_hosts }}"
+
+- name: A pattern with an exclusion
+  hosts: "servers:!{{ groups['servers'][0] }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ ansible_play_hosts }}"
+
+# A list whose entries are templates.
+- name: A list of patterns
+  hosts:
+    - "{{ groups['servers'][0] }}"
+    - "{{ 'w2' }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ ansible_play_hosts }}"
+
+# Batches, delegation and the strategy see the hosts the pattern found.
+- name: Batches and delegation
+  hosts: "{{ groups['servers'] }}"
+  gather_facts: false
+  serial: 2
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ ansible_play_batch }} of {{ ansible_play_hosts_all }}"
+    - debug:
+        msg: "once from {{ inventory_hostname }} for {{ groups['web'][0] }}"
+      delegate_to: "{{ groups['web'][0] }}"
+      run_once: true
+
+- name: The free strategy
+  hosts: "{{ groups['web'] }}"
+  gather_facts: false
+  strategy: free
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ ansible_play_hosts }}"

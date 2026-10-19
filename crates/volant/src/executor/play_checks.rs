@@ -220,70 +220,93 @@ pub(super) fn load_play_vars_files(
             untrusted_hosts: Some(&untrusted_hosts),
             base: None,
         };
-        let mut files = Vec::new();
-        for raw in &play.vars_files {
-            let rendered = match state.templar.render(raw, vars) {
-                Ok(rendered) => rendered,
-                // Only a variable without a value is recoverable. Every other template failure
-                // stops the run there, and swallowing them all as one undefined variable both
-                // named the wrong cause and let a broken playbook exit 0.
-                Err(err) if err.is_undefined() => {
-                    if warned.insert(raw) {
-                        out.warning(
-                            "skipping vars_files item due to an undefined variable",
-                            false,
-                        );
-                    }
-                    continue;
+        let files = read_vars_files(
+            &play.vars_files,
+            &state.templar,
+            vars,
+            playbook_dir,
+            &mut loaded,
+            &mut |raw| {
+                if warned.insert(raw) {
+                    out.warning(
+                        "skipping vars_files item due to an undefined variable",
+                        false,
+                    );
                 }
-                Err(err) => anyhow::bail!("rendering vars_files entry {raw}: {err}"),
-            };
-            // Exit 4, the reference's own code for a playbook it cannot make sense of, measured
-            // alongside the wording. A template that fails to render stays at 1, also measured:
-            // the reference splits those two the same way.
-            let path = rendered.as_str().ok_or_else(|| {
-                crate::stats::Refusal::at(
-                    4,
-                    format!(
-                        "Invalid `vars_files` value of type '{}'. A `vars_files` value should \
-                         either be a string or list of strings.",
-                        python_type(&rendered)
-                    ),
-                )
-            })?;
-            let path = if Path::new(path).is_absolute() {
-                PathBuf::from(path)
-            } else {
-                playbook_dir.join(path)
-            };
-            // `exists` answers "no" both for a path that is not there and for one it cannot
-            // stat, a parent directory refusing access included. The reference asks the same
-            // question the same way and skips either without a word, so both stay a skip here.
-            if !path.exists() {
-                continue;
-            }
-            files.push(if let Some(file) = loaded.get(&path) {
-                file.clone()
-            } else {
-                // Exit 4 as well: measured, a `vars_files` entry naming a file whose YAML
-                // does not parse stops the reference with the same code a broken playbook
-                // gets.
-                // A vaulted file the run cannot read is exit 1 in the reference.
-                let file = load_vars_file(&path).map_err(|err| {
-                    if err.is::<crate::vars::VaultFile>() {
-                        crate::stats::Refusal::at(1, err)
-                    } else {
-                        crate::stats::Refusal::or(4, err)
-                    }
-                })?;
-                loaded.insert(path, file.clone());
-                file
-            });
-        }
+            },
+        )?;
         if per_host.is_empty() {
             recheck_gather_keywords(play, state, &files)?;
         }
         per_host.insert(host.name.clone(), files);
     }
     Ok(per_host)
+}
+
+/// The `vars_files` entries read under `vars`, each rendered path read once into `loaded`.
+/// `on_undefined` hears of an entry whose template has no value, which is skipped.
+pub(super) fn read_vars_files<'a>(
+    entries: &'a [String],
+    templar: &Templar,
+    vars: Vars<'_>,
+    playbook_dir: &Path,
+    loaded: &mut HashMap<PathBuf, Map<String, Value>>,
+    on_undefined: &mut dyn FnMut(&'a String),
+) -> anyhow::Result<Vec<Map<String, Value>>> {
+    let mut files = Vec::new();
+    for raw in entries {
+        let rendered = match templar.render(raw, vars) {
+            Ok(rendered) => rendered,
+            // Only a variable without a value is recoverable. Every other template failure
+            // stops the run there, and swallowing them all as one undefined variable both
+            // named the wrong cause and let a broken playbook exit 0.
+            Err(err) if err.is_undefined() => {
+                on_undefined(raw);
+                continue;
+            }
+            Err(err) => anyhow::bail!("rendering vars_files entry {raw}: {err}"),
+        };
+        // Exit 4, the reference's own code for a playbook it cannot make sense of, measured
+        // alongside the wording. A template that fails to render stays at 1, also measured:
+        // the reference splits those two the same way.
+        let path = rendered.as_str().ok_or_else(|| {
+            crate::stats::Refusal::at(
+                4,
+                format!(
+                    "Invalid `vars_files` value of type '{}'. A `vars_files` value should \
+                     either be a string or list of strings.",
+                    python_type(&rendered)
+                ),
+            )
+        })?;
+        let path = if Path::new(path).is_absolute() {
+            PathBuf::from(path)
+        } else {
+            playbook_dir.join(path)
+        };
+        // `exists` answers "no" both for a path that is not there and for one it cannot
+        // stat, a parent directory refusing access included. The reference asks the same
+        // question the same way and skips either without a word, so both stay a skip here.
+        if !path.exists() {
+            continue;
+        }
+        files.push(if let Some(file) = loaded.get(&path) {
+            file.clone()
+        } else {
+            // Exit 4 as well: measured, a `vars_files` entry naming a file whose YAML
+            // does not parse stops the reference with the same code a broken playbook
+            // gets.
+            // A vaulted file the run cannot read is exit 1 in the reference.
+            let file = load_vars_file(&path).map_err(|err| {
+                if err.is::<crate::vars::VaultFile>() {
+                    crate::stats::Refusal::at(1, err)
+                } else {
+                    crate::stats::Refusal::or(4, err)
+                }
+            })?;
+            loaded.insert(path, file.clone());
+            file
+        });
+    }
+    Ok(files)
 }

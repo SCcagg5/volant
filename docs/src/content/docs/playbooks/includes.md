@@ -92,6 +92,27 @@ A `notify` in an included file that names no handler ends the run with exit code
 
 `include_vars` produces variables rather than steps, so it is neither static nor dynamic in this sense. It is an ordinary controller-side module, and what it reads lands at facts precedence.
 
+`include_vars` reads one file, named by `file:` or written as the free-form path, or every file of a directory, named by `dir:`. The two forms take different options, and giving options of both forms fails the task.
+
+A file is looked for in the places `include_vars` searches: `vars/` and then the directory itself, for a role and then for the playbook. A `dir:` is not searched for. A task of a role reads it under the role's `vars/`, and `dir: vars/x` names a directory of the role itself when that exists. Any other task reads it against the directory of the file that holds the task. An absolute path is used as it is.
+
+A directory is read in a fixed order: directories sorted by their full path as text, then the files of each directory sorted by name. Hidden files and directories are read, and links to directories are followed. A later file replaces the keys of an earlier one whole. A file with nothing in it adds nothing, and it is still listed in `ansible_included_var_files`.
+
+| Option | Meaning |
+|---|---|
+| `dir` | The directory to read. |
+| `depth` | How many levels to read, the directory being the first. `0`, the default, reads them all. |
+| `files_matching` | A regular expression searched in each file name, not in its path. Files that do not match are left out. |
+| `ignore_files` | A list of regular expressions, or one string of them split on white space. Each is anchored at the end of the name. Files that match are left out. |
+| `extensions` | The extensions a file may have, without the dot. The default is `yaml`, `yml` and `json`. The comparison is case-sensitive. |
+| `ignore_unknown_extensions` | Leave out a file with another extension. Without it, such a file fails the task. |
+| `name` | Put everything under this one variable. It also works for a single file. |
+| `hash_behaviour` | `merge` lays each variable over the variable of that name that the task already sees, mappings merged all the way down. Any other value replaces. |
+
+The result holds `ansible_facts` and `ansible_included_var_files`, the files in the order they were read. A task that reads a vaulted file is hidden like a `no_log` task: `-v` shows the censored line, and a loop item that read one shows `(censored due to no_log)`. The task runs in check mode, as it does in Ansible.
+
+A missing directory, a path that is not a directory, a file without a valid extension and a file that is not a mapping fail the task with `message` set, as in Ansible. A failure in a directory keeps the variables of the directories before the failing one in the result, but a failed task sets no variables. A file that cannot be parsed or decrypted raises the error instead, and the task has no result of its own. An option of the wrong type fails with Python's own sentence.
+
 ## Nesting limit
 
 A statement 32 levels deep is rejected. One counter covers role nesting, `import_role` inside a role's tasks and `import_tasks` inside an imported file, because a cycle can run through any mix of the three.
@@ -103,7 +124,7 @@ A statement 32 levels deep is rejected. One counter covers role nesting, `import
 - A failing include inside a loop prints the usual `failed: [host] (item=...)` line. Ansible prints only an `[ERROR]` on standard error.
 - `allow_duplicates: false` counts a role as run for a host when its tasks are brought in. The reference counts it when the host ran at least one of its tasks, so a role whose tasks all skip still runs again there.
 - `allow_duplicates: false` on an `import_role` compares the statements while the play compiles, and so a `when` on the earlier statement does not change the result for a host.
-- `include_vars` does not support `dir` and its six related options yet. A run that silently loaded none of a directory's variables would apply a playbook with defaults nobody wrote.
 - `include_vars: file=x.yml name=ns` is read as one raw argument rather than split into `key=value` pairs, the same limitation `import_tasks` has.
-- What `include_vars` produces sits one level above where Ansible puts it. You only notice with a name that a host variable also sets.
+- What `include_vars` produces sits one level above where Ansible puts it. You only notice with a name that a `set_fact` also wrote: Ansible lets the `set_fact` win in either order, and here the later write wins.
+- The text of a YAML syntax error in a file that `include_vars` reads is the parser's own, not ansible-core's `YAML parsing failed: ...`. The shape of the failure is the same.
 - A failing `include_vars` has `"failed": true` in its result.
