@@ -449,6 +449,32 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
+/// The links under `dir` whose target does not exist.
+fn dangling_links(dir: &Path, found: &mut Vec<PathBuf>) {
+    for entry in std::fs::read_dir(dir).expect("the directory lists") {
+        let path = entry.expect("the directory lists").path();
+        if path.is_symlink() {
+            if !path.exists() {
+                found.push(path);
+            }
+        } else if path.is_dir() {
+            dangling_links(&path, found);
+        }
+    }
+}
+
+/// `cargo package` cannot archive a link whose target is missing: a scenario names such a link in
+/// the `links` of its case.yml, and a fixture holds no other.
+#[test]
+fn no_tracked_fixture_is_a_dangling_link() {
+    let mut found = Vec::new();
+    dangling_links(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests"),
+        &mut found,
+    );
+    assert!(found.is_empty(), "dangling links in tests: {found:?}");
+}
+
 /// The `links` of a case in a copy: each path becomes a link to its target, which may not exist.
 fn make_links(copy: &Path, links: &[(String, String)]) {
     for (path, target) in links {
