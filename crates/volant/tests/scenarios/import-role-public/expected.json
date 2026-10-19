@@ -1,0 +1,6 @@
+[
+  {
+    "code": 0,
+    "stdout": "\nPLAY [h1] **********************************************************************\n\nTASK [before] ******************************************************************\nok: [h1] => {\n    \"msg\": \"before: rdef=unset rvar=unset\"\n}\n\nTASK [r : show r] **************************************************************\nok: [h1] => {\n    \"msg\": \"in r rdef=r-default rvar=r-var\"\n}\n\nTASK [r : change something] ****************************************************\nchanged: [h1] => {\n    \"msg\": \"changing\"\n}\n\nTASK [after the private import] ************************************************\nok: [h1] => {\n    \"msg\": \"after: rdef=unset rvar=unset\"\n}\n\nTASK [q : show q] **************************************************************\nok: [h1] => {\n    \"msg\": \"in q rdef=unset rvar=unset qdef=q-default\"\n}\n\nTASK [after the public import] *************************************************\nok: [h1] => {\n    \"msg\": \"after q: qdef=q-default qvar=q-var\"\n}\n\nRUNNING HANDLER [r : r handler] ************************************************\nok: [h1] => {\n    \"msg\": \"r handler ran\"\n}\n\nPLAY RECAP *********************************************************************\nh1                         : ok=7    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   \n\n"
+  }
+]

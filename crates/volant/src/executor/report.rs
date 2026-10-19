@@ -3,14 +3,16 @@
 
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
-use volant_protocol::TaskResult;
+use volant_protocol::{TaskResult, failed_when_decides};
 
 use crate::playbook::{Flag, PlayTask};
 use crate::render::{DIFF_KEY, Dump, ERROR_KEY, ErrorBlock};
 
 use super::coordinator::Event;
 use super::debugger::{self, Answer, Hold, Kind};
-use super::run::{RetryLine, classify, empty_loop_result, loops, registered_value};
+use super::run::{
+    RetryLine, asks_to_be_hidden, classify, classify_as, empty_loop_result, loops, registered_value,
+};
 
 /// Sends the result lines of one task and its `TaskDone`. Returns the result a rescue would be
 /// given as `ansible_failed_result` when the task failed for good, and `None` when it did not:
@@ -66,16 +68,24 @@ pub(super) async fn report_task(
             .flatten()
             .unwrap_or_else(|| task.ignores_errors())
     };
-    // Whether a failed item stands: one that its own `ignore_errors` did not cover.
+    // Whether a failed item stands: one that its own `ignore_errors` did not cover. An item fails
+    // the task by its `failed_when_result` when one of the items has it: a result whose retries
+    // ran out says `failed: true` and passes under `failed_when: false`.
+    let decided = failed_when_decides(results.iter().map(|(_, r)| r));
     let failure_stands = results
         .iter()
         .enumerate()
-        .any(|(i, (_, r))| r.failed() && !ignores(i));
-    let any_failed = results.iter().any(|(_, r)| r.failed());
+        .any(|(i, (_, r))| r.is_failed_among(decided) && !ignores(i));
+    let any_failed = results.iter().any(|(_, r)| r.is_failed_among(decided));
     let aggregate = is_loop.then(|| aggregate(task, results, dump, any_failed, censored));
     // The result the debugger judges: the task's own, or the loop's aggregate.
     let judged = match &aggregate {
-        Some((aggregate, _)) => Some(classify(aggregate, !failure_stands, rescuable)),
+        Some((aggregate, _)) => Some(classify_as(
+            aggregate,
+            any_failed,
+            !failure_stands,
+            rescuable,
+        )),
         None => results
             .first()
             .map(|(_, r)| classify(r, ignores(0), rescuable)),
@@ -122,12 +132,12 @@ pub(super) async fn report_task(
                     name: names.get(i).cloned().unwrap_or_else(|| task.name.clone()),
                     left: *left,
                     result: attempt.clone(),
-                    censored,
+                    censored: censored || asks_to_be_hidden(attempt),
                 })
                 .await;
         }
         let outcome = classify(r, ignores(i), rescuable);
-        if r.failed() && first_failure.is_none() {
+        if r.is_failed_among(decided) && first_failure.is_none() {
             first_failure = Some(r.clone());
         }
         let label = labels.get(i).cloned().flatten();
@@ -167,7 +177,10 @@ pub(super) async fn report_task(
                 dump,
                 show: true,
                 counts: !is_loop,
-                censored,
+                // A result that asks to be hidden (`include_vars` of a vaulted file) is censored
+                // on its own line whatever the task's `no_log` says. Its error block is not: the
+                // reference words that block from the task's own `no_log` alone.
+                censored: censored || asks_to_be_hidden(r),
                 delegate: delegate.map(str::to_string),
                 error,
             })
@@ -178,7 +191,7 @@ pub(super) async fn report_task(
     }
     let mut failure = first_failure.map(|r| without_error(&r));
     if let Some((aggregate, show)) = aggregate {
-        let outcome = classify(&aggregate, !failure_stands, rescuable);
+        let outcome = classify_as(&aggregate, any_failed, !failure_stands, rescuable);
         // Measured on ansible-core 2.19.12: a rescue reading `ansible_failed_result.results`
         // after a loop whose second item failed sees all three items. The aggregate is the
         // whole task's result, which is what the reference hands over - an item's own result

@@ -12,8 +12,8 @@ use crate::roles::{RoleEntry, RoleSearch, RoleVars};
 use crate::template::Templar;
 
 use super::builder::{Builder, Seen};
-use super::include::refuse_public;
-use super::inherit::{extend, layered, merge};
+use super::include::role_flag;
+use super::inherit::{extend, lay_under, merge};
 use super::model::{Compiled, Handler, Section, Step, StepKind};
 use super::tags::TagSelection;
 /// The check the reference inserts in front of a role that ships `meta/argument_specs.yml`.
@@ -99,11 +99,7 @@ pub(super) fn unknown_options(
 
 /// The role one `import_role` task names, read out of its arguments.
 pub(super) fn import_role_entry(task: &PlayTask) -> anyhow::Result<RoleEntry> {
-    // Measured: the reference takes these nine and refuses anything else. The last three name
-    // work this release does not do - nothing dedups an `import_role`, the argument-spec check
-    // has no off switch, and `public` exports nothing of its own - so they are refused rather
-    // than accepted and forgotten. `public` is refused by value and not by presence: see
-    // `refuse_public`.
+    // Measured: the reference takes these nine and refuses anything else, `apply` among them.
     unknown_options(
         "import_role",
         &task.args,
@@ -118,27 +114,32 @@ pub(super) fn import_role_entry(task: &PlayTask) -> anyhow::Result<RoleEntry> {
             "allow_duplicates",
             "rolespec_validate",
         ],
-        &["allow_duplicates", "rolespec_validate"],
+        &[],
     )?;
-    refuse_public("import_role", &task.args)?;
     let text = |key: &str| task.args.get(key).and_then(Value::as_str);
     let name = text("name")
         .or_else(|| text("role"))
         .ok_or_else(|| anyhow::anyhow!("'import_role' takes a role name"))?;
     let from = |key: &str, fallback: &str| text(key).unwrap_or(fallback).to_string();
     Ok(RoleEntry {
-        name: name.to_string(),
-        from: crate::roles::RoleFrom {
-            tasks: from("tasks_from", "main"),
-            vars: from("vars_from", "main"),
-            defaults: from("defaults_from", "main"),
-            handlers: from("handlers_from", "main"),
-        },
         // An `import_role` takes no free keys: everything it says is an argument of the
         // statement, and what it hands the role travels in the task's own `vars:`, which the
         // merge already carries down to every task of the role.
         params: Map::new(),
         keywords: PlayTask::empty(),
+        // An import lends its variables unless it says otherwise.
+        public: role_flag(&task.args, "public", true)?,
+        validate: role_flag(&task.args, "rolespec_validate", true)?,
+        unique: !role_flag(&task.args, "allow_duplicates", true)?,
+        ..RoleEntry::named(
+            name,
+            crate::roles::RoleFrom {
+                tasks: from("tasks_from", "main"),
+                vars: from("vars_from", "main"),
+                defaults: from("defaults_from", "main"),
+                handlers: from("handlers_from", "main"),
+            },
+        )
     })
 }
 
@@ -197,6 +198,8 @@ pub(crate) fn compile(
         depth: 0,
         include_depth: 0,
         selection,
+        exporting: true,
+        imported: Vec::new(),
     };
     // The play's own tags are the outermost layer of the merge, so every task under it - in a
     // role, in an imported file, at any block depth - carries them for the selection and for
@@ -223,6 +226,14 @@ pub(crate) fn compile(
         ignore_errors: play.ignore_errors.clone(),
         ignore_unreachable: play.ignore_unreachable,
         connect: play.connect.clone(),
+        // The templates a play wrote for the same keywords. Its `become` stays out, like the
+        // literal one, and `gather_facts` and `force_handlers` are read when the play starts.
+        deferred: crate::playbook::Deferred {
+            r#become: None,
+            gather_facts: None,
+            force_handlers: None,
+            ..play.deferred.clone()
+        },
         ..PlayTask::empty()
     };
     // `gather_facts` is the play's own first task and nothing else: the reference's `setup`
@@ -253,6 +264,10 @@ pub(crate) fn compile(
         },
         run_once: None,
         when: play.gather_when.clone(),
+        deferred: crate::playbook::Deferred {
+            run_once: None,
+            ..empty.deferred.clone()
+        },
         args: gather_args(play),
         origin: play.origin.clone(),
         ..empty.clone()
@@ -312,17 +327,18 @@ pub(crate) fn compile(
     // folded once here rather than accumulated as the list is walked, and each role's own values
     // are laid back over them for its own steps. Measured both ways: a role sees a variable only
     // a later role sets, and a role whose own `vars` name it keeps its own value.
+    // Only a public role lends: an `import_role` that says `public: false` keeps its variables
+    // to its own tasks, measured.
     let mut exported = RoleVars::default();
-    for role in &builder.roles {
+    for role in builder.roles.iter().filter(|role| role.public) {
         extend(&mut exported.defaults, &role.defaults);
     }
-    for role in &builder.roles {
+    for role in builder.roles.iter().filter(|role| role.public) {
         extend(&mut exported.vars, &role.vars);
     }
     let mut roles = builder.roles;
     for role in &mut roles {
-        role.defaults = layered(&exported.defaults, &role.defaults);
-        role.vars = layered(&exported.vars, &role.vars);
+        lay_under(role, &exported, None);
     }
     let mut steps = builder.steps;
     let mut handlers = builder.handlers;

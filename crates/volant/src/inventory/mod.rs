@@ -303,11 +303,12 @@ impl Inventory {
     /// or intersection has something to start from, rather than starting from nothing.
     pub fn resolve(&self, pattern: &str) -> Resolution {
         let mut res = Resolution::default();
+        let group_names: HashSet<&str> = self.groups.iter().map(|g| g.name.as_str()).collect();
         for name in self
             .hosts
             .iter()
             .map(|h| h.name.as_str())
-            .filter(|n| self.groups.iter().any(|g| g.name == *n))
+            .filter(|n| group_names.contains(n))
         {
             res.warnings
                 .push(format!("Found both group and host with same name: {name}"));
@@ -333,9 +334,10 @@ impl Inventory {
             regular.push("all");
         }
         let mut selected: Vec<String> = Vec::new();
+        let mut chosen: HashSet<String> = HashSet::new();
         for name in regular {
             for h in self.matching(name, &mut res) {
-                if !selected.contains(&h) {
+                if chosen.insert(h.clone()) {
                     selected.push(h);
                 }
             }
@@ -348,14 +350,7 @@ impl Inventory {
             let drop: HashSet<String> = self.matching(name, &mut res).into_iter().collect();
             selected.retain(|h| !drop.contains(h));
         }
-        for name in selected {
-            res.hosts
-                .push(if self.hosts.iter().any(|h| h.name == name) {
-                    self.host_with_vars(&name)
-                } else {
-                    implicit_localhost(&name)
-                });
-        }
+        res.hosts = self.hosts_with_vars(&selected);
         res
     }
 
@@ -428,6 +423,11 @@ impl Inventory {
             .iter()
             .map(|h| h.name.as_str())
             .find(|n| is_localhost(n))
+    }
+
+    /// The names `all` selects, in the order `resolve("all")` gives them, without their variables.
+    pub fn all_host_names(&self) -> Vec<String> {
+        self.all_hosts()
     }
 
     /// Group vars from the outermost group to the innermost, then host vars on top.

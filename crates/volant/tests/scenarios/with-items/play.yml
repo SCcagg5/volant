@@ -5,3 +5,19 @@
       debug:
         msg: "{{ item }}"
       with_items: [1, [2, 3], x]
+    - name: A scalar is one item
+      debug:
+        msg: "{{ item | to_json }}"
+      with_items: abc
+    - name: A number is one item
+      debug:
+        msg: "{{ item | to_json }}"
+      with_items: 5
+    - name: A mapping is one item
+      debug:
+        msg: "{{ item | to_json }}"
+      with_items: {a: 1}
+    - name: None is one item
+      debug:
+        msg: "{{ item | to_json }}"
+      with_items: "{% if false %}x{% endif %}"

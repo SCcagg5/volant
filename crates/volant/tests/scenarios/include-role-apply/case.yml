@@ -1,0 +1,8 @@
+# `apply:` on include_role puts its keywords on the tasks and the handlers of the role.
+runs:
+  - args: [-i, inv.ini, apply.yml]
+  - args: [-i, inv.ini, apply.yml, --tags, x]
+  - args: [-i, inv.ini, apply.yml, --skip-tags, x]
+  - args: [-i, inv.ini, apply.yml, --tags, nosuch]
+  - args: [-i, inv.ini, validated.yml]
+  - args: [-i, inv.ini, validated.yml, --tags, x]

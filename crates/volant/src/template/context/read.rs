@@ -206,7 +206,7 @@ impl Context {
 /// The strings of `value` that hold a template.
 fn collect_templates<'a>(value: &'a Value, out: &mut Vec<&'a str>) {
     match value {
-        Value::String(text) if Templar::is_template(text) => out.push(text),
+        Value::String(text) if Templar::is_stored_template(text) => out.push(text),
         Value::Array(items) => items.iter().for_each(|v| collect_templates(v, out)),
         Value::Object(map) => map.values().for_each(|v| collect_templates(v, out)),
         _ => {}

@@ -59,7 +59,7 @@ pub const SET_FACT: ModuleSpec = ModuleSpec {
 pub const INCLUDE_VARS: ModuleSpec = ModuleSpec {
     name: "include_vars",
     free_form: true,
-    summary: "Read a file of variables and set them on the host, for the rest of the run.",
+    summary: "Read a file or a directory of variables and set them on the host, for the rest of the run.",
     args: &[],
     validated_as: None,
 };

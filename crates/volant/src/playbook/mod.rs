@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Playbook loading: plays and tasks, with the keywords this release supports.
 
+mod deferred;
 mod fields;
 mod import;
 mod keywords;
@@ -10,6 +11,7 @@ mod origin;
 mod play;
 mod task;
 
+pub use deferred::Deferred;
 pub use fields::Debugger;
 pub use keywords::{BECOME_METHODS, Flag, META, is_meta};
 pub(crate) use keywords::{
@@ -17,7 +19,7 @@ pub(crate) use keywords::{
 };
 pub(crate) use load::{TaskFileRefused, base_dir, parse_handlers_file, parse_tasks_file};
 pub use load::{load, parse};
-pub use model::{Block, HandlerTask, Play, PlayTask, Playbook, TaskOrBlock, Throttle};
+pub use model::{Apply, Block, HandlerTask, Play, PlayTask, Playbook, TaskOrBlock, Throttle};
 pub use origin::Origin;
 pub(crate) use play::parse_role_entries;
 

@@ -1,0 +1,10 @@
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: public
+      include_role:
+        name: r
+        public: true
+    - name: inventory beats a default and loses to the vars file
+      debug:
+        msg: "{{ inventory_hostname }}: rdef={{ rdef }} rvar={{ rvar }}"

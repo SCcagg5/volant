@@ -1,0 +1,30 @@
+- hosts: "{{ groups['one'] | first }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: a
+
+- name: Named
+  hosts: "{{ pick | default('o1') }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: b
+
+- hosts: "{{ groups['one'] }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: c
+
+- hosts: "{{ groups['one'] | join(',') }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: d
+
+- hosts: ["{{ groups['one'] | first }}", "{{ 'o1' }}"]
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: e

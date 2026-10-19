@@ -5,7 +5,7 @@ use std::sync::Arc;
 use rstest::rstest;
 use serde_json::{Map, Value, json};
 
-use super::include::include_role_options;
+use super::include::{include_options, include_role_entry};
 use super::*;
 use crate::inventory::Host;
 use crate::playbook::{Debugger, PlayTask, parse};
@@ -710,6 +710,7 @@ fn expansion(dir: &Path, play: &str, sel: &TagSelection) -> Option<anyhow::Resul
             what: String::new(),
             vars: IncludeParams::default(),
             label: None,
+            role_id: None,
         };
         let expanded = match expand_include(&base, &parent, &request) {
             Ok(expanded) => expanded,
@@ -1137,20 +1138,176 @@ fn the_meta_actions_are_sorted_and_free_of_duplicates() {
     assert_eq!(names, sorted);
 }
 
-/// `public` is judged by what it is worth, not by being written.
-#[test]
-fn public_is_refused_by_value_and_not_by_presence() {
-    let asked = |value: Value| {
-        let mut args = Map::new();
-        args.insert("name".into(), json!("base"));
-        args.insert("public".into(), value);
-        include_role_options(&args)
+/// Every option of the four role and task statements, measured on ansible-core 2.19.12.
+/// The default of `public` is the one thing that differs between an include and an import.
+#[rstest]
+#[case::include_defaults("include_role", json!({"name": "r"}), Ok([false, true, false]))]
+#[case::include_role_alias("include_role", json!({"role": "r"}), Ok([false, true, false]))]
+#[case::include_file_selectors(
+    "include_role",
+    json!({"name": "r", "tasks_from": "a", "vars_from": "b", "defaults_from": "c", "handlers_from": "d"}),
+    Ok([false, true, false])
+)]
+#[case::include_public("include_role", json!({"name": "r", "public": true}), Ok([true, true, false]))]
+#[case::include_public_word("include_role", json!({"name": "r", "public": "yes"}), Ok([true, true, false]))]
+#[case::include_public_false("include_role", json!({"name": "r", "public": false}), Ok([false, true, false]))]
+#[case::include_public_number("include_role", json!({"name": "r", "public": 1}), Ok([true, true, false]))]
+#[case::include_no_duplicates(
+    "include_role",
+    json!({"name": "r", "allow_duplicates": false}),
+    Ok([false, true, true])
+)]
+#[case::include_duplicates_word(
+    "include_role",
+    json!({"name": "r", "allow_duplicates": "no"}),
+    Ok([false, true, true])
+)]
+#[case::include_duplicates("include_role", json!({"name": "r", "allow_duplicates": true}), Ok([false, true, false]))]
+#[case::include_no_validation(
+    "include_role",
+    json!({"name": "r", "rolespec_validate": false}),
+    Ok([false, false, false])
+)]
+#[case::include_apply("include_role", json!({"name": "r", "apply": {"tags": ["t"]}}), Ok([false, true, false]))]
+#[case::include_typo("include_role", json!({"name": "r", "typo": 1}), Err("Invalid options for include_role: typo"))]
+#[case::include_bad_public(
+    "include_role",
+    json!({"name": "r", "public": "maybe"}),
+    Err("Error processing keyword 'public': The value 'maybe' could not be converted to 'bool'.")
+)]
+#[case::include_bad_duplicates(
+    "include_role",
+    json!({"name": "r", "allow_duplicates": 2}),
+    Err("Error processing keyword 'allow_duplicates': The value 2 could not be converted to 'bool'.")
+)]
+#[case::include_bad_validation(
+    "include_role",
+    json!({"name": "r", "rolespec_validate": [true]}),
+    Err("Error processing keyword 'rolespec_validate': The value [True] could not be converted to 'bool'.")
+)]
+#[case::include_no_name("include_role", json!({"tasks_from": "a"}), Err("'include_role' takes a role name"))]
+#[case::import_defaults("import_role", json!({"name": "r"}), Ok([true, true, false]))]
+#[case::import_file_selectors(
+    "import_role",
+    json!({"name": "r", "tasks_from": "a", "vars_from": "b", "defaults_from": "c", "handlers_from": "d"}),
+    Ok([true, true, false])
+)]
+#[case::import_private("import_role", json!({"name": "r", "public": false}), Ok([false, true, false]))]
+#[case::import_no_duplicates(
+    "import_role",
+    json!({"name": "r", "allow_duplicates": false}),
+    Ok([true, true, true])
+)]
+#[case::import_no_validation(
+    "import_role",
+    json!({"name": "r", "rolespec_validate": false}),
+    Ok([true, false, false])
+)]
+#[case::import_apply("import_role", json!({"name": "r", "apply": {"tags": ["t"]}}), Err("Invalid options for import_role: apply"))]
+#[case::import_bad_public(
+    "import_role",
+    json!({"name": "r", "public": "maybe"}),
+    Err("Error processing keyword 'public': The value 'maybe' could not be converted to 'bool'.")
+)]
+fn role_statement_options_are_read_like_the_reference(
+    #[case] statement: &str,
+    #[case] args: Value,
+    #[case] expected: Result<[bool; 3], &str>,
+) {
+    let Value::Object(args) = args else {
+        panic!("arguments are a mapping");
     };
-    assert!(asked(json!(false)).is_ok());
-    assert!(asked(json!("no")).is_ok());
-    assert!(asked(json!(true)).is_err());
-    assert!(asked(json!("yes")).is_err());
-    // Not knowing is not the same as being told no: an export this release cannot do is
-    // refused rather than guessed at.
-    assert!(asked(json!("{{ maybe }}")).is_err());
+    let read = if statement == "include_role" {
+        include_role_entry(&args)
+    } else {
+        flatten::import_role_entry(&PlayTask {
+            args,
+            ..PlayTask::empty()
+        })
+    };
+    match (read, expected) {
+        (Ok(entry), Ok(want)) => assert_eq!([entry.public, entry.validate, entry.unique], want),
+        (Err(err), Err(want)) => assert!(format!("{err:#}").contains(want), "{err:#}"),
+        (got, want) => panic!("{got:?} against {want:?}"),
+    }
+}
+
+/// `include_tasks` takes the file, its free-form spelling and `apply`; `import_tasks` takes the
+/// first two and refuses the third.
+#[rstest]
+#[case::file(json!({"file": "a.yml"}), true)]
+#[case::raw(json!({"_raw_params": "a.yml"}), true)]
+#[case::apply(json!({"file": "a.yml", "apply": {"tags": ["t"]}}), true)]
+#[case::typo(json!({"file": "a.yml", "typo": 1}), false)]
+fn include_tasks_takes_file_and_apply(#[case] args: Value, #[case] accepted: bool) {
+    let Value::Object(args) = args else {
+        panic!("arguments are a mapping");
+    };
+    assert_eq!(include_options("include_tasks", &args).is_ok(), accepted);
+}
+
+/// A templatable keyword comes down as the layer nearest the task wrote it, in either form, and
+/// a layer that wrote nothing is looked through: play, block and task in each of three states.
+#[rstest]
+#[case::escalation("become", "true")]
+#[case::no_log("no_log", "true")]
+#[case::run_once("run_once", "true")]
+#[case::any_errors_fatal("any_errors_fatal", "true")]
+#[case::ignore_unreachable("ignore_unreachable", "true")]
+#[case::delegate_facts("delegate_facts", "true")]
+#[case::timeout("timeout", "3")]
+fn the_layer_nearest_the_task_wins_in_either_form(#[case] key: &str, #[case] literal: &str) {
+    let typed = |task: &PlayTask| match key {
+        "become" => json!(task.r#become),
+        "no_log" => json!(task.no_log),
+        "run_once" => json!(task.run_once),
+        "any_errors_fatal" => json!(task.any_errors_fatal),
+        "ignore_unreachable" => json!(task.ignore_unreachable),
+        "delegate_facts" => json!(task.delegate_facts),
+        _ => json!(task.timeout),
+    };
+    let waiting = |task: &PlayTask| match key {
+        "become" => task.deferred.r#become.clone(),
+        "no_log" => task.deferred.no_log.clone(),
+        "run_once" => task.deferred.run_once.clone(),
+        "any_errors_fatal" => task.deferred.any_errors_fatal.clone(),
+        "ignore_unreachable" => task.deferred.ignore_unreachable.clone(),
+        "delegate_facts" => task.deferred.delegate_facts.clone(),
+        _ => task.deferred.timeout.clone(),
+    };
+    // `None` writes nothing, `Some(true)` a template and `Some(false)` a literal.
+    let line = |layer: Option<bool>| match layer {
+        None => String::new(),
+        Some(true) => format!("{key}: \"{{{{ v }}}}\""),
+        Some(false) => format!("{key}: {literal}"),
+    };
+    let states = [None, Some(true), Some(false)];
+    for play in states {
+        // A play has no `delegate_facts`, nor a `become` the merge reads: the executor reads it.
+        if matches!(key, "delegate_facts" | "become") && play.is_some() {
+            continue;
+        }
+        for block in states {
+            for task in states {
+                let text = format!(
+                    "- hosts: all\n  gather_facts: false\n  {}\n  tasks:\n    - block:\n        - command: echo\n          {}\n      {}\n",
+                    line(play),
+                    line(task),
+                    line(block)
+                );
+                let step = &compiled(&text).steps[0];
+                let (want_typed, want_waiting) = match task.or(block).or(play) {
+                    None => (Value::Null, None),
+                    Some(true) => (Value::Null, Some("{{ v }}".to_string())),
+                    Some(false) if key == "timeout" => (json!(3), None),
+                    Some(false) => (json!(true), None),
+                };
+                assert_eq!(
+                    (typed(&step.task), waiting(&step.task)),
+                    (want_typed, want_waiting),
+                    "{key}: play {play:?}, block {block:?}, task {task:?}"
+                );
+            }
+        }
+    }
 }

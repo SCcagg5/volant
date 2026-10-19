@@ -1,0 +1,2 @@
+role_target: "{{ other }}"
+other: w2

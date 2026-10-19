@@ -1,0 +1,3 @@
+- name: r handler
+  debug:
+    msg: r handler ran

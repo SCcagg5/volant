@@ -45,6 +45,13 @@ pub(crate) fn drop_internal_keys(result: &mut TaskResult) {
     });
 }
 
+/// Whether a result carries the `_ansible_no_log` an action sets when it read what must not be
+/// shown (`include_vars` of a vaulted file): every line that prints the result then prints the
+/// censored body, a retry line included.
+pub(in crate::executor) fn asks_to_be_hidden(result: &TaskResult) -> bool {
+    result.0.get("_ansible_no_log") == Some(&Value::Bool(true))
+}
+
 /// The output a line of `stdout` or `stderr` stands for past [`MAX_VALUES`] lines. A command may
 /// print millions of ordinary lines, which ansible-core splits whole; what the bound stops is a
 /// frame of near-empty lines, two bytes each on the wire. At 32 bytes a line, the most a 64 MiB
@@ -201,7 +208,18 @@ pub(in crate::executor) fn classify(
     ignore_errors: bool,
     rescuable: bool,
 ) -> Outcome {
-    if result.failed() {
+    classify_as(result, result.is_failed(), ignore_errors, rescuable)
+}
+
+/// [`classify`] for a result whose failure the caller judged: a loop's aggregate says `failed`
+/// when an item did, and the task fails only when [`TaskResult::is_failed`] says so of an item.
+pub(in crate::executor) fn classify_as(
+    result: &TaskResult,
+    failed: bool,
+    ignore_errors: bool,
+    rescuable: bool,
+) -> Outcome {
+    if failed {
         if ignore_errors {
             Outcome::Ignored
         } else if rescuable {

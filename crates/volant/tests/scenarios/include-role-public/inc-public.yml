@@ -1,0 +1,8 @@
+- name: public, from another defaults file
+  include_role:
+    name: r
+    public: true
+    defaults_from: other
+- name: in the file
+  debug:
+    msg: "rdef={{ rdef | default('unset') }}"

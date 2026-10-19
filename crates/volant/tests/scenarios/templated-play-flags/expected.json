@@ -1,0 +1,4 @@
+{
+  "code": 2,
+  "stdout": "\nPLAY [h1] **********************************************************************\n\nTASK [Notify] ******************************************************************\nchanged: [h1]\n\nTASK [Fail] ********************************************************************\n[ERROR]: Task failed: Action failed: boom\nOrigin: <golden-tmp>/play.yml:12:7\n\n10       changed_when: true\n11       notify: Clean up\n12     - name: Fail\n         ^ column 7\n\nfatal: [h1]: FAILED! => {\"changed\": false, \"msg\": \"boom\"}\n\nRUNNING HANDLER [Clean up] *****************************************************\nok: [h1] => {\n    \"msg\": \"handled\"\n}\n\nPLAY RECAP *********************************************************************\nh1                         : ok=2    changed=1    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0   \n\n"
+}

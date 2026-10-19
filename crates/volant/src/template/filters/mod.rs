@@ -143,7 +143,7 @@ pub fn register(
         add_filter(env, "batch", f::batch);
         add_filter(env, "slice", f::slice);
         add_text_filter(env, "sum", f::sum);
-        add_filter(env, "indent", f::indent);
+        add_filter(env, "indent", super::pymethods::limits::indent);
         add_filter(env, "select", f::select);
         add_filter(env, "reject", f::reject);
         add_filter(env, "selectattr", f::selectattr);
@@ -261,41 +261,20 @@ pub fn register(
     super::test_plugins::register(env);
     add_test(env, "truthy", |v: Value| truthy(&json(&v)));
     add_test(env, "falsy", |v: Value| !truthy(&json(&v)));
-    add_test(env, "match", |v: Value, pattern: String, kwargs: Kwargs| {
-        regex_test(&v, &pattern, true, kwargs)
-    });
-    add_test(
-        env,
-        "search",
-        |v: Value, pattern: String, kwargs: Kwargs| regex_test(&v, &pattern, false, kwargs),
-    );
-    add_test(env, "regex", |v: Value, pattern: String, kwargs: Kwargs| {
-        regex_test(&v, &pattern, false, kwargs)
-    });
+    for name in ["match", "search", "regex"] {
+        add_test(
+            env,
+            name,
+            move |v: Value, rest: Rest<Value>, kwargs: Kwargs| regex_test(&v, &rest, &kwargs, name),
+        );
+    }
     add_test(env, "contains", |seq: Value, item: Value| {
         seq.try_iter().is_ok_and(|mut it| it.any(|x| x == item))
     });
 
     super::lookups::register(env, base_dir, bridge);
 
-    // Python's `str` and `dict` methods (`.split()`, `.startswith()`, `.keys()`...), which real
-    // roles call on values. Anything neither `pycompat` nor this engine has must still fail by
-    // name, not silently: `pycompat` answers a method it does not know with a bare
-    // `UnknownMethod`, and an error of its own (a bad argument) keeps its detail.
-    env.set_unknown_method_callback(|state, value, method, args| {
-        minijinja_contrib::pycompat::unknown_method_callback(state, value, method, args).map_err(
-            |e| {
-                if e.kind() == ErrorKind::UnknownMethod && e.detail().is_none() {
-                    Error::new(
-                        ErrorKind::UnknownMethod,
-                        format!("method {method} is not available yet"),
-                    )
-                } else {
-                    e
-                }
-            },
-        )
-    });
+    super::pymethods::register(env);
 }
 
 fn json(v: &Value) -> serde_json::Value {

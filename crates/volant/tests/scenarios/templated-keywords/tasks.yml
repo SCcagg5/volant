@@ -1,0 +1,31 @@
+- hosts: h1,h2
+  gather_facts: false
+  vars:
+    flag_t: true
+    flag_f: false
+  tasks:
+    - name: Hidden
+      debug: {msg: secret}
+      no_log: "{{ flag_t }}"
+    - name: Shown
+      debug: {msg: public}
+      no_log: "{{ flag_f }}"
+    - name: Once
+      debug: {msg: once}
+      run_once: "{{ flag_t }}"
+    - name: Every host
+      debug: {msg: every}
+      run_once: "{{ flag_f }}"
+    - name: Facts stay on the host
+      set_fact: {kept: here}
+      delegate_to: h2
+      delegate_facts: "{{ flag_f }}"
+      run_once: true
+    - name: Facts go to the delegate
+      set_fact: {moved: there}
+      delegate_to: h2
+      delegate_facts: "{{ flag_t }}"
+      run_once: true
+    - name: Read back
+      debug:
+        msg: "{{ inventory_hostname }} kept={{ kept | default('-') }} moved={{ moved | default('-') }}"
