@@ -360,7 +360,7 @@ impl Drop for Lock {
 
 /// Whether a process `pid` exists. One that belongs to another user counts.
 #[cfg(unix)]
-fn alive(pid: i32) -> bool {
+pub(crate) fn alive(pid: i32) -> bool {
     if pid <= 0 {
         return false;
     }
@@ -370,7 +370,7 @@ fn alive(pid: i32) -> bool {
 }
 
 #[cfg(not(unix))]
-fn alive(_: i32) -> bool {
+pub(crate) fn alive(_: i32) -> bool {
     true
 }
 
