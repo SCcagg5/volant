@@ -13993,5 +13993,266 @@
       "template": "{{ ('{:.70000f}'.format(1.5)) | length }}"
     },
     "result": 70002
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys([]) }}"
+    },
+    "result": {}
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(['a', 'b']) }}"
+    },
+    "result": {
+      "a": null,
+      "b": null
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(['a', 'b'], 0) }}"
+    },
+    "result": {
+      "a": 0,
+      "b": 0
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys('abc', 1) }}"
+    },
+    "result": {
+      "a": 1,
+      "b": 1,
+      "c": 1
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(('a', 'b'), 1) }}"
+    },
+    "result": {
+      "a": 1,
+      "b": 1
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys({'x': 1, 'y': 2}, 5) }}"
+    },
+    "result": {
+      "x": 5,
+      "y": 5
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(['a', 'a', 'b'], 1) }}"
+    },
+    "result": {
+      "a": 1,
+      "b": 1
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(range(3), 'x') }}"
+    },
+    "result": {
+      "0": "x",
+      "1": "x",
+      "2": "x"
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys([1, 1.0, true], 'x') }}"
+    },
+    "result": {
+      "1": "x"
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys('a b c'.split()) }}"
+    },
+    "result": {
+      "a": null,
+      "b": null,
+      "c": null
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(['é', 'z']) }}"
+    },
+    "result": {
+      "z": null,
+      "é": null
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(x) | length }}",
+      "vars": {
+        "x": [
+          "a",
+          "b",
+          "a"
+        ]
+      }
+    },
+    "result": 2
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(x, 0) | dict2items }}",
+      "vars": {
+        "x": [
+          "a",
+          "b"
+        ]
+      }
+    },
+    "result": [
+      {
+        "key": "a",
+        "value": 0
+      },
+      {
+        "key": "b",
+        "value": 0
+      }
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(['a', 'b'], 0) | combine({'c': 1}) }}"
+    },
+    "result": {
+      "a": 0,
+      "b": 0,
+      "c": 1
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(['a', 'b'], 0).keys() | list }}"
+    },
+    "result": [
+      "a",
+      "b"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(['a', 'b'], 0)['a'] }}"
+    },
+    "result": 0
+  },
+  {
+    "case": {
+      "template": ">{% set d = dict.fromkeys(['a']) %}{% set _ = d.update({'b': 1}) %}{{ d }}"
+    },
+    "result": ">{'a': None, 'b': 1}"
+  },
+  {
+    "case": {
+      "template": ">{% set d = dict.fromkeys(['a', 'b'], []) %}{% set _ = d.a.append(1) %}{{ d }}"
+    },
+    "result": ">{'a': [1], 'b': [1]}"
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys is defined }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys([[1]]) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: unhashable type: '_AnsibleLazyTemplateList'"
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys([{'a': 1}]) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: unhashable type: '_AnsibleLazyTemplateDict'"
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(5) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: 'int' object is not iterable"
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(none) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: 'NoneType' object is not iterable"
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(true) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: 'bool' object is not iterable"
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys() }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: fromkeys expected at least 1 argument, got 0"
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(1, 2, 3) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: fromkeys expected at most 2 arguments, got 3"
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(['a'], value=1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: dict.fromkeys() takes no keyword arguments"
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(iterable=['a']) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: dict.fromkeys() takes no keyword arguments"
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(nope) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': 'nope' is undefined"
+  },
+  {
+    "case": {
+      "template": "{{ dict.fromkeys(['a'], nope) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': 'nope' is undefined"
+  },
+  {
+    "case": {
+      "template": "{{ {}.fromkeys([1, 1.0, true], 'x') }}"
+    },
+    "result": {
+      "1": "x"
+    }
+  },
+  {
+    "case": {
+      "template": "{{ {}.fromkeys([[1]]) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: unhashable type: '_AnsibleLazyTemplateList'"
+  },
+  {
+    "case": {
+      "template": "{{ {}.fromkeys(5) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: 'int' object is not iterable"
   }
 ]
