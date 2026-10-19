@@ -357,6 +357,16 @@ pub(crate) fn possibly_all_template(text: &str) -> bool {
             && ["%}", "}}", "#}"].iter().any(|m| text.ends_with(m)))
 }
 
+/// Whether the reference's `FREEFORM_ACTIONS` holds this module: `command`, `shell`, `raw` and
+/// `script`, builtin or legacy spelled, and the two `ansible.windows` ones. A string argument of
+/// these is read with `parse_kv` and `check_raw`: only the command options leave the line.
+pub(super) fn is_command_line(module: &str) -> bool {
+    FREE_FORM_COLLECTION_MODULES.contains(&module)
+        || native(module).is_some_and(|m| m.free_form)
+        || crate::action_plugins::kind(module)
+            == Some(crate::action_plugins::Kind::Bridged("script"))
+}
+
 /// Whether the module's string form is one command line rather than `key=value` pairs.
 ///
 /// The three registries answer for their own rows, so a module moving between them keeps the
