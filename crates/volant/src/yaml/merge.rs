@@ -356,24 +356,32 @@ fn unique<'a>(pairs: Vec<(Item<'a>, Item<'a>)>) -> Vec<(Item<'a>, Item<'a>)> {
     out
 }
 
-/// Plays `item` back as the events it came from.
+/// Plays `item` back as the events it came from. The walk keeps its own stack, as a document may
+/// nest as deep as `limits` allows and a recursive walk would fill a worker thread's stack.
 fn play<'a>(item: Item<'a>, to: &mut YamlLoader<'a, MarkedYaml<'a>>) {
-    match item {
-        Item::Leaf(event, span) => to.on_event(event, span),
-        Item::Seq(head, items, end) => {
-            to.on_event(Event::SequenceStart(head.anchor, head.tag), head.span);
-            for item in items {
-                play(item, to);
+    enum Step<'a> {
+        Node(Item<'a>),
+        End(Event<'a>, Span),
+    }
+    let mut steps = vec![Step::Node(item)];
+    while let Some(step) = steps.pop() {
+        match step {
+            Step::End(event, span) | Step::Node(Item::Leaf(event, span)) => {
+                to.on_event(event, span);
             }
-            to.on_event(Event::SequenceEnd, end);
-        }
-        Item::Map(head, pairs, end) => {
-            to.on_event(Event::MappingStart(head.anchor, head.tag), head.span);
-            for (key, value) in pairs {
-                play(key, to);
-                play(value, to);
+            Step::Node(Item::Seq(head, items, end)) => {
+                to.on_event(Event::SequenceStart(head.anchor, head.tag), head.span);
+                steps.push(Step::End(Event::SequenceEnd, end));
+                steps.extend(items.into_iter().rev().map(Step::Node));
             }
-            to.on_event(Event::MappingEnd, end);
+            Step::Node(Item::Map(head, pairs, end)) => {
+                to.on_event(Event::MappingStart(head.anchor, head.tag), head.span);
+                steps.push(Step::End(Event::MappingEnd, end));
+                for (key, value) in pairs.into_iter().rev() {
+                    steps.push(Step::Node(value));
+                    steps.push(Step::Node(key));
+                }
+            }
         }
     }
 }

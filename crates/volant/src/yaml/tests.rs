@@ -604,6 +604,10 @@ fn a_document_at_the_limit_converts_on_a_small_stack() {
         ),
         // Read through the merge-key reader, which builds and plays back a tree of its own.
         ("merge", "# <<\n".to_string() + &"- ".repeat(489) + "x\n"),
+        (
+            "merge, anchored",
+            "# <<\n- &a ".to_string() + &"- ".repeat(488) + "x\n",
+        ),
     ];
     for (what, text) in shapes {
         let worker = std::thread::Builder::new()
