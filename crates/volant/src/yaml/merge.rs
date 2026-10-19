@@ -14,10 +14,20 @@ use std::collections::hash_map::Entry;
 use saphyr::{MarkedYaml, Scalar, YamlLoader};
 use saphyr_parser::{Event, Parser, ScalarStyle, Span, SpannedEventReceiver, Tag};
 
-/// Whether `text` can hold a merge key. A key `<<` needs those two characters, so a text without
-/// them skips this module and its cost.
-pub(super) fn may_hold_a_merge_key(text: &str) -> bool {
-    text.contains("<<")
+/// Feeds `loader` the events of `text`. A text that cannot hold a merge key (it needs the two
+/// characters `<<`) goes straight to the parser and skips this module's cost.
+pub(super) fn parse<'a>(
+    text: &'a str,
+    source: &str,
+    loader: &mut YamlLoader<'a, MarkedYaml<'a>>,
+) -> anyhow::Result<()> {
+    if text.contains("<<") {
+        load(text, source, loader)
+    } else {
+        Parser::new_from_str(text)
+            .load(loader, true)
+            .map_err(Into::into)
+    }
 }
 
 /// Feeds `loader` the events of `text`, every merge key resolved. A merge key that names

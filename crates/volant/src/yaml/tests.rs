@@ -276,9 +276,8 @@ fn missing_fields_are_none_not_panics() {
     assert!(field(&docs[0], "a").is_some());
 }
 
-/// Each row is a document and the JSON that ansible-core 2.19.12 loads it as, mapping keys in the
-/// order it keeps them: the merged pairs first, then the explicit keys, an explicit key keeping
-/// the place of the merged key it overrides.
+/// Each row is a document and the JSON ansible-core 2.19.12 loads it as, keys in its order: the
+/// merged pairs first, an explicit key taking the place of the merged key it overrides.
 #[test]
 fn a_merge_key_merges_as_pyyaml_does() {
     let rows: &[(&str, &str)] = &[
