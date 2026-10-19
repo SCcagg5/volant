@@ -99,5 +99,5 @@ fn copying_a_list_that_holds_copies_of_itself_is_linear() {
     let out = render(
         "{% set l = [1] %}{% for i in range(60) %}{% set _ = l.append(l.copy()) %}{% endfor %}{{ l | length }}",
     );
-    assert_eq!(out, Ok(json!("61")));
+    assert_eq!(out, Ok(json!(61)));
 }
