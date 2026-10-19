@@ -16,9 +16,13 @@ use serde_json::Value;
 
 use super::bridged;
 use super::context::set_literal;
-use super::env::{attr_call, container_repr, holds_undefined};
+use super::env::{attr_call, const_call, container_repr, holds_undefined, var_call};
+use super::pymethods::mutable::MUTATORS;
 use super::templar::Templar;
-use super::{CONCAT_KEY, ITEM_KEY, QUERY_KEY, TemplateError, UNDEFINED, VAULT_NAME};
+use super::{
+    CONCAT_KEY, ITEM_KEY, MITEM_KEY, MKLIST_KEY, MKMAP_KEY, QUERY_KEY, TemplateError, UNDEFINED,
+    VAULT_NAME,
+};
 
 /// Replaces every `!unsafe` wrapper inside `value` by its text, and every `!vault` wrapper that
 /// decrypts by what it holds; whether there was one. A vault wrapper that does not decrypt stays
@@ -153,9 +157,13 @@ pub(super) fn concat(
 /// instruction and a two-argument call take the same two operands off the stack in the same
 /// order, and a call keeps its own, so every jump target stays where it was.
 ///
+/// `mutating` is true when the template calls a method that changes a list or mapping in place
+/// (see [`mutates`]). Each variable, attribute and item it reads then goes through a function that
+/// hands back the mutable form of a plain list or mapping.
+///
 /// Says whether the code opens a capture (`{% set x %}...{% endset %}`, `{% filter %}`), whose
 /// `{{ }}` print into a buffer, not into the output.
-pub(super) fn route_calls(instructions: &mut Instructions<'_>) -> bool {
+pub(super) fn route_calls(instructions: &mut Instructions<'_>, mutating: bool) -> bool {
     let mut captures = false;
     // A macro or a `set` that takes the name `q` or `query` shadows the lookup shorthand.
     let mut shadowed = Vec::new();
@@ -185,9 +193,26 @@ pub(super) fn route_calls(instructions: &mut Instructions<'_>) -> bool {
         }
         match op {
             Instruction::StringConcat => *op = Instruction::CallFunction(CONCAT_KEY, Some(2)),
-            Instruction::GetItem => *op = Instruction::CallFunction(ITEM_KEY, Some(2)),
+            Instruction::GetItem => {
+                let key = if mutating { MITEM_KEY } else { ITEM_KEY };
+                *op = Instruction::CallFunction(key, Some(2));
+            }
             Instruction::GetAttr(name) => {
-                *op = Instruction::CallFunction(attr_call(name), Some(1));
+                *op = Instruction::CallFunction(attr_call(name, mutating), Some(1));
+            }
+            Instruction::BuildList(Some(n)) if mutating && u16::try_from(*n).is_ok() => {
+                *op = Instruction::CallFunction(MKLIST_KEY, u16::try_from(*n).ok());
+            }
+            Instruction::BuildMap(n) if mutating && u16::try_from(*n * 2).is_ok() => {
+                *op = Instruction::CallFunction(MKMAP_KEY, u16::try_from(*n * 2).ok());
+            }
+            Instruction::LoadConst(value) if mutating => {
+                if let Some(name) = const_call(value) {
+                    *op = Instruction::CallFunction(name, Some(0));
+                }
+            }
+            Instruction::Lookup(name) if mutating => {
+                *op = Instruction::CallFunction(var_call(name), Some(0));
             }
             Instruction::CallFunction(name, args)
                 if matches!(*name, "query" | "q") && !shadowed.iter().any(|n| n == name) =>
@@ -292,6 +317,20 @@ pub(super) fn note_emit(out: &minijinja::Output<'_>, value: &minijinja::Value) {
     });
 }
 
+/// Whether compiled code calls a method that changes a list or mapping in place.
+pub(super) fn mutates(instructions: &Instructions<'_>) -> bool {
+    let mut at = 0;
+    while let Some(op) = instructions.get(at) {
+        if let Instruction::CallMethod(name, _) = op
+            && MUTATORS.contains(name)
+        {
+            return true;
+        }
+        at += 1;
+    }
+    false
+}
+
 /// `env.render_named_str`, with `~` routed through [`concat()`]. Compiled once per call, as
 /// `render_named_str` does, with the whitespace and syntax settings given. The only place that
 /// decides auto-escape. The environment is the templar's, with the filters and tests the
@@ -324,9 +363,10 @@ pub(super) fn render_counted(
         default_auto_escape: Arc::new(|_| AutoEscape::None),
     };
     let mut compiled = no_panic(|| CompiledTemplate::new(name, source, &config))?;
-    let mut captures = route_calls(&mut compiled.instructions);
+    let mutating = mutates(&compiled.instructions) || compiled.blocks.values().any(mutates);
+    let mut captures = route_calls(&mut compiled.instructions, mutating);
     for block in compiled.blocks.values_mut() {
-        captures |= route_calls(block);
+        captures |= route_calls(block, mutating);
     }
     let env =
         templar.env_for(std::iter::once(&compiled.instructions).chain(compiled.blocks.values()));
@@ -374,7 +414,8 @@ pub(super) fn eval_expr(
     let mut codegen = CodeGenerator::new("<expression>", expr);
     codegen.compile_expr(&ast);
     let (mut instructions, _) = codegen.finish();
-    let _ = route_calls(&mut instructions);
+    let mutating = mutates(&instructions);
+    let _ = route_calls(&mut instructions, mutating);
     let env = templar.env_for([&instructions]);
     let mut out = String::new();
     let (value, _) = Vm::new(&env).eval(
