@@ -20,6 +20,62 @@ pub struct FactCache {
     timeout: i64,
 }
 
+/// The deepest JSON a cache entry may hold. `serde_json` stops at 128 levels unless told not to,
+/// and the writer wraps each level of a `set_fact` value in a second object, so a value that the
+/// YAML loader accepts is about twice as deep in the file. A file this deep is read with the
+/// limit off, which is safe because the depth is counted first, without recursion.
+const MAX_JSON_DEPTH: usize = 2 * crate::yaml::MAX_DEPTH + 8;
+
+/// How deep `serde_json` reads before it stops, less a margin for the object around a payload.
+const PLAIN_JSON_DEPTH: usize = 120;
+
+/// The deepest nesting of brackets in the JSON `text`, counted without recursion.
+fn json_depth(text: &str) -> usize {
+    let (mut depth, mut deepest, mut in_string, mut escaped) = (0usize, 0usize, false, false);
+    for byte in text.bytes() {
+        match (in_string, byte) {
+            (true, _) if escaped => escaped = false,
+            (true, b'\\') => escaped = true,
+            (true, b'"') => in_string = false,
+            (false, b'"') => in_string = true,
+            (false, b'[' | b'{') => {
+                depth += 1;
+                deepest = deepest.max(depth);
+            }
+            (false, b']' | b'}') => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    deepest
+}
+
+/// Whether a `set_fact` value can be written to the file and read back.
+pub fn fits(value: &Value) -> bool {
+    let (mut deepest, mut stack) = (0, vec![(value, 1)]);
+    while let Some((value, depth)) = stack.pop() {
+        deepest = deepest.max(depth);
+        match value {
+            Value::Array(items) => stack.extend(items.iter().map(|v| (v, depth + 2))),
+            Value::Object(map) => stack.extend(map.values().map(|v| (v, depth + 2))),
+            _ => {}
+        }
+    }
+    deepest < MAX_JSON_DEPTH
+}
+
+/// `text` as JSON, past the 128 levels `serde_json` allows by default.
+fn parse_nested(text: &str) -> serde_json::Result<Value> {
+    let mut de = serde_json::Deserializer::from_str(text);
+    de.disable_recursion_limit();
+    let mut values = de.into_iter::<Value>();
+    match (values.next(), values.next()) {
+        (Some(Ok(value)), None) => Ok(value),
+        (Some(Err(e)), _) => Err(e),
+        // Nothing, or more than one value: the plain parser words the error.
+        _ => serde_json::from_str(text),
+    }
+}
+
 /// What a read that found a broken file reports: a warning to print first, and the error that
 /// stops the run.
 #[derive(Debug)]
@@ -245,7 +301,19 @@ impl FactCache {
             }
         };
         // The reference does not guard this step: a bad payload is its own crash.
-        match serde_json::from_str::<Value>(&payload) {
+        let depth = json_depth(&payload);
+        if depth > MAX_JSON_DEPTH {
+            eprintln!(
+                "[WARNING]: The fact cache entry of {host} nests deeper than {MAX_JSON_DEPTH} levels and is ignored."
+            );
+            return Ok(None);
+        }
+        let parsed = if depth > PLAIN_JSON_DEPTH {
+            parse_nested(&payload)
+        } else {
+            serde_json::from_str::<Value>(&payload)
+        };
+        match parsed {
             Ok(Value::Object(facts)) => Ok(Some(
                 facts
                     .into_iter()
@@ -270,6 +338,12 @@ impl FactCache {
     /// `facts` is in the form the file holds, see [`tag`].
     pub fn write(&self, host: &str, facts: &Map<String, Value>) -> std::io::Result<()> {
         let payload = dumps(&Value::Object(facts.clone()));
+        if json_depth(&payload) > MAX_JSON_DEPTH {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("the facts nest deeper than {MAX_JSON_DEPTH} levels"),
+            ));
+        }
         let body = dumps(&json!({ "__payload__": payload }));
         let mut tmp = tempfile::NamedTempFile::new_in(&self.dir)?;
         tmp.write_all(body.as_bytes())?;

@@ -1,0 +1,3 @@
+# A variable that holds a template is rendered when a template reads it, so a filter or an
+# operator sees the final value; text that came from a host is still never rendered.
+args: [-i, inventory.ini, -e, "{\"e_c\": 21, \"e_b\": \"{{ e_c }}\", \"e_s\": \"{{ e_b | int + 1 }}\"}", site.yml]

@@ -1,0 +1,12 @@
+- hosts: s1
+  gather_facts: false
+  tasks:
+    - shell: printf '[fresh]\nfr1 ansible_connection=local\n' > extra.ini
+    - meta: refresh_inventory
+
+- name: After the refresh
+  hosts: "{{ groups['fresh'] | default([]) }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ ansible_play_hosts_all }}"

@@ -11,7 +11,7 @@ Each row is a keyword, option or plugin that ansible-core 2.19.12 ships, or a mo
 
 | Category | runs | partial | not yet | later |
 |---|---|---|---|---|
-| keyword (play) | 40 | 1 | 0 | 0 |
+| keyword (play) | 41 | 0 | 0 | 0 |
 | keyword (block) | 31 | 0 | 0 | 0 |
 | keyword (task) | 66 | 0 | 0 | 0 |
 | keyword (loop_control) | 7 | 0 | 0 | 0 |
@@ -42,7 +42,7 @@ Each row is a keyword, option or plugin that ansible-core 2.19.12 ships, or a mo
 
 | Name | Status | Note |
 |---|---|---|
-| `any_errors_fatal` | <span class="kw kw-runs">runs</span> |  |
+| `any_errors_fatal` | <span class="kw kw-runs">runs</span> | A template counts as true whatever it renders to, as ansible-core 2.19 reads it, and the task then fails on a value that is not a boolean |
 | `become` | <span class="kw kw-runs">runs</span> |  |
 | `become_exe` | <span class="kw kw-runs">runs</span> |  |
 | `become_flags` | <span class="kw kw-runs">runs</span> |  |
@@ -56,24 +56,24 @@ Each row is a keyword, option or plugin that ansible-core 2.19.12 ships, or a mo
 | `environment` | <span class="kw kw-runs">runs</span> |  |
 | `fact_path` | <span class="kw kw-runs">runs</span> |  |
 | `force_handlers` | <span class="kw kw-runs">runs</span> |  |
-| `gather_facts` | <span class="kw kw-runs">runs</span> |  |
+| `gather_facts` | <span class="kw kw-runs">runs</span> | A template is rendered once, when the play starts, with the play's variables. The play still counts as one that may gather facts, so it needs ansible-core to be there |
 | `gather_subset` | <span class="kw kw-runs">runs</span> |  |
 | `gather_timeout` | <span class="kw kw-runs">runs</span> |  |
 | `handlers` | <span class="kw kw-runs">runs</span> |  |
-| `hosts` | <span class="kw kw-partial">partial</span> | A pattern written as a template is not rendered: the play matches no host, prints a warning and exits 0 |
+| `hosts` | <span class="kw kw-runs">runs</span> |  |
 | `ignore_errors` | <span class="kw kw-runs">runs</span> |  |
 | `ignore_unreachable` | <span class="kw kw-runs">runs</span> |  |
 | `max_fail_percentage` | <span class="kw kw-runs">runs</span> |  |
 | `module_defaults` | <span class="kw kw-runs">runs</span> |  |
 | `name` | <span class="kw kw-runs">runs</span> |  |
-| `no_log` | <span class="kw kw-runs">runs</span> |  |
+| `no_log` | <span class="kw kw-runs">runs</span> | A template is rendered for each host when its task runs. In a loop, one item that hides hides every item, where ansible-core hides each item by its own value |
 | `order` | <span class="kw kw-runs">runs</span> |  |
 | `port` | <span class="kw kw-runs">runs</span> |  |
 | `post_tasks` | <span class="kw kw-runs">runs</span> |  |
 | `pre_tasks` | <span class="kw kw-runs">runs</span> |  |
 | `remote_user` | <span class="kw kw-runs">runs</span> |  |
 | `roles` | <span class="kw kw-runs">runs</span> |  |
-| `run_once` | <span class="kw kw-runs">runs</span> |  |
+| `run_once` | <span class="kw kw-runs">runs</span> | A template is read for each host of the batch, and the first host it is true for runs the task. A template that is true for some hosts and false for others ends the run, where ansible-core also runs the hosts in front of the first. Under `free` and `host_pinned` a template is ignored without the warning a literal gets |
 | `serial` | <span class="kw kw-runs">runs</span> |  |
 | `strategy` | <span class="kw kw-runs">runs</span> |  |
 | `tags` | <span class="kw kw-runs">runs</span> |  |
@@ -89,7 +89,7 @@ Each row is a keyword, option or plugin that ansible-core 2.19.12 ships, or a mo
 | Name | Status | Note |
 |---|---|---|
 | `always` | <span class="kw kw-runs">runs</span> |  |
-| `any_errors_fatal` | <span class="kw kw-runs">runs</span> |  |
+| `any_errors_fatal` | <span class="kw kw-runs">runs</span> | A template counts as true whatever it renders to, as ansible-core 2.19 reads it, and the task then fails on a value that is not a boolean |
 | `become` | <span class="kw kw-runs">runs</span> |  |
 | `become_exe` | <span class="kw kw-runs">runs</span> |  |
 | `become_flags` | <span class="kw kw-runs">runs</span> |  |
@@ -108,12 +108,12 @@ Each row is a keyword, option or plugin that ansible-core 2.19.12 ships, or a mo
 | `ignore_unreachable` | <span class="kw kw-runs">runs</span> |  |
 | `module_defaults` | <span class="kw kw-runs">runs</span> |  |
 | `name` | <span class="kw kw-runs">runs</span> |  |
-| `no_log` | <span class="kw kw-runs">runs</span> |  |
+| `no_log` | <span class="kw kw-runs">runs</span> | A template is rendered for each host when its task runs. In a loop, one item that hides hides every item, where ansible-core hides each item by its own value |
 | `notify` | <span class="kw kw-runs">runs</span> |  |
 | `port` | <span class="kw kw-runs">runs</span> |  |
 | `remote_user` | <span class="kw kw-runs">runs</span> |  |
 | `rescue` | <span class="kw kw-runs">runs</span> |  |
-| `run_once` | <span class="kw kw-runs">runs</span> |  |
+| `run_once` | <span class="kw kw-runs">runs</span> | A template is read for each host of the batch, and the first host it is true for runs the task. A template that is true for some hosts and false for others ends the run, where ansible-core also runs the hosts in front of the first. Under `free` and `host_pinned` a template is ignored without the warning a literal gets |
 | `tags` | <span class="kw kw-runs">runs</span> |  |
 | `throttle` | <span class="kw kw-runs">runs</span> |  |
 | `timeout` | <span class="kw kw-runs">runs</span> |  |
@@ -125,7 +125,7 @@ Each row is a keyword, option or plugin that ansible-core 2.19.12 ships, or a mo
 | Name | Status | Note |
 |---|---|---|
 | `action` | <span class="kw kw-runs">runs</span> |  |
-| `any_errors_fatal` | <span class="kw kw-runs">runs</span> |  |
+| `any_errors_fatal` | <span class="kw kw-runs">runs</span> | A template counts as true whatever it renders to, as ansible-core 2.19 reads it, and the task then fails on a value that is not a boolean |
 | `args` | <span class="kw kw-runs">runs</span> |  |
 | `async` | <span class="kw kw-runs">runs</span> |  |
 | `become` | <span class="kw kw-runs">runs</span> |  |
@@ -151,14 +151,14 @@ Each row is a keyword, option or plugin that ansible-core 2.19.12 ships, or a mo
 | `loop_control` | <span class="kw kw-runs">runs</span> |  |
 | `module_defaults` | <span class="kw kw-runs">runs</span> |  |
 | `name` | <span class="kw kw-runs">runs</span> |  |
-| `no_log` | <span class="kw kw-runs">runs</span> |  |
+| `no_log` | <span class="kw kw-runs">runs</span> | A template is rendered for each host when its task runs. In a loop, one item that hides hides every item, where ansible-core hides each item by its own value |
 | `notify` | <span class="kw kw-runs">runs</span> |  |
 | `poll` | <span class="kw kw-runs">runs</span> |  |
 | `port` | <span class="kw kw-runs">runs</span> |  |
 | `register` | <span class="kw kw-runs">runs</span> |  |
 | `remote_user` | <span class="kw kw-runs">runs</span> |  |
 | `retries` | <span class="kw kw-runs">runs</span> |  |
-| `run_once` | <span class="kw kw-runs">runs</span> |  |
+| `run_once` | <span class="kw kw-runs">runs</span> | A template is read for each host of the batch, and the first host it is true for runs the task. A template that is true for some hosts and false for others ends the run, where ansible-core also runs the hosts in front of the first. Under `free` and `host_pinned` a template is ignored without the warning a literal gets |
 | `tags` | <span class="kw kw-runs">runs</span> |  |
 | `throttle` | <span class="kw kw-runs">runs</span> |  |
 | `timeout` | <span class="kw kw-runs">runs</span> |  |

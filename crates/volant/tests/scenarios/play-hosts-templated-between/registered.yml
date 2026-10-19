@@ -1,0 +1,30 @@
+- hosts: s1
+  gather_facts: false
+  tasks:
+    - shell: printf '%s%s' '{' '{"w1"}}'
+      register: braces
+    - shell: printf 'w2'
+      register: plain
+    - set_fact:
+        copied: "{{ braces.stdout }}"
+
+- name: A registered result that is a name
+  hosts: "{{ hostvars['s1']['plain']['stdout'] }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }}"
+
+- name: A registered result that holds a template
+  hosts: "{{ hostvars['s1']['braces']['stdout'] }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: never
+
+- name: The same text copied by a fact
+  hosts: "{{ hostvars['s1']['copied'] }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: never

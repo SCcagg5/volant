@@ -75,27 +75,29 @@ const fn noted_kw(name: &'static str, note: &'static str) -> Keyword {
     }
 }
 
-/// A keyword this release answers in part, with what is missing as the generated page prints it.
-const fn partial_kw(name: &'static str, missing: &'static str) -> Keyword {
-    Keyword {
-        name,
-        support: Partial,
-        missing: Some(missing),
-        note: None,
-        barrier: false,
-    }
-}
-
 /// The limit of the `debugger` rows.
 pub const DEBUGGER_NOTE: &str = "`p` and a line that is not a command evaluate a subset of Python: names, literals, indexing, attributes, assignments and the calls the prompt needs. `task_vars` edited at the prompt reach a redo through `u` only";
 
-/// A keyword whose presence on a task makes that task a synchronisation point.
-const fn barrier_kw(name: &'static str, support: Support) -> Keyword {
+/// The limit of the `run_once` rows: a template is read once for the batch.
+pub const RUN_ONCE_NOTE: &str = "A template is read for each host of the batch, and the first host it is true for runs the task. A template that is true for some hosts and false for others ends the run, where ansible-core also runs the hosts in front of the first. Under `free` and `host_pinned` a template is ignored without the warning a literal gets";
+
+/// The limit of the `any_errors_fatal` rows: a template counts as true.
+pub const ANY_ERRORS_FATAL_NOTE: &str = "A template counts as true whatever it renders to, as ansible-core 2.19 reads it, and the task then fails on a value that is not a boolean";
+
+/// The limit of the `no_log` rows: a loop hides every item or none.
+pub const NO_LOG_NOTE: &str = "A template is rendered for each host when its task runs. In a loop, one item that hides hides every item, where ansible-core hides each item by its own value";
+
+/// The limit of the `gather_facts` row: a template is read when the play starts.
+pub const GATHER_FACTS_NOTE: &str = "A template is rendered once, when the play starts, with the play's variables. The play still counts as one that may gather facts, so it needs ansible-core to be there";
+
+/// The `run_once` row: a keyword whose presence on a task makes that task a synchronisation point,
+/// with its limit.
+const fn run_once_kw() -> Keyword {
     Keyword {
-        name,
-        support,
+        name: "run_once",
+        support: Runs,
         missing: None,
-        note: None,
+        note: Some(RUN_ONCE_NOTE),
         barrier: true,
     }
 }
@@ -123,7 +125,7 @@ pub fn is_barrier(name: &str) -> bool {
 /// `Block.fattributes` has none of them, so a block carrying one is refused at load.
 pub const TASK_KEYWORDS: &[Keyword] = &[
     kw("action", Runs),
-    kw("any_errors_fatal", Runs),
+    noted_kw("any_errors_fatal", ANY_ERRORS_FATAL_NOTE),
     kw("args", Runs),
     kw("async", Runs),
     kw("become", Runs),
@@ -149,14 +151,14 @@ pub const TASK_KEYWORDS: &[Keyword] = &[
     kw("loop_control", Runs),
     kw("module_defaults", Runs),
     kw("name", Runs),
-    kw("no_log", Runs),
+    noted_kw("no_log", NO_LOG_NOTE),
     kw("notify", Runs),
     kw("poll", Runs),
     kw("port", Runs),
     kw("register", Runs),
     kw("remote_user", Runs),
     kw("retries", Runs),
-    barrier_kw("run_once", Runs),
+    run_once_kw(),
     kw("tags", Runs),
     kw("throttle", Runs),
     kw("timeout", Runs),
@@ -225,7 +227,7 @@ pub const TASK_KEYWORDS: &[Keyword] = &[
 /// carry, so the compiler folds them into every task like `no_log`. `max_fail_percentage` is the
 /// play's alone: the coordinator ends a batch that lost more of its hosts than the limit allows.
 pub const PLAY_KEYWORDS: &[Keyword] = &[
-    kw("any_errors_fatal", Runs),
+    noted_kw("any_errors_fatal", ANY_ERRORS_FATAL_NOTE),
     kw("become", Runs),
     kw("become_exe", Runs),
     kw("become_flags", Runs),
@@ -239,27 +241,24 @@ pub const PLAY_KEYWORDS: &[Keyword] = &[
     kw("environment", Runs),
     kw("fact_path", Runs),
     kw("force_handlers", Runs),
-    kw("gather_facts", Runs),
+    noted_kw("gather_facts", GATHER_FACTS_NOTE),
     kw("gather_subset", Runs),
     kw("gather_timeout", Runs),
     kw("handlers", Runs),
-    partial_kw(
-        "hosts",
-        "A pattern written as a template is not rendered: the play matches no host, prints a warning and exits 0",
-    ),
+    kw("hosts", Runs),
     kw("ignore_errors", Runs),
     kw("ignore_unreachable", Runs),
     kw("max_fail_percentage", Runs),
     kw("module_defaults", Runs),
     kw("name", Runs),
-    kw("no_log", Runs),
+    noted_kw("no_log", NO_LOG_NOTE),
     kw("order", Runs),
     kw("port", Runs),
     kw("post_tasks", Runs),
     kw("pre_tasks", Runs),
     kw("remote_user", Runs),
     kw("roles", Runs),
-    barrier_kw("run_once", Runs),
+    run_once_kw(),
     kw("serial", Runs),
     kw("strategy", Runs),
     kw("tags", Runs),
@@ -300,7 +299,7 @@ pub const LOOP_CONTROL_KEYWORDS: &[Keyword] = &[
 /// own names.
 pub const BLOCK_KEYWORDS: &[Keyword] = &[
     kw("always", Runs),
-    kw("any_errors_fatal", Runs),
+    noted_kw("any_errors_fatal", ANY_ERRORS_FATAL_NOTE),
     kw("become", Runs),
     kw("become_exe", Runs),
     kw("become_flags", Runs),
@@ -319,12 +318,12 @@ pub const BLOCK_KEYWORDS: &[Keyword] = &[
     kw("ignore_unreachable", Runs),
     kw("module_defaults", Runs),
     kw("name", Runs),
-    kw("no_log", Runs),
+    noted_kw("no_log", NO_LOG_NOTE),
     kw("notify", Runs),
     kw("port", Runs),
     kw("remote_user", Runs),
     kw("rescue", Runs),
-    barrier_kw("run_once", Runs),
+    run_once_kw(),
     kw("tags", Runs),
     kw("throttle", Runs),
     kw("timeout", Runs),

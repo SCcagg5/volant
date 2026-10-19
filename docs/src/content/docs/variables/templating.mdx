@@ -35,6 +35,28 @@ A `when` whose value is not a boolean is rejected as well.
 
 A condition wrapped in `{{ }}` that renders to a string is evaluated once more as a condition, as ansible-core 2.19 does. With `healthy: "true"` in the play's `vars`, `when: "{{ healthy }}"` runs the task. This second evaluation never happens when the first render read a value from a managed host: the task fails with `Encountered untrusted template or expression.` instead. See [Trusted and untrusted values](/variables/trust/).
 
+## Variables that hold templates
+
+A variable whose value is a template is rendered when another template reads it, so a filter or an operator always sees the final value:
+
+```yaml
+vars:
+  host: example.org
+  url: "http://{{ host }}:8080/x"
+  port: "{{ 8080 }}"
+tasks:
+  - debug:
+      msg: "{{ url | length }} {{ port | int + 1 }}"   # 25 8081
+```
+
+This holds in play, block and task `vars`, `group_vars`, role defaults, `vars_files`, `include_vars` and extra vars, and for a list or mapping that holds templates. A member that fails to render raises nothing until something reads it.
+
+A variable that reads a name with no value has none either: `default` and `is defined` see it as undefined. A variable that reads itself, directly or through others, fails with `Recursive loop detected in template: maximum recursion depth exceeded`, also behind `default`, as in ansible-core.
+
+A variable from a managed host is not rendered, and neither is a variable built from one. Reading it through a filter gives its text. See [Trusted and untrusted values](/variables/trust/).
+
+A variable is rendered by a read only when everything its text reads is written by the playbook, or is a value a managed host sent, which stays data. A variable that reads `groups`, `hostvars`, `vars`, `inventory_hostname`, `group_names`, one of the play host lists, or calls `lookup` or `query`, is left as written, and so is a variable that reads one of those through other variables. Names in the inventory can be added during the run from text a host sent, so values derived from them stay data. A variable left this way is rendered when the task uses it, as before. `hostvars['other']['name']` also gives the raw text of a variable that holds a template.
+
 ## What is available
 
 On top of MiniJinja's own Jinja2 builtins, Volant adds these from Ansible:
@@ -74,7 +96,6 @@ The file's own trailing newline survives the render. [Action plugins](/reference
 
 - A string that reads two variables, one of them chained through a third that holds a `raw` block, is rendered once more than in the reference.
 - A value under `!unsafe` is data and is never templated. A `!vault` value is decrypted; see [Vault](/variables/vault/).
-- A variable that reads another templated variable through a filter or an operator gives wrong data. With `b: "{{ c }}"` and `s: "{{ b | int + 1 }}"`, `s` is not `c + 1` ([issue 466](https://github.com/lorica-labs/volant/issues/466), [pull request 483](https://github.com/lorica-labs/volant/pull/483)).
 - In a variable or a task argument, `{% ... %}` blocks render, but `trim_blocks` does not apply, a `{# ... #}` comment stays in the text, and a value made only of a block, such as a `for` loop that yields `1`, comes out as the string `"1"` instead of a number. A template file for the `template` module is not affected.
 - Python methods that change a value or that MiniJinja lacks fail with `method <name> is not available yet`: `append`, `extend`, `insert`, `pop`, `remove`, `sort`, `reverse`, `update`, `setdefault`, `copy`, `index`, `rsplit`, `partition`, `zfill`, `ljust`, `swapcase`, `removeprefix`, `encode` and `dict.fromkeys`. So does `%` formatting of a string, as in `'%s' % x`.
 - `now()` and `lipsum()` fail with an unknown function.
@@ -84,6 +105,16 @@ The file's own trailing newline survives the render. [Action plugins](/reference
 - In a template file, `template_host`, `template_uid`, `template_run_date` and `template_mtime` are not set, unlike `template_path`, `template_fullpath` and `ansible_managed`.
 - In a template file, `{% include %}` and `{% import %}` fail: nothing loads a second file during a render.
 - The six delimiter options (`variable_start_string` and its five relatives) and an `output_encoding` other than UTF-8 are not supported yet.
+
+## Limits on YAML
+
+Volant refuses a YAML text that it cannot load without risk. The error names the limit. A playbook, a variable file, an inventory and the text a `from_yaml` filter reads all follow the same limits.
+
+- A document nests collections at most 489 levels deep. ansible-core loads a file down to 489 levels and stops it at 490 with `maximum recursion depth exceeded`, and Volant gives the same message. An alias counts as the levels of the node it names. A flow collection stops earlier, at 255 levels, because the scanner counts them in a `u8`. ansible-core loads a flow collection down to 489, so a flow-heavy file between 256 and 489 levels still differs.
+- A text holds one document, as in ansible-core: a second `---` stops the load. The limits below count the whole text.
+- The anchors and aliases of one text copy at most 1,000,000 nodes and 64 MiB of scalar text. A copy is made at each anchor and at each alias. ansible-core shares a node and copies nothing, so it loads a text that stands for billions of nodes and fails only when a task walks the value. For example, 5,100 hosts that share a mapping of 100 keys by alias go over the node limit.
+- A `from_yaml` text over a limit fails the task that reads it, and the other hosts go on. A file over a limit stops the run before it starts, as a syntax error does.
+- A fact nested deeper than the YAML limit is not written to the `jsonfile` fact cache: a `set_fact` with `cacheable: true` prints a warning and keeps the fact for the run only. The file holds two levels of JSON for each level of the value.
 
 ## Performance on large inventories
 

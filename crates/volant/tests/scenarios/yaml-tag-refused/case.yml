@@ -1,0 +1,7 @@
+# A tag with no constructor and a scalar a tag cannot build stop the load of a vars file. The
+# error text is on stderr, where only the exit code is compared.
+runs:
+  - args: [-i, inv.ini, play-custom.yml]
+  - args: [-i, inv.ini, play-vault.yml]
+  - args: [-i, inv.ini, play-int.yml]
+  - args: [-i, inv.ini, play-date.yml]

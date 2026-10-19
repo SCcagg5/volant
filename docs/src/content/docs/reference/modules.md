@@ -39,7 +39,7 @@ The controller runs these itself, so they need no connection to the host.
 | `assert` | no | Fail the task unless every condition in `that` holds. |
 | `debug` | no | Print a message or the value of a variable. |
 | `fail` | no | Fail the task with a message. |
-| `include_vars` | yes | Read a file of variables and set them on the host, for the rest of the run. |
+| `include_vars` | yes | Read a file or a directory of variables and set them on the host, for the rest of the run. |
 | `pause` | no | Wait for `seconds` or `minutes`. On a terminal a pause with no duration asks for an answer and keeps it in `user_input`; `prompt` next to a duration is not supported yet. Without a terminal, a pause that asks for input prints a warning and continues at once, as Ansible does. |
 | `set_fact` | no | Set facts for a host, for the rest of the run. |
 | `validate_argument_spec` | no | Check a role's arguments against the specification in `meta/argument_specs.yml`. |

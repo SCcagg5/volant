@@ -24,3 +24,4 @@
 /.volant-changed
 /.volant-describe
 /.volant-files
+__pycache__/

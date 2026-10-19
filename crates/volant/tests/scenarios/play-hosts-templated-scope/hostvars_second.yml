@@ -1,0 +1,19 @@
+- hosts: s1
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: first
+
+- name: A host's variable names the next play
+  hosts: "{{ hostvars['s1']['team'] }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }}"
+
+- name: hostvars lists every host
+  hosts: "{{ hostvars.keys() | select('match', '^s') | join(',') }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ ansible_play_hosts }}"

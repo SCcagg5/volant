@@ -1,0 +1,18 @@
+- hosts: h1
+  gather_facts: false
+  roles: [r1]
+  tasks:
+    - name: a playbook task reads against the playbook directory
+      include_vars: {dir: top/vars}
+      register: r
+    - debug: var=r.ansible_included_var_files
+
+    - include_tasks: sub/tasks/inc.yml
+
+    - name: an absolute path is used as it is
+      include_vars: {dir: "{{ playbook_dir }}/sub/vars2"}
+      register: r
+    - debug: var=r.ansible_included_var_files
+
+    - name: a role included from a task gives its tasks the role's directory too
+      include_role: {name: r1, tasks_from: inner}
