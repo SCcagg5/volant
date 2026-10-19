@@ -241,9 +241,8 @@ fn an_explicit_core_tag_picks_the_type() {
     ]);
 }
 
-/// The rows of the plain scalars the resolver types, with the near misses it leaves as strings.
-/// Integers beyond `i64` are not in the table, and neither are the non-finite floats, which the
-/// test after it holds.
+/// Plain scalars the resolver types, with the near misses it leaves as strings. Integers beyond
+/// `i64` and the non-finite floats are not here; the next test holds the floats.
 #[test]
 fn plain_scalars_are_resolved_as_pyyaml_resolves_them() {
     assert_loads_as(&[
