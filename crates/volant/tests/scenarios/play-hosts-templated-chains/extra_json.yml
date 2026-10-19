@@ -1,0 +1,5 @@
+- hosts: "{{ tgt }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }}"

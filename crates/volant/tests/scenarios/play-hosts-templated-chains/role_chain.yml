@@ -1,0 +1,9 @@
+- hosts: "{{ a }}"
+  gather_facts: false
+  vars:
+    a: "{{ role_target }}"
+  roles:
+    - role: rt
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }}"
