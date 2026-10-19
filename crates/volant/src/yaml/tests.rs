@@ -606,7 +606,7 @@ fn a_document_at_the_limit_converts_on_a_small_stack() {
         ("merge", "# <<\n".to_string() + &"- ".repeat(489) + "x\n"),
         (
             "merge, anchored",
-            "# <<\n- &a ".to_string() + &"- ".repeat(488) + "x\n",
+            "# <<\n- &a\n  ".to_string() + &"- ".repeat(488) + "x\n",
         ),
     ];
     for (what, text) in shapes {
