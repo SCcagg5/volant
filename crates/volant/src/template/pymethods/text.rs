@@ -235,10 +235,13 @@ pub(super) fn expandtabs(s: &str, call: &Call<'_>) -> Result<Value, Error> {
 
 /// The title-case form of a character: its upper case, but `ß` gives `Ss`.
 fn titlecase(c: char) -> impl Iterator<Item = char> {
-    let text: Vec<char> = if c == 'ß' {
-        vec!['S', 's']
-    } else {
-        c.to_uppercase().collect()
+    let text: Vec<char> = match c {
+        'ß' => vec!['S', 's'],
+        'Ǆ' | 'ǆ' => vec!['ǅ'],
+        'Ǉ' | 'ǉ' => vec!['ǈ'],
+        'Ǌ' | 'ǌ' => vec!['ǋ'],
+        'Ǳ' | 'ǳ' => vec!['ǲ'],
+        _ => c.to_uppercase().collect(),
     };
     text.into_iter()
 }
@@ -306,9 +309,18 @@ pub(super) fn predicate(s: &str, name: &str) -> Option<bool> {
         }
         "isprintable" => s
             .chars()
-            .all(|c| !c.is_control() && (c == ' ' || !c.is_whitespace())),
+            .all(|c| !c.is_control() && !is_format_char(c) && (c == ' ' || !c.is_whitespace())),
         _ => return None,
     })
+}
+
+/// The common characters of the Unicode category `Cf`, which Python does not call printable.
+fn is_format_char(c: char) -> bool {
+    matches!(
+        u32::from(c),
+        0xad | 0x600..=0x605 | 0x61c | 0x6dd | 0x70f | 0x180e | 0x200b..=0x200f
+            | 0x202a..=0x202e | 0x2060..=0x2064 | 0x2066..=0x206f | 0xfeff | 0xfff9..=0xfffb
+    )
 }
 
 fn is_title(s: &str) -> bool {

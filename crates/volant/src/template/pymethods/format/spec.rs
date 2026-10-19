@@ -222,6 +222,9 @@ fn integer(n: i64, spec: Spec) -> Result<String, Error> {
         if spec.sign.is_some() {
             return Err(raise("Sign not allowed with integer format specifier 'c'"));
         }
+        if let Some(g) = spec.group {
+            return Err(raise(format!("Cannot specify '{g}' with 'c'.")));
+        }
         let c = u32::try_from(n)
             .ok()
             .and_then(char::from_u32)
@@ -232,7 +235,7 @@ fn integer(n: i64, spec: Spec) -> Result<String, Error> {
             "",
             spec.width,
             fill,
-            spec.align.unwrap_or('<'),
+            spec.align.unwrap_or('>'),
         ));
     }
     if spec.group == Some(',') && "boxX".contains(kind) {
