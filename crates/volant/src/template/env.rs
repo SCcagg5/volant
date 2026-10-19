@@ -56,7 +56,7 @@ pub(super) fn environment(base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) -> En
     filters::register(&mut env, base_dir, bridge);
     env.add_function(CONCAT_KEY, concat);
     env.add_function("range", range);
-    env.add_function("dict", globals::dict);
+    env.add_global("dict", minijinja::Value::from_object(globals::DictType));
     env.add_function("cycler", globals::cycler);
     env.add_function("joiner", minijinja_contrib::globals::joiner);
     env.add_function("undef", globals::undef);

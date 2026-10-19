@@ -105,7 +105,7 @@ What differs from CPython:
 
 ### Lists and mappings
 
-`list` and `dict` methods run too: `append`, `extend`, `insert`, `remove`, `pop`, `sort`, `reverse`, `index`, `count`, `copy` and `clear` on a list, and `get`, `keys`, `values`, `items`, `pop`, `popitem`, `setdefault`, `update`, `copy`, `clear` and `fromkeys` on a mapping. `keys()`, `values()` and `items()` give lists. `sort` takes `reverse`, and `key` only as `none`. The usual ways to write a change are `{% set _ = items.append(x) %}` and `{{ items.append(x) or '' }}`: the method changes the list and answers `none`.
+`list` and `dict` methods run too: `append`, `extend`, `insert`, `remove`, `pop`, `sort`, `reverse`, `index`, `count`, `copy` and `clear` on a list, and `get`, `keys`, `values`, `items`, `pop`, `popitem`, `setdefault`, `update`, `copy`, `clear` and `fromkeys` on a mapping. `fromkeys` is also a method of the `dict` name: `dict.fromkeys(['a', 'b'], 0)`. `keys()`, `values()` and `items()` give lists. `sort` takes `reverse`, and `key` only as `none`. The usual ways to write a change are `{% set _ = items.append(x) %}` and `{{ items.append(x) or '' }}`: the method changes the list and answers `none`.
 
 A template changes a list or mapping in place, and other names for the same value see the change:
 

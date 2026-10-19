@@ -19,6 +19,7 @@ mod text;
 mod translate;
 
 use args::{Call, raise, type_of};
+pub(in crate::template) use dicts::fromkeys;
 use mutable::{Dict, MutDict, MutList, is_dict, is_list};
 pub(super) use percent::{format_filter, percent};
 

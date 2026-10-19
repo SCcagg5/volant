@@ -6,10 +6,11 @@
 //! (`dict(items)`, `dict(keys | zip(values))`). Its failures are worded as CPython words them.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use minijinja::value::{Object, Rest, ValueKind, from_args};
+use minijinja::value::{Object, ObjectRepr, Rest, ValueKind, from_args};
 use minijinja::{Error, ErrorKind, State, Value};
 
 use super::{any_undefined, type_name};
@@ -107,16 +108,65 @@ fn items_of(value: &Value) -> Result<Box<dyn Iterator<Item = Value>>, Error> {
     Ok(Box::new(value.try_iter()?))
 }
 
-/// `dict(...)`: nothing, a mapping, or any iterable of two-item elements, then keywords.
-///
-/// Measured on ansible-core 2.19.12: a later pair wins over an earlier one with the same key,
-/// a keyword wins over the positional argument, `dict(none)` and `dict(5)` fail as non-iterable
-/// and a string is read character by character.
-pub(super) fn dict(args: Rest<Value>) -> Result<Value, Error> {
-    build(args.0, MAX_PAIRS)
+/// The `dict` global: it builds a mapping when called, and has the class method `fromkeys`, which
+/// Python writes `dict.fromkeys(keys, value)`.
+#[derive(Debug)]
+pub(super) struct DictType;
+
+impl Object for DictType {
+    fn repr(self: &Arc<Self>) -> ObjectRepr {
+        ObjectRepr::Plain
+    }
+
+    fn render(self: &Arc<Self>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("<class 'dict'>")
+    }
+
+    fn get_value(self: &Arc<Self>, key: &Value) -> Option<Value> {
+        (key.as_str()? == "fromkeys").then(|| Value::from_function(from_keys))
+    }
+
+    /// `dict(...)`: nothing, a mapping, or any iterable of two-item elements, then keywords.
+    ///
+    /// Measured on ansible-core 2.19.12: a later pair wins over an earlier one with the same key,
+    /// a keyword wins over the positional argument, `dict(none)` and `dict(5)` fail as non-iterable
+    /// and a string is read character by character.
+    fn call(self: &Arc<Self>, _state: &State<'_, '_>, args: &[Value]) -> Result<Value, Error> {
+        build(args.to_vec(), MAX_PAIRS)
+    }
+
+    fn call_method(
+        self: &Arc<Self>,
+        _state: &State<'_, '_>,
+        method: &str,
+        args: &[Value],
+    ) -> Result<Value, Error> {
+        if method != "fromkeys" {
+            return Err(Error::from(ErrorKind::UnknownMethod));
+        }
+        from_keys(Rest(args.to_vec()))
+    }
 }
 
-/// [`dict`] with the most pairs it takes from one iterable as a parameter.
+/// `dict.fromkeys(iterable, value=none)`. An undefined argument is an undefined read.
+fn from_keys(args: Rest<Value>) -> Result<Value, Error> {
+    if any_undefined(&args) {
+        return Err(Error::from(ErrorKind::UndefinedError));
+    }
+    super::pymethods::fromkeys(&args)
+}
+
+/// The entries of `dict.fromkeys`: each of `keys` with `value`. The keys are told apart as
+/// `dict()` tells them apart: `1`, `1.0` and `true` are one key.
+pub(super) fn keyed(keys: Vec<Value>, value: &Value) -> Result<Vec<(Value, Value)>, Error> {
+    let mut entries = Entries::default();
+    for key in keys {
+        entries.set(key, value.clone())?;
+    }
+    Ok(entries.items)
+}
+
+/// `dict(...)` with the most pairs it takes from one iterable as a parameter.
 pub(super) fn build(mut args: Vec<Value>, max_pairs: usize) -> Result<Value, Error> {
     let keywords = match args.last() {
         Some(last) if last.is_kwargs() => args.pop(),

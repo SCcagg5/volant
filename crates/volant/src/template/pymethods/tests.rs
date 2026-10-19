@@ -241,3 +241,34 @@ fn percent_pads_infinity_with_blanks_and_bounds_the_whole_text() {
         .unwrap_err();
     assert!(err.0.contains("C int"), "{err}");
 }
+
+/// `dict.fromkeys` and `{}.fromkeys` refuse a call in CPython's words. The golden rows only
+/// record that the reference failed; these are the texts it printed.
+#[test]
+fn fromkeys_refuses_in_the_words_of_python() {
+    for (template, want) in [
+        ("{{ dict.fromkeys([[1]]) }}", "unhashable type: 'list'"),
+        ("{{ dict.fromkeys([{'a': 1}]) }}", "unhashable type: 'dict'"),
+        ("{{ dict.fromkeys(5) }}", "'int' object is not iterable"),
+        (
+            "{{ {}.fromkeys(none) }}",
+            "'NoneType' object is not iterable",
+        ),
+        (
+            "{{ dict.fromkeys() }}",
+            "fromkeys expected at least 1 argument, got 0",
+        ),
+        (
+            "{{ dict.fromkeys(1, 2, 3) }}",
+            "fromkeys expected at most 2 arguments, got 3",
+        ),
+        (
+            "{{ dict.fromkeys([], value=1) }}",
+            "dict.fromkeys() takes no keyword arguments",
+        ),
+    ] {
+        let err = render(template).unwrap_err();
+        assert!(err.contains(want), "{template}: {err}");
+    }
+    assert!(render("{{ dict.fromkeys(nope) }}").is_err());
+}
