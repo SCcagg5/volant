@@ -37,15 +37,16 @@ The plugin finds the template under `templates/`, renders it once with the task'
 
 Four variables are set for the render, on top of the task's own: `ansible_managed` (unless the task already set it), `template_path` (`src` as the task wrote it), `template_fullpath` (the path found on the controller) and `template_destpath` (`dest` as rendered, see below). `template_host`, `template_uid`, `template_run_date` and `template_mtime`, which the reference also sets, are not.
 
-`trim_blocks` defaults on and `lstrip_blocks` defaults off, as in the reference, and the file's trailing newline is kept. `newline_sequence` takes `\n`, `\r` or `\r\n`, the escaped four-character spelling read the same as the literal one. The six delimiter options (`variable_start_string` and its five relatives) are not supported yet and are named rather than silently ignored, and so is an `output_encoding` other than UTF-8. A template that uses `{% include %}` or `{% import %}` fails: nothing here loads a second file mid-render.
+`trim_blocks` defaults on and `lstrip_blocks` defaults off, as in the reference, and the file's trailing newline is kept. `newline_sequence` takes `\n`, `\r` or `\r\n`, the escaped four-character spelling read the same as the literal one. The six delimiter options (`variable_start_string` and its five relatives) and a `#jinja2:` first line in the template file are read as the reference reads them, see [Rendering a template file](/variables/templating/#rendering-a-template-file). `output_encoding` writes UTF-8, UTF-8 with a signature, Latin-1, ASCII, cp1252, ISO 8859-15, UTF-16 and UTF-32, and names any other encoding as not supported yet. A template that uses `{% include %}` or `{% import %}` fails: nothing here loads a second file mid-render.
 
 Rejected before the host is asked anything:
 
 - `'state' cannot be specified on a template`
 - `src and dest are required`
 - `newline_sequence needs to be one of: \n, \r or \r\n`
-- `argument '<name>' is not supported yet on 'template'`, for a delimiter option
-- `output_encoding '<encoding>' is not supported yet on 'template': only utf-8 is`
+- `Block, variable and comment start strings must be different.`
+- `TemplateOverrides.<name> must be <class 'str'> instead of <class 'NoneType'>`, for a delimiter option that is empty or null
+- `output_encoding '<encoding>' is not supported yet on 'template': only utf-8, ... are`
 - A `src` that names nothing on the controller, in the reference's own words, with no `AnsibleActionFail` wrapper this time.
 - A render bigger than one frame is rejected, naming both sizes, before anything is staged.
 
@@ -149,7 +150,6 @@ The plugin reads the link's key and user (the host variable, `--private-key`, `-
 
 ### Known gaps
 
-- Template delimiters (`variable_start_string` and the five others) are not bridged; `template` still refuses them.
 - `wait_for_connection` on a host that is down from the first connection ends `UNREACHABLE` for a plugin item that never got a link; the reference reports `failed` with `timed out waiting for ping module test`.
 - A bridged result that is `unreachable` at the result level prints as `ok`.
 - A skipped bridged result carries `"failed": false`.
@@ -160,7 +160,7 @@ The plugin reads the link's key and user (the host variable, `--private-key`, `-
 
 ## A source file a managed host named
 
-A `src` is named by a managed host when its render read something a host contributed: a gathered fact, as in `src: "{{ ansible_os_family }}.j2"`, a registered result, or an item of `with_first_found` built from one. `[volant] host_named_paths` says what `copy`, `template`, `script`, `unarchive` and `assemble` do with it. It applies to the file read on the controller, and under `--check` and `--diff` too.
+A `src` is named by a managed host when its render read something a host contributed: a gathered fact, as in `src: "{{ ansible_os_family }}.j2"`, a registered result, or an item of `with_first_found` built from one. `[volant] host_named_paths` says what `copy`, `template`, `script`, `unarchive` and `assemble` do with it. It applies to the file read on the controller, and under `--check` and `--diff` too. For `template`, a delimiter option (`variable_start_string` and the five others) whose value a host contributed is used under `allow`, as ansible-core uses it, and refused under `contained` and `refuse`. A `#jinja2:` first line in an author's template is read in every mode.
 
 | Value | What the task does |
 |---|---|

@@ -278,12 +278,7 @@ pub(crate) fn parse_role_entries(node: &Yaml) -> anyhow::Result<Vec<RoleEntry>> 
 /// not - so `vars:` is read as the block keyword it is and only the leftovers are parameters.
 fn parse_role_entry(yaml: &Yaml) -> anyhow::Result<RoleEntry> {
     if let Some(name) = yaml.as_str() {
-        return Ok(RoleEntry {
-            name: name.to_string(),
-            from: RoleFrom::default(),
-            params: Map::new(),
-            keywords: PlayTask::empty(),
-        });
+        return Ok(RoleEntry::named(name, RoleFrom::default()));
     }
     let map = yaml
         .as_mapping()
@@ -334,6 +329,9 @@ fn parse_role_entry(yaml: &Yaml) -> anyhow::Result<RoleEntry> {
     let ignore_unreachable =
         boolean_or_template(yaml, "ignore_unreachable", &mut deferred.ignore_unreachable)?;
     Ok(RoleEntry {
+        public: true,
+        validate: true,
+        unique: false,
         name,
         from,
         params,

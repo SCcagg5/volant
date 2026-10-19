@@ -1,0 +1,7 @@
+- name: first
+  debug:
+    msg: "first v={{ v | default('unset') }} on {{ inventory_hostname }}"
+- name: second
+  debug:
+    msg: second
+  tags: [u]

@@ -1,0 +1,38 @@
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: first, false
+      include_role:
+        name: r
+        allow_duplicates: false
+    - name: same again, false
+      include_role:
+        name: r
+        allow_duplicates: false
+    - name: default
+      include_role:
+        name: r
+    - name: allowed
+      include_role:
+        name: r
+        allow_duplicates: true
+    - name: other vars, false
+      include_role:
+        name: r
+        allow_duplicates: false
+      vars:
+        p: 1
+    - name: other vars again, false
+      include_role:
+        name: r
+        allow_duplicates: false
+      vars:
+        p: 1
+    - name: other file, false
+      include_role:
+        name: r
+        tasks_from: other
+        allow_duplicates: false
+    - name: done
+      debug:
+        msg: done

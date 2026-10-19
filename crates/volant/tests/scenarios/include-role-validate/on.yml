@@ -1,0 +1,10 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: before
+      debug:
+        msg: before
+    - name: include, on
+      include_role:
+        name: sp
+        rolespec_validate: true
