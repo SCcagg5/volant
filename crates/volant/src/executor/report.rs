@@ -10,7 +10,9 @@ use crate::render::{DIFF_KEY, Dump, ERROR_KEY, ErrorBlock};
 
 use super::coordinator::Event;
 use super::debugger::{self, Answer, Hold, Kind};
-use super::run::{RetryLine, classify, empty_loop_result, loops, registered_value};
+use super::run::{
+    RetryLine, asks_to_be_hidden, classify, empty_loop_result, loops, registered_value,
+};
 
 /// Sends the result lines of one task and its `TaskDone`. Returns the result a rescue would be
 /// given as `ansible_failed_result` when the task failed for good, and `None` when it did not:
@@ -122,7 +124,7 @@ pub(super) async fn report_task(
                     name: names.get(i).cloned().unwrap_or_else(|| task.name.clone()),
                     left: *left,
                     result: attempt.clone(),
-                    censored,
+                    censored: censored || asks_to_be_hidden(attempt),
                 })
                 .await;
         }
@@ -167,7 +169,10 @@ pub(super) async fn report_task(
                 dump,
                 show: true,
                 counts: !is_loop,
-                censored,
+                // A result that asks to be hidden (`include_vars` of a vaulted file) is censored
+                // on its own line whatever the task's `no_log` says. Its error block is not: the
+                // reference words that block from the task's own `no_log` alone.
+                censored: censored || asks_to_be_hidden(r),
                 delegate: delegate.map(str::to_string),
                 error,
             })

@@ -1,0 +1,4 @@
+hc: 5
+hb: "{{ hc }}"
+hs: "{{ hb | int * 3 }}"
+hl: ["{{ ghost }}"]

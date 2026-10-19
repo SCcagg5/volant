@@ -1,0 +1,8 @@
+- hosts: "{{ a }}"
+  gather_facts: false
+  vars:
+    a: "{{ b }}"
+    b: "{{ a }}"
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }}"

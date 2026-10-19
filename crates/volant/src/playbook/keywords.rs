@@ -8,6 +8,7 @@ use volant_protocol::modules::{import_module, include_module, local, native, sho
 
 use crate::yaml::{as_bool, field, to_json};
 
+use super::deferred::{Deferred, boolean_or_template};
 use super::model::{Connect, PlayTask};
 use super::origin::value_origin;
 pub(super) fn connect_keywords(yaml: &Yaml, context: &str) -> anyhow::Result<Connect> {
@@ -52,13 +53,15 @@ pub const BECOME_METHODS: [&str; 2] = ["sudo", "su"];
 pub const META: &str = "meta";
 
 /// `become` and `become_user`, wherever they appear. `become_user` is read as text; `become`
-/// goes through `as_bool`, so `yes`, `on` and `"true"` all work as they do in Ansible. The
-/// method and its program are read with the connection keywords, which fold the same way.
+/// goes through `as_bool`, so `yes`, `on` and `"true"` all work as they do in Ansible, and a
+/// template waits in `deferred`. The method and its program are read with the connection
+/// keywords, which fold the same way.
 pub(super) fn escalation(
     yaml: &Yaml,
     context: &str,
+    deferred: &mut Deferred,
 ) -> anyhow::Result<(Option<bool>, Option<String>)> {
-    let flag = boolean(yaml, "become")?;
+    let flag = boolean_or_template(yaml, "become", &mut deferred.r#become)?;
     let user = match field(yaml, "become_user") {
         None | Some(Yaml::Value(Scalar::Null)) => None,
         Some(Yaml::Value(Scalar::String(s))) => Some(s.to_string()),
@@ -204,8 +207,9 @@ pub(super) fn flag(yaml: &Yaml, key: &str) -> anyhow::Result<Option<Flag>> {
 pub(super) fn delegation(
     yaml: &Yaml,
     context: &str,
+    deferred: &mut Deferred,
 ) -> anyhow::Result<(Option<bool>, Option<String>)> {
-    let facts = boolean(yaml, "delegate_facts")?;
+    let facts = boolean_or_template(yaml, "delegate_facts", &mut deferred.delegate_facts)?;
     let to = match field(yaml, "delegate_to") {
         None | Some(Yaml::Value(Scalar::Null)) => None,
         Some(Yaml::Value(Scalar::String(s))) => Some(s.to_string()),
@@ -355,6 +359,16 @@ pub(crate) fn possibly_all_template(text: &str) -> bool {
     text.starts_with("#jinja2:")
         || (["{%", "{{", "{#"].iter().any(|m| text.starts_with(m))
             && ["%}", "}}", "#}"].iter().any(|m| text.ends_with(m)))
+}
+
+/// Whether the reference's `FREEFORM_ACTIONS` holds this module: `command`, `shell`, `raw` and
+/// `script`, builtin or legacy spelled, and the two `ansible.windows` ones. A string argument of
+/// these is read with `parse_kv` and `check_raw`: only the command options leave the line.
+pub(super) fn is_command_line(module: &str) -> bool {
+    FREE_FORM_COLLECTION_MODULES.contains(&module)
+        || native(module).is_some_and(|m| m.free_form)
+        || crate::action_plugins::kind(module)
+            == Some(crate::action_plugins::Kind::Bridged("script"))
 }
 
 /// Whether the module's string form is one command line rather than `key=value` pairs.

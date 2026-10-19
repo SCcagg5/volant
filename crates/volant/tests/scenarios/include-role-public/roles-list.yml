@@ -1,0 +1,14 @@
+- hosts: h1
+  gather_facts: false
+  pre_tasks:
+    - name: public include before the roles
+      include_role:
+        name: q
+        public: true
+  roles:
+    - r
+  tasks:
+    - name: an included role without public sees what the roles lend
+      include_role:
+        name: r
+        tasks_from: other

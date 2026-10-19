@@ -48,11 +48,17 @@ const RECURSION: &str = "A recursion loop was detected with the roles specified.
 pub(super) type Seen = Vec<(String, Value)>;
 
 fn identity(entry: &RoleEntry) -> (String, Value) {
+    identity_with(entry, &entry.keywords.vars)
+}
+
+/// The identity of a role instance whose `vars:` are not on the entry: an `import_role` hands
+/// them down in the keywords of the statement.
+pub(super) fn identity_with(entry: &RoleEntry, vars: &Map<String, Value>) -> (String, Value) {
     (
         entry.name.clone(),
         serde_json::json!({
             "params": sorted(&entry.params),
-            "vars": sorted(&entry.keywords.vars),
+            "vars": sorted(vars),
             "when": entry.keywords.when,
             "from": [
                 &entry.from.tasks,
@@ -103,6 +109,14 @@ pub(super) struct Builder<'a> {
     /// list would leave every `BlockSpan` pointing at the indices the list used to have, and a
     /// span one step wide of the wrong step is how a host walks into a section it never entered.
     pub(super) selection: &'a TagSelection,
+    /// Whether the roles pushed now lend their variables to the play: false while the role of a
+    /// `public: false` statement and its dependencies are being read.
+    pub(super) exporting: bool,
+    /// The `import_role` statements already read, which an `import_role` that says
+    /// `allow_duplicates: false` is compared with. Measured on ansible-core 2.19.12: an import
+    /// is skipped for a host when an identical one ran before, whether that one allowed
+    /// duplicates or not, and the `roles:` list is not in the comparison.
+    pub(super) imported: Seen,
 }
 
 impl Builder<'_> {
@@ -182,6 +196,11 @@ impl Builder<'_> {
             "import_tasks" => return self.import_tasks(task, inherited, block, section, role),
             "import_role" => {
                 let entry = import_role_entry(task)?;
+                let key = identity_with(&entry, &task.vars);
+                if entry.unique && self.imported.contains(&key) {
+                    return Ok(());
+                }
+                self.imported.push(key);
                 // A fresh `seen` list: measured, `import_role` runs its role even when the
                 // play's `roles:` list has already run it with the same parameters. Its
                 // dependencies still deduplicate against each other.
@@ -332,7 +351,7 @@ impl Builder<'_> {
         section: Section,
     ) -> anyhow::Result<()> {
         let path = self.search.locate(&entry.name)?;
-        let role = crate::roles::load(&path, &entry.from)?;
+        let role = crate::roles::load(&path, &entry.name, &entry.from)?;
         let key = identity(entry);
         if !role.allow_duplicates && seen.contains(&key) {
             return Ok(());
@@ -349,6 +368,11 @@ impl Builder<'_> {
         // A role does not inherit the play's `collections`: it searches its own `meta/main.yml`
         // list, which may be empty, and a block or task inside it may still write another.
         kw.collections = Some(role.collections.clone());
+        // What this role lends is settled for it and for the roles it depends on, and restored
+        // before its tasks are read: an `import_role` written in them is a statement of its own.
+        let outer_exporting = self.exporting;
+        self.exporting = outer_exporting && entry.public;
+        let exporting = self.exporting;
         self.parent_roles.insert(0, path.clone());
         let dependencies: anyhow::Result<()> = role
             .dependencies
@@ -357,11 +381,14 @@ impl Builder<'_> {
         self.parent_roles.remove(0);
         dependencies?;
         let index = self.roles.len();
+        self.exporting = outer_exporting;
         self.roles.push(RoleVars {
             name: entry.name.clone(),
             defaults: role.defaults,
             vars: role.vars,
             params: entry.params.clone(),
+            public: exporting,
+            own: None,
         });
         // The role's handlers, before its tasks are walked, so a role imported by another one
         // contributes its handlers in front of the importer's. Their keywords are merged the way
@@ -373,7 +400,8 @@ impl Builder<'_> {
                 role: Some(index),
             });
         }
-        if let Some(spec) = role.argument_spec {
+        // `rolespec_validate: false` leaves the check out, whatever the role ships.
+        if let Some(spec) = role.argument_spec.filter(|_| entry.validate) {
             let task = merge(
                 &kw,
                 &validation(entry, &path, spec, role.argument_spec_description),

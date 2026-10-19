@@ -12,8 +12,9 @@ use super::announce::{
     options_dump, version_line,
 };
 use super::args::PlaybookArgs;
-use super::hosts::{play_hosts, resolve_limit, tag_selection};
+use super::hosts::{ListingHosts, play_hosts, rendered, resolve_limit, tag_selection};
 use super::passwords::{ask_passwords, ssh_words};
+use super::signals::spawn_signal_watcher;
 use crate::bridge::Bridge;
 use crate::compile::{self, Compiled};
 use crate::config::Config;
@@ -136,6 +137,14 @@ async fn run_all(
         return Ok(fatal.code);
     }
     let mut inventory = loaded.inventory;
+    // The reference checks the whole inventory, before any `--limit` and any playbook, and the
+    // implicit `localhost` is not in `all`.
+    if config.localhost_warning && inventory.resolve("all").hosts.is_empty() {
+        out.warning(
+            "provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'",
+            false,
+        );
+    }
     announce_callbacks(out);
     let dump = if out.verbose_at(4) {
         options_dump(args, &config, forks)
@@ -223,13 +232,15 @@ async fn run_all(
     let mut warned: HashSet<String> = HashSet::new();
     if mode.wanted() {
         let mut entries: Vec<listing::PlaybookEntry> = Vec::new();
+        let mut hosts_of = ListingHosts::new(args, &sources, &bridge, &selection, limit.as_ref());
         for (argument, (pb, steps)) in args.playbooks.iter().zip(playbooks.iter().zip(&compiled)) {
             let mut plays = Vec::new();
             for (play, compiled) in pb.plays.iter().zip(steps) {
                 // Resolved even for `--list-tasks`, which never prints a host: the reference
                 // warns about a pattern nothing matches whichever listing was asked for, and
                 // that warning is the only sign an operator gets of a typo in `hosts:`.
-                let hosts = play_hosts(&inventory, play, limit.as_ref(), out, &mut warned, false)?;
+                let play = hosts_of.render(play, compiled, &inventory)?;
+                let hosts = play_hosts(&inventory, &play, limit.as_ref(), out, &mut warned, false)?;
                 plays.push(listing::PlayEntry {
                     play,
                     compiled,
@@ -274,11 +285,13 @@ async fn run_all(
     for (pb, steps) in playbooks.iter().zip(&compiled) {
         for (play, compiled) in pb.plays.iter().zip(steps) {
             // Resolved quietly: `play_hosts` prints the pattern warnings when the play starts.
-            let matched = inventory.resolve(&play.hosts).hosts.iter().any(|h| {
-                limit
-                    .as_ref()
-                    .is_none_or(|allowed| allowed.contains(&h.name))
-            });
+            // A template is not known yet, so it may match: refused as a pattern that does.
+            let matched = executor::is_templated(play)
+                || inventory.resolve(&play.hosts).hosts.iter().any(|h| {
+                    limit
+                        .as_ref()
+                        .is_none_or(|allowed| allowed.contains(&h.name))
+                });
             preflight::check_steps(compiled, terminal && matched)?;
         }
     }
@@ -433,11 +446,14 @@ async fn run_all(
             return Ok(1);
         }
     };
-    // Held to the end of the run: the file the `ssh` calls ask for the password is removed
-    // when it drops.
-    let _connection_password = connection_password
-        .map(|password| crate::askpass::install(&password))
-        .transpose()?;
+    // The signals first: a run stopped from here on removes the password files on its way out.
+    let (stop_tx, stop_rx) = watch::channel(false);
+    let abort = Arc::new(Abort::new(stop_tx));
+    spawn_signal_watcher(Arc::clone(&abort));
+    crate::askpass::remove_stale();
+    // Held to the end of the run: the directory with the files the `ssh` calls ask for a
+    // password, those of a host variable's passwords too, is removed when it drops.
+    let _askpass = crate::askpass::install(connection_password.as_deref())?;
     let defaults = ConnectionDefaults {
         remote_user: args.user.clone().or(config.remote_user),
         connection: args.connection.clone(),
@@ -461,9 +477,6 @@ async fn run_all(
     };
     let mut stats = Stats::default();
 
-    let (stop_tx, stop_rx) = watch::channel(false);
-    let abort = Arc::new(Abort::new(stop_tx));
-    spawn_signal_watcher(Arc::clone(&abort));
     let options = RunOptions {
         defaults,
         forks,
@@ -471,6 +484,7 @@ async fn run_all(
         // force_handlers` are the same request.
         force_handlers: args.force_handlers || config.force_handlers,
         batching: config.batching,
+        host_named_paths: config.host_named_paths,
         control_dir: config
             .ssh_control_master
             .then(crate::transport::control_dir)
@@ -558,6 +572,7 @@ async fn run_all(
         failed_hosts: HashSet::new(),
         unreachable_hosts: HashSet::new(),
         refreshed: None,
+        played: false,
         verbosity: args.verbose,
         links: HashMap::new(),
         python: python.map(Arc::new),
@@ -623,12 +638,14 @@ async fn run_all(
                     &extra_for_check,
                     &mut prompt_warned,
                 )?;
-                let play = &*prompted;
+                let rendered = rendered(&prompted, compiled, &state, &inventory, limit.as_ref())?;
+                let play = &*rendered;
                 let hosts = play_hosts(&inventory, play, limit.as_ref(), out, &mut warned, true)?;
                 if !local_agent_checked && hosts.iter().any(&is_local) {
                     agents.local()?;
                     local_agent_checked = true;
                 }
+                state.played |= !hosts.is_empty();
                 let end = executor::run_play(
                     play, compiled, hosts, &agents, &options, &mut state, out, &mut stats,
                 )
@@ -698,29 +715,6 @@ pub(super) fn armed(union: python::Union, enabled: bool, facts: Facts) -> python
         natives: Natives { enabled, facts },
         ..union
     }
-}
-
-/// Ctrl-C and SIGTERM both request a clean stop: running batches are cancelled, the recap is
-/// printed, and the process exits with ansible-playbook's code 99.
-fn spawn_signal_watcher(stop: Arc<Abort>) {
-    tokio::spawn(async move {
-        #[cfg(unix)]
-        {
-            use tokio::signal::unix::{SignalKind, signal};
-            let Ok(mut term) = signal(SignalKind::terminate()) else {
-                return;
-            };
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => {}
-                _ = term.recv() => {}
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = tokio::signal::ctrl_c().await;
-        }
-        stop.interrupt();
-    });
 }
 
 /// The recap, then what `set_stats` collected when the run asks to see it.

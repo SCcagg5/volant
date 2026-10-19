@@ -664,7 +664,7 @@ fn plan() -> PlayPlan {
         play_vars: Map::new(),
         vars_files: HashMap::new(),
         all_play_hosts: Vec::new(),
-        r#become: None,
+        r#become: (None, None),
         become_user: None,
         python: None,
         step: None,
@@ -680,7 +680,7 @@ fn become_follows_the_variable_then_the_task_then_the_play() {
             let mut t = task("command");
             t.r#become = task_become;
             let mut p = plan();
-            p.r#become = play_become;
+            p.r#become = (play_become, None);
             become_for(&t, &p, &hvars(host), &defaults(), &templar).unwrap()
         };
         assert!(
@@ -841,7 +841,7 @@ type Program<'a> = (BecomeMethod, Vec<&'a str>, Option<Vec<&'a str>>);
 #[case::keywords(json!({}), (Some("su"), Some("/bin/su"), Some("- -m")), Ok((BecomeMethod::Su, vec!["/bin/su"], Some(vec!["-", "-m"]))))]
 #[case::host_over_keyword(json!({"ansible_become_method": "sudo", "ansible_become_exe": "/opt/sudo", "ansible_become_flags": "-E"}), (Some("su"), Some("/bin/su"), Some("-")), Ok((BecomeMethod::Sudo, vec!["/opt/sudo"], Some(vec!["-E"]))))]
 #[case::sudo_own_vars(json!({"ansible_sudo_exe": "/opt/sudo", "ansible_sudo_flags": "-E"}), (None, None, None), Ok((BecomeMethod::Sudo, vec!["/opt/sudo"], Some(vec!["-E"]))))]
-#[case::become_var_over_own(json!({"ansible_become_exe": "/a", "ansible_sudo_exe": "/b"}), (None, None, None), Ok((BecomeMethod::Sudo, vec!["/a"], None)))]
+#[case::own_var_over_become_var(json!({"ansible_become_exe": "/a", "ansible_sudo_exe": "/b", "ansible_become_flags": "-E", "ansible_sudo_flags": "-P"}), (None, None, None), Ok((BecomeMethod::Sudo, vec!["/b"], Some(vec!["-P"]))))]
 #[case::su_own_vars(json!({"ansible_su_exe": "/opt/su", "ansible_sudo_exe": "/ignored"}), (Some("su"), None, None), Ok((BecomeMethod::Su, vec!["/opt/su"], None)))]
 #[case::bad_l10n(json!({"ansible_su_prompt_l10n": "Passwort"}), (Some("su"), None, None), Err("must be a list of strings"))]
 #[case::templated(json!({"tool": "/usr/bin/sudo -E"}), (None, Some("{{ tool }}"), None), Ok((BecomeMethod::Sudo, vec!["/usr/bin/sudo", "-E"], None)))]
@@ -871,6 +871,37 @@ fn the_escalation_program_comes_from_the_variable_the_keyword_or_the_defaults(
         (Err(err), Err(says)) => assert!(err.0.contains(says), "{}", err.0),
         (got, want) => panic!("got {got:?}, wanted {want:?}"),
     }
+}
+
+/// Escalation user and password names in ansible-core 2.19.12's order: the method's own name,
+/// then `ansible_become_pass`, then `ansible_become_password`; a null is not set.
+#[rstest::rstest]
+#[case::password(json!({"ansible_become_password": "a"}), None, "a", "root")]
+#[case::pass_over_password(json!({"ansible_become_password": "a", "ansible_become_pass": "b"}), None, "b", "root")]
+#[case::sudo_pass_over_both(json!({"ansible_become_password": "a", "ansible_become_pass": "b", "ansible_sudo_pass": "c"}), None, "c", "root")]
+#[case::su_pass_for_su(json!({"ansible_become_pass": "b", "ansible_su_pass": "d", "ansible_sudo_pass": "c"}), Some("su"), "d", "root")]
+#[case::sudo_pass_ignored_by_su(json!({"ansible_sudo_pass": "c"}), Some("su"), "from the defaults", "root")]
+#[case::number(json!({"ansible_become_password": 1234}), None, "1234", "root")]
+#[case::null_is_not_set(json!({"ansible_become_password": null, "ansible_sudo_pass": "c"}), None, "c", "root")]
+#[case::list_is_no_password(json!({"ansible_become_password": ["a"]}), None, "from the defaults", "root")]
+#[case::user(json!({"ansible_become_user": "a", "ansible_sudo_user": "b"}), None, "from the defaults", "b")]
+#[case::su_user(json!({"ansible_become_user": "a", "ansible_su_user": "b", "ansible_sudo_user": "c"}), Some("su"), "from the defaults", "b")]
+fn the_escalation_user_and_password_follow_the_alias_order_of_the_reference(
+    #[case] vars: Value,
+    #[case] method: Option<&str>,
+    #[case] password: &str,
+    #[case] user: &str,
+) {
+    let mut t = task("command");
+    t.r#become = Some(true);
+    t.connect.become_method = method.map(str::to_string);
+    let mut d = defaults();
+    d.become_password = Some("from the defaults".into());
+    let e = become_for(&t, &plan(), &hvars(vars), &d, &templar())
+        .unwrap()
+        .unwrap();
+    assert_eq!(e.password.as_deref(), Some(password));
+    assert_eq!(e.user, user);
 }
 
 /// The password never has to be quoted, logged or formatted, so the one place it could still
@@ -1188,4 +1219,267 @@ fn a_notify_that_fails_to_render_fails_its_item_only() {
     assert!(prepared(&step, &store).is_err());
     step.task.loop_items = None;
     assert!(prepared(&step, &store).is_err());
+}
+
+/// What `resolve` made of one keyword written as a template, for a host whose variables are
+/// `on: true`, `off: false` and `n: 3`: the typed value the task runs with, or the failure.
+fn resolved(key: &str, template: &str) -> Result<Value, String> {
+    let mut t = task("command");
+    let slot = match key {
+        "any_errors_fatal" => &mut t.deferred.any_errors_fatal,
+        "async_val" => &mut t.deferred.async_val,
+        "delegate_facts" => &mut t.deferred.delegate_facts,
+        "ignore_unreachable" => &mut t.deferred.ignore_unreachable,
+        "no_log" => &mut t.deferred.no_log,
+        "poll" => &mut t.deferred.poll,
+        "run_once" => &mut t.deferred.run_once,
+        "timeout" => &mut t.deferred.timeout,
+        other => panic!("{other} is not rendered by `resolve`"),
+    };
+    *slot = Some(template.to_string());
+    let step = step_of(t, Origin::default());
+    let vars = hvars(json!({"on": true, "off": false, "n": 3}));
+    let resolution = super::resolve(&step, &[&vars], &templar());
+    if let Some(err) = resolution.error {
+        return Err(err.0);
+    }
+    let task = &resolution
+        .step
+        .expect("a step with a template is rendered")
+        .task;
+    Ok(match key {
+        "async_val" => json!(task.async_val),
+        "delegate_facts" => json!(task.delegate_facts),
+        "ignore_unreachable" => json!(task.ignore_unreachable),
+        "no_log" => json!(task.no_log),
+        "poll" => json!(task.poll),
+        "timeout" => json!(task.timeout),
+        // Validated, and read by the strategy as written, so nothing is stored.
+        _ => Value::Null,
+    })
+}
+
+/// Every keyword rendered when the task runs, with a template giving true, false or no boolean,
+/// as ansible-core 2.19.12 reads it; `async` is named `async_val` in the sentence.
+#[rstest::rstest]
+#[case::no_log_true("no_log", "{{ on }}", Ok(json!(true)))]
+#[case::no_log_false("no_log", "{{ off }}", Ok(json!(false)))]
+#[case::no_log_word("no_log", "{{ 'yes' }}", Ok(json!(true)))]
+#[case::delegate_facts_true("delegate_facts", "{{ on }}", Ok(json!(true)))]
+#[case::delegate_facts_false("delegate_facts", "{{ off }}", Ok(json!(false)))]
+#[case::ignore_unreachable_true("ignore_unreachable", "{{ on }}", Ok(json!(true)))]
+#[case::ignore_unreachable_false("ignore_unreachable", "{{ off }}", Ok(json!(false)))]
+#[case::any_errors_fatal_true("any_errors_fatal", "{{ on }}", Ok(Value::Null))]
+#[case::any_errors_fatal_false("any_errors_fatal", "{{ off }}", Ok(Value::Null))]
+#[case::run_once_true("run_once", "{{ on }}", Ok(Value::Null))]
+#[case::run_once_false("run_once", "{{ off }}", Ok(Value::Null))]
+#[case::no_log_invalid(
+    "no_log",
+    "{{ 'maybe' }}",
+    Err(
+        "Task failed: Error processing keyword 'no_log': The value 'maybe' could not be converted to 'bool'."
+    )
+)]
+#[case::delegate_facts_invalid(
+    "delegate_facts",
+    "{{ 'maybe' }}",
+    Err(
+        "Task failed: Error processing keyword 'delegate_facts': The value 'maybe' could not be converted to 'bool'."
+    )
+)]
+#[case::ignore_unreachable_invalid(
+    "ignore_unreachable",
+    "{{ 'maybe' }}",
+    Err(
+        "Task failed: Error processing keyword 'ignore_unreachable': The value 'maybe' could not be converted to 'bool'."
+    )
+)]
+#[case::any_errors_fatal_invalid(
+    "any_errors_fatal",
+    "{{ 'maybe' }}",
+    Err(
+        "Task failed: Error processing keyword 'any_errors_fatal': The value 'maybe' could not be converted to 'bool'."
+    )
+)]
+#[case::run_once_invalid(
+    "run_once",
+    "{{ 'maybe' }}",
+    Err(
+        "Task failed: Error processing keyword 'run_once': The value 'maybe' could not be converted to 'bool'."
+    )
+)]
+#[case::number_is_no_boolean(
+    "no_log",
+    "{{ 2 }}",
+    Err(
+        "Task failed: Error processing keyword 'no_log': The value 2 could not be converted to 'bool'."
+    )
+)]
+#[case::undefined_name(
+    "no_log",
+    "{{ nosuch }}",
+    Err("Task failed: Error processing keyword 'no_log': ")
+)]
+#[case::timeout_number("timeout", "{{ n }}", Ok(json!(3)))]
+#[case::timeout_text("timeout", "{{ '3' }}", Ok(json!(3)))]
+#[case::timeout_whole_float("timeout", "{{ 2.0 }}", Ok(json!(2)))]
+#[case::timeout_true("timeout", "{{ on }}", Ok(json!(1)))]
+#[case::timeout_zero("timeout", "{{ 0 }}", Ok(json!(0)))]
+#[case::timeout_word(
+    "timeout",
+    "{{ 'abc' }}",
+    Err(
+        "Task failed: Error processing keyword 'timeout': The value 'abc' could not be converted to 'int'."
+    )
+)]
+#[case::timeout_fraction(
+    "timeout",
+    "{{ 2.5 }}",
+    Err(
+        "Task failed: Error processing keyword 'timeout': The value 2.5 could not be converted to 'int'."
+    )
+)]
+#[case::timeout_empty(
+    "timeout",
+    "{{ '' }}",
+    Err(
+        "Task failed: Error processing keyword 'timeout': The value '' could not be converted to 'int'."
+    )
+)]
+#[case::timeout_negative(
+    "timeout",
+    "{{ -1 }}",
+    Err("Task failed: Timeout -1 is invalid, it must be between 0 and 100000000.")
+)]
+#[case::timeout_too_long(
+    "timeout",
+    "{{ 100000001 }}",
+    Err("Task failed: Timeout 100000001 is invalid, it must be between 0 and 100000000.")
+)]
+#[case::async_number("async_val", "{{ n }}", Ok(json!(3)))]
+#[case::async_negative(
+    "async_val",
+    "{{ -1 }}",
+    Err("Task failed: Error processing keyword 'async_val': the value -1 is negative")
+)]
+#[case::async_word(
+    "async_val",
+    "{{ 'abc' }}",
+    Err(
+        "Task failed: Error processing keyword 'async_val': The value 'abc' could not be converted to 'int'."
+    )
+)]
+#[case::poll_number("poll", "{{ n }}", Ok(json!(3)))]
+#[case::poll_negative(
+    "poll",
+    "{{ -1 }}",
+    Err("Task failed: Error processing keyword 'poll': the value -1 is negative")
+)]
+#[case::poll_word(
+    "poll",
+    "{{ 'abc' }}",
+    Err(
+        "Task failed: Error processing keyword 'poll': The value 'abc' could not be converted to 'int'."
+    )
+)]
+fn keywords_written_as_templates_are_rendered_for_the_host(
+    #[case] key: &str,
+    #[case] template: &str,
+    #[case] want: Result<Value, &str>,
+) {
+    match (resolved(key, template), want) {
+        (Ok(got), Ok(want)) => assert_eq!(got, want),
+        (Err(got), Err(want)) => assert!(got.starts_with(want), "{got}"),
+        (got, want) => panic!("{got:?} against {want:?}"),
+    }
+}
+
+/// A value that is no boolean masks the task's output and warns, and the task still fails on it.
+#[test]
+fn a_no_log_that_is_no_boolean_masks_the_task_and_warns() {
+    let mut t = task("command");
+    t.deferred.no_log = Some("{{ 'maybe' }}".into());
+    let step = step_of(t, Origin::default());
+    let resolution = super::resolve(&step, &[&hvars(json!({}))], &templar());
+    assert!(resolution.error.is_some());
+    assert!(resolution.step.expect("rendered").task.censors());
+    assert_eq!(
+        resolution.warnings,
+        [
+            "Invalid no_log value for task, output will be masked: Error processing keyword 'no_log': The value 'maybe' could not be converted to 'bool'."
+        ]
+    );
+}
+
+/// A step that wrote no template is not copied: the compiled step is the one that runs.
+#[test]
+fn a_step_without_templates_resolves_to_nothing() {
+    let mut t = task("command");
+    t.no_log = Some(true);
+    let step = step_of(t, Origin::default());
+    let resolution = super::resolve(&step, &[&hvars(json!({}))], &templar());
+    assert!(resolution.step.is_none() && resolution.error.is_none());
+}
+
+/// A templated `become` is rendered for the host, and the layer nearest the task is the only one
+/// read: a task's own literal hides a play's template, which is then never rendered.
+#[test]
+fn a_templated_become_is_rendered_for_the_host() {
+    let templar = templar();
+    let vars = hvars(json!({"on": true, "off": false}));
+    let escalates =
+        |task_template: Option<&str>, task_fixed, play: (Option<bool>, Option<&str>)| {
+            let mut t = task("command");
+            t.r#become = task_fixed;
+            t.deferred.r#become = task_template.map(str::to_string);
+            let mut p = plan();
+            p.r#become = (play.0, play.1.map(str::to_string));
+            become_for(&t, &p, &vars, &defaults(), &templar).map(|e| e.is_some())
+        };
+    assert_eq!(escalates(Some("{{ on }}"), None, (None, None)), Ok(true));
+    assert_eq!(escalates(Some("{{ off }}"), None, (None, None)), Ok(false));
+    assert_eq!(escalates(None, None, (None, Some("{{ on }}"))), Ok(true));
+    assert_eq!(
+        escalates(None, Some(false), (None, Some("{{ on }}"))),
+        Ok(false),
+        "the task's literal hides the play's template"
+    );
+    assert_eq!(
+        escalates(None, Some(true), (None, Some("{{ 'maybe' }}"))),
+        Ok(true),
+        "and the play's template is not rendered at all"
+    );
+    assert_eq!(
+        escalates(Some("{{ off }}"), None, (Some(true), None)),
+        Ok(false),
+        "a task's template beats the play's literal"
+    );
+    let err = escalates(Some("{{ 'maybe' }}"), None, (None, None)).unwrap_err();
+    assert_eq!(
+        err.0,
+        "Task failed: Error processing keyword 'become': The value 'maybe' could not be converted to 'bool'."
+    );
+}
+
+/// `no_log` is the task's, so a loop task is hidden when any item's value hides it, and shown only
+/// when every item's value shows it. Each item's own value would be the reference's reading.
+#[test]
+fn a_templated_no_log_hides_every_item_of_a_loop_when_one_item_hides() {
+    let mut t = task("command");
+    t.deferred.no_log = Some("{{ item.hide }}".into());
+    let step = step_of(t, Origin::default());
+    let items = |hides: [bool; 2]| hides.map(|hide| hvars(json!({"item": {"hide": hide}})));
+    for (hides, want) in [
+        ([false, false], false),
+        ([false, true], true),
+        ([true, false], true),
+    ] {
+        let vars = items(hides);
+        let resolution = super::resolve(&step, &[&vars[0], &vars[1]], &templar());
+        assert_eq!(
+            resolution.step.expect("rendered").task.no_log,
+            Some(want),
+            "{hides:?}"
+        );
+    }
 }

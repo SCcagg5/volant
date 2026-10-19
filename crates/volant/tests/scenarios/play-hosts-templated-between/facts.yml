@@ -1,0 +1,21 @@
+- hosts: s1
+  gather_facts: false
+  tasks:
+    - set_fact:
+        picked: w2
+    - set_fact:
+        tpl_pick: "{{ 'w1' }}"
+
+- name: A fact of the first play
+  hosts: "{{ hostvars['s1']['picked'] }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }}"
+
+- name: A fact through a filter
+  hosts: "{{ hostvars['s1']['tpl_pick'] | upper | lower }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }}"

@@ -1,0 +1,18 @@
+- name: sub play
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: plain task
+      debug: {msg: plain}
+    - name: extra task
+      debug: {msg: extra}
+      tags: [extra]
+    - name: always task
+      debug: {msg: always}
+      tags: [always]
+    - name: never task
+      debug: {msg: never}
+      tags: [never]
+    - name: debug task
+      debug: {msg: debugging}
+      tags: [never, debug]

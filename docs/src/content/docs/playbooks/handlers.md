@@ -35,6 +35,10 @@ Handlers run in the order they are defined, not the order they were notified. A 
 
 A task notifies only when it reports `changed`. For a loop, the overall result decides, so one changed item is enough. Once a flush has run, the notifications are cleared, so a handler does not run again at the next flush unless something notifies it again.
 
+## Keywords from the play
+
+A handler in the play's `handlers:` list takes the play's task keywords as a task does, and as a handler from a role does. This covers `no_log`, `environment`, `ignore_errors`, `ignore_unreachable`, `any_errors_fatal`, `run_once`, `timeout`, `throttle`, `debugger`, `connection`, `port`, `remote_user`, the `become` keywords, `check_mode`, `diff`, `module_defaults` and `collections`. A keyword the handler sets itself wins. A play with `no_log: true` hides the results of its handlers too.
+
 ## When a handler fails
 
 A failing handler removes the host like any other failing task, and it stops the handlers after it in the same flush. A flush written inside a block belongs to that block, so a handler that fails there is caught by the block's `rescue`.

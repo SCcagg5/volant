@@ -1,0 +1,8 @@
+- name: Own variables
+  hosts: "{{ pick | default('w1') }}"
+  gather_facts: false
+  vars:
+    pick: s1
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }}"

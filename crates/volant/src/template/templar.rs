@@ -1,29 +1,48 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! `Templar`: renders templates, expressions and conditionals against a set of variables.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
-use minijinja::machinery::{Instruction, Instructions, WhitespaceConfig};
+use minijinja::machinery::{Instruction, Instructions};
 use minijinja::{Environment, ErrorKind};
 use serde_json::{Map, Value};
 
 use crate::bridge::{Bridge, PluginKind};
 
 use super::bridged;
-use super::context::{Vars, context_of};
+use super::context::{Vars, begin, context_of, is_literal, reads, take_failure};
 use super::env::{environment, holds_undefined, truthy, type_name};
 use super::filters;
 use super::vm::{
-    convert_error, eval_expr, holds_template, render_str, single_expression, unwrap_unsafe,
+    TemplateReads, convert_error, eval_expr, keep_literal, single_expression, template_reads,
 };
 use super::{RESOLVING, Tainted, TemplateError};
 
+/// A handle on the environment and the bridge, cheap to clone: a render's context holds one so
+/// that a variable whose value is a template can be rendered when a template reads it.
+#[derive(Clone)]
 pub struct Templar {
+    inner: Arc<Shared>,
+}
+
+struct Shared {
     env: RwLock<Bridged>,
     bridge: Option<Arc<Bridge>>,
+    /// What each template text read, found once: a variable's text is analyzed on every task.
+    reads: Mutex<HashMap<String, Option<Arc<TemplateReads>>>>,
+}
+
+/// Entries kept before the table starts over. Texts are the playbook's own variables, so a run
+/// stays far below it.
+const MAX_READS: usize = 8192;
+
+impl std::fmt::Debug for Templar {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Templar")
+    }
 }
 
 /// The environment a render runs in, and the filter and test names already looked at.
@@ -46,24 +65,34 @@ impl Templar {
 
     /// The bridge to ansible-core this templar sends what it lacks to, when it has one.
     pub(crate) fn bridge(&self) -> Option<&Arc<Bridge>> {
-        self.bridge.as_ref()
+        self.inner.bridge.as_ref()
     }
 
     /// [`Templar::new`], sending what the engine lacks to `bridge`: a filter or test the engine
     /// has no native implementation of, a lookup it does not run. A native name never reaches it.
     pub fn with_bridge(base_dir: PathBuf, bridge: Option<Arc<Bridge>>) -> Self {
         Self {
-            env: RwLock::new(Bridged {
-                env: Arc::new(environment(base_dir, bridge.as_ref())),
-                seen: HashSet::new(),
+            inner: Arc::new(Shared {
+                env: RwLock::new(Bridged {
+                    env: Arc::new(environment(base_dir, bridge.as_ref())),
+                    seen: HashSet::new(),
+                }),
+                bridge,
+                reads: Mutex::new(HashMap::new()),
             }),
-            bridge,
         }
     }
 
     /// The environment as it stands.
     pub(crate) fn env(&self) -> Arc<Environment<'static>> {
-        Arc::clone(&self.env.read().unwrap_or_else(PoisonError::into_inner).env)
+        Arc::clone(
+            &self
+                .inner
+                .env
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .env,
+        )
     }
 
     /// The environment to run `code` in: [`Templar::env`], plus a call to the bridge under each
@@ -72,7 +101,7 @@ impl Templar {
         &self,
         code: impl IntoIterator<Item = &'a Instructions<'s>>,
     ) -> Arc<Environment<'static>> {
-        let Some(bridge) = &self.bridge else {
+        let Some(bridge) = &self.inner.bridge else {
             return self.env();
         };
         let mut used = Vec::new();
@@ -115,12 +144,20 @@ impl Templar {
             }
         }
         {
-            let current = self.env.read().unwrap_or_else(PoisonError::into_inner);
+            let current = self
+                .inner
+                .env
+                .read()
+                .unwrap_or_else(PoisonError::into_inner);
             if used.iter().all(|name| current.seen.contains(name)) {
                 return Arc::clone(&current.env);
             }
         }
-        let mut current = self.env.write().unwrap_or_else(PoisonError::into_inner);
+        let mut current = self
+            .inner
+            .env
+            .write()
+            .unwrap_or_else(PoisonError::into_inner);
         let Bridged { env, seen } = &mut *current;
         for (kind, name) in used {
             if seen.contains(&(kind, name.clone())) {
@@ -134,6 +171,24 @@ impl Templar {
         Arc::clone(env)
     }
 
+    /// What the template `text` reads, cached. `None` when it does not compile.
+    pub(super) fn reads_of(&self, text: &str) -> Option<Arc<TemplateReads>> {
+        let mut table = self
+            .inner
+            .reads
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(known) = table.get(text) {
+            return known.clone();
+        }
+        let found = template_reads(text).map(Arc::new);
+        if table.len() >= MAX_READS {
+            table.clear();
+        }
+        table.insert(text.to_string(), found.clone());
+        found
+    }
+
     pub fn is_template(text: &str) -> bool {
         text.contains("{{") || text.contains("{%")
     }
@@ -145,7 +200,7 @@ impl Templar {
         text: &str,
         vars: impl Into<Vars<'a>>,
     ) -> Result<Value, TemplateError> {
-        let (ctx, tainted) = context_of(vars.into());
+        let (ctx, tainted) = context_of(self, vars.into());
         self.render_in(text, &ctx, &tainted)
     }
 
@@ -158,49 +213,32 @@ impl Templar {
         // Per string, not per context: `render_value_in` walks a whole structure through one
         // context, and a tainted field must not make the next field data too.
         tainted.store(false, Ordering::Relaxed);
+        let before = begin(ctx);
         let mut value = self.render_once(text, ctx)?;
+        keep_literal(text, &value, ctx, true, reads(ctx) == before);
         // A variable can hold a template of its own, so Ansible renders a result again while it
         // still carries a marker. Three further passes: a chain longer than that is a loop, and
-        // an unchanged result ends it earlier.
-        //
-        // Not when the pass read a value that came from a managed host, or a file read at run
-        // time: such a result is data, and rendering it again is how a remote string gets to
-        // run code here.
+        // an unchanged result ends it earlier. Not when the pass read a value that came from a
+        // managed host, or a file read at run time: such a result is data, and rendering it
+        // again is how a remote string gets to run code here. Nor when the text wrote the
+        // marker itself: see `keep_literal`.
         for _ in 0..3 {
-            if tainted.load(Ordering::Relaxed) {
+            if tainted.load(Ordering::Relaxed) || is_literal(ctx) {
                 break;
             }
             let Value::String(text) = &value else { break };
             if !Self::is_template(text) {
                 break;
             }
+            let before = reads(ctx);
             let next = self.render_once(text, ctx)?;
             if next == value {
                 break;
             }
+            keep_literal(text, &next, ctx, false, reads(ctx) == before);
             value = next;
         }
         Ok(value)
-    }
-
-    fn render_once(&self, text: &str, ctx: &minijinja::Value) -> Result<Value, TemplateError> {
-        if !Self::is_template(text) {
-            return Ok(Value::String(text.to_string()));
-        }
-        // Whitespace around the expression, a final newline included, is text: the reference
-        // keeps it, so the result is a string.
-        if text.trim() == text
-            && let Some(expr) = single_expression(text)
-        {
-            return self.evaluate_in(expr, ctx);
-        }
-        let ws = WhitespaceConfig {
-            keep_trailing_newline: true,
-            ..WhitespaceConfig::default()
-        };
-        render_str(self, "<string>", text, ctx, ws)
-            .map(Value::String)
-            .map_err(convert_error)
     }
 
     /// `render`, one pass: a result that is itself a template is not rendered again, which is how
@@ -210,7 +248,7 @@ impl Templar {
         text: &str,
         vars: impl Into<Vars<'a>>,
     ) -> Result<Value, TemplateError> {
-        let (ctx, _tainted) = context_of(vars.into());
+        let (ctx, _tainted) = context_of(self, vars.into());
         self.render_once(text, &ctx)
     }
 
@@ -223,18 +261,17 @@ impl Templar {
         Ok(self.render_value_tainted(value, vars)?.0)
     }
 
-    /// `render_value`, saying as well whether what came out is data: true when any string of it
-    /// was rendered by a pass that read a name from a managed host, or read a file at run time.
-    /// The loop path asks, because the items of a loop built from a registered list are data and
-    /// must not be rendered again once they are bound to the loop variable.
+    /// `render_value`, saying as well whether what came out is data: true when a string of it
+    /// read a name from a managed host or a file at run time, or holds text `keep_literal` keeps.
+    /// The loop path asks: such items must not be rendered again once bound to the loop variable.
     pub fn render_value_tainted<'a>(
         &self,
         value: &Value,
         vars: impl Into<Vars<'a>>,
     ) -> Result<(Value, bool), TemplateError> {
-        let (ctx, tainted) = context_of(vars.into());
+        let (ctx, tainted) = context_of(self, vars.into());
         let mut any = false;
-        let out = self.render_value_in(value, &ctx, &tainted, &mut any)?;
+        let out = self.render_value_in(value, &ctx, &tainted, &mut any, true)?;
         Ok((out, any))
     }
 
@@ -251,13 +288,13 @@ impl Templar {
         map: &Map<String, Value>,
         vars: impl Into<Vars<'a>>,
     ) -> Result<(Map<String, Value>, BTreeSet<String>), TemplateError> {
-        let (ctx, tainted) = context_of(vars.into());
+        let (ctx, tainted) = context_of(self, vars.into());
         let mut out = Map::new();
         let mut untrusted = BTreeSet::new();
         for (key, value) in map {
             let mut any = false;
             let rendered = self
-                .render_value_in(value, &ctx, &tainted, &mut any)
+                .render_value_in(value, &ctx, &tainted, &mut any, false)
                 .map_err(|err| {
                     // Measured on ansible-core 2.19.12: a plugin's failure names the value it
                     // was resolving, `Error while resolving value for 'msg': The lookup plugin
@@ -287,23 +324,24 @@ impl Templar {
         ctx: &minijinja::Value,
         tainted: &Tainted,
         any: &mut bool,
+        keep: bool,
     ) -> Result<Value, TemplateError> {
         Ok(match value {
             Value::String(s) => {
                 let out = self.render_in(s, ctx, tainted)?;
-                *any |= tainted.load(Ordering::Relaxed);
+                *any |= tainted.load(Ordering::Relaxed) || (keep && is_literal(ctx));
                 out
             }
             Value::Array(items) => Value::Array(
                 items
                     .iter()
-                    .map(|v| self.render_value_in(v, ctx, tainted, any))
+                    .map(|v| self.render_value_in(v, ctx, tainted, any, keep))
                     .collect::<Result<_, _>>()?,
             ),
             Value::Object(map) => {
                 let mut out = Map::new();
                 for (k, v) in map {
-                    out.insert(k.clone(), self.render_value_in(v, ctx, tainted, any)?);
+                    out.insert(k.clone(), self.render_value_in(v, ctx, tainted, any, keep)?);
                 }
                 Value::Object(out)
             }
@@ -319,7 +357,7 @@ impl Templar {
     ) -> Result<Value, TemplateError> {
         // `evaluate_in` takes one pass and no more, so a result built from a name that came from
         // a managed host is already handed back as it stands: there is nothing here to stop.
-        self.evaluate_in(expr, &context_of(vars.into()).0)
+        self.evaluate_in(expr, &context_of(self, vars.into()).0)
     }
 
     /// `evaluate`, and whether the value is data: a lookup read a file, a command or the
@@ -329,13 +367,23 @@ impl Templar {
         expr: &str,
         vars: impl Into<Vars<'a>>,
     ) -> Result<(Value, bool), TemplateError> {
-        let (ctx, tainted) = context_of(vars.into());
+        let (ctx, tainted) = context_of(self, vars.into());
         let value = self.evaluate_in(expr, &ctx)?;
         Ok((value, tainted.load(Ordering::Relaxed)))
     }
 
-    fn evaluate_in(&self, expr: &str, ctx: &minijinja::Value) -> Result<Value, TemplateError> {
-        let value = eval_expr(self, expr, ctx).map_err(convert_error)?;
+    pub(super) fn evaluate_in(
+        &self,
+        expr: &str,
+        ctx: &minijinja::Value,
+    ) -> Result<Value, TemplateError> {
+        let value = eval_expr(self, expr, ctx).map_err(convert_error);
+        // A variable the expression read failed to render: that is the error, whatever the
+        // undefined value it was read as did to the expression.
+        if let Some(error) = take_failure(ctx) {
+            return Err(error);
+        }
+        let value = value?;
         // Strict mode only raises on operations that force an undefined value (printing,
         // comparing, ...); an attribute lookup that never gets used stays a lazy Undefined, alone
         // or inside a list or mapping, that serde_json would otherwise turn into `null`. Force
@@ -347,115 +395,6 @@ impl Templar {
         }
         serde_json::to_value(&value)
             .map_err(|e| TemplateError(format!("cannot convert template result: {e}")))
-    }
-
-    /// Templates the string values of a variable map against the map itself, a few passes, until
-    /// nothing changes. Best effort: a value that fails to render is left as written, so the
-    /// error surfaces where the value is used, as it does in Ansible.
-    ///
-    /// A name that came from a managed host is left exactly as it arrived. This is the other
-    /// half of the barrier `render_in` holds: the merged map a task renders against carries the
-    /// facts, so a registered value whose text looks like an expression would be evaluated here,
-    /// one task before anything even reads it.
-    ///
-    /// The names that are data once it is done travel out with the map: the ones it was given
-    /// plus the ones a pass turned into data by rendering them from one of those.
-    ///
-    /// The second half is the part a caller cannot work out for itself. A task's own `vars:` are
-    /// resolved here and read nowhere else, so a name the playbook wrote over a registered value
-    /// has no entry anywhere to be looked up by: unless this set travels out with the map, the
-    /// arguments rendered against that map read the payload as author content and evaluate it.
-    pub fn resolve_vars_tainted<'a>(
-        &self,
-        vars: impl Into<Vars<'a>>,
-    ) -> (Map<String, Value>, BTreeSet<String>) {
-        let vars = vars.into();
-        let given = || vars.untrusted.cloned().unwrap_or_default();
-        // Most maps hold no template at all: walking them once is far cheaper than the two
-        // clones a pass costs.
-        if !vars.map.values().any(holds_template) {
-            return (vars.map.clone(), given());
-        }
-        // The names the store knows about, and the ones a pass turns into data as it goes: a
-        // value rendered from a managed host's name, or from a file read at run time, is data
-        // from that pass on and the passes after this one leave it alone.
-        let mut untrusted = given();
-        let mut current = vars.map.clone();
-        // What `!unsafe` loaded as is text from here on: a sibling that reads it must see the
-        // text, not the wrapper, and the name is data so no pass renders it.
-        for (k, v) in &mut current {
-            if matches!(v, Value::String(s) if crate::yaml::vault_text(s).is_some()) {
-                crate::vault::note_name(k);
-            }
-            if !untrusted.contains(k) && unwrap_unsafe(v) {
-                untrusted.insert(k.clone());
-            }
-        }
-        for _ in 0..5 {
-            // One context for the whole pass: every value of the map renders against the same
-            // map, so building it per value paid for the same conversion once per variable.
-            let (ctx, tainted) = context_of(Vars {
-                map: &current,
-                hostvars: vars.hostvars,
-                shared: vars.shared,
-                facts: vars.facts,
-                untrusted: Some(&untrusted),
-                untrusted_hosts: vars.untrusted_hosts,
-            });
-            let mut next = current.clone();
-            let mut changed = false;
-            let mut soiled = Vec::new();
-            for (k, v) in &current {
-                if untrusted.contains(k) {
-                    continue;
-                }
-                let mut any = false;
-                let rendered = self.render_value_lenient(v, &ctx, &tainted, &mut any);
-                if any {
-                    soiled.push(k.clone());
-                }
-                if rendered != *v {
-                    changed = true;
-                    next.insert(k.clone(), rendered);
-                }
-            }
-            untrusted.extend(soiled);
-            current = next;
-            if !changed {
-                break;
-            }
-        }
-        (current, untrusted)
-    }
-
-    fn render_value_lenient(
-        &self,
-        value: &Value,
-        ctx: &minijinja::Value,
-        tainted: &Tainted,
-        any: &mut bool,
-    ) -> Value {
-        match value {
-            Value::String(s) if Self::is_template(s) => {
-                let out = self
-                    .render_in(s, ctx, tainted)
-                    .unwrap_or_else(|_| value.clone());
-                *any |= tainted.load(Ordering::Relaxed);
-                out
-            }
-            Value::Array(items) => Value::Array(
-                items
-                    .iter()
-                    .map(|v| self.render_value_lenient(v, ctx, tainted, any))
-                    .collect(),
-            ),
-            Value::Object(map) => Value::Object(
-                map.iter()
-                    .map(|(k, v)| (k.clone(), self.render_value_lenient(v, ctx, tainted, any)))
-                    .collect(),
-            ),
-            other => other.clone(),
-        }
     }
 
     /// A `when` clause. Ansible accepts `{{ }}` around it with a warning; the result must be a
@@ -470,7 +409,7 @@ impl Templar {
         expr: &str,
         vars: impl Into<Vars<'a>>,
     ) -> Result<bool, TemplateError> {
-        let (ctx, tainted) = context_of(vars.into());
+        let (ctx, tainted) = context_of(self, vars.into());
         let delimited = single_expression(expr);
         let mut value = self.evaluate_in(delimited.unwrap_or(expr.trim()), &ctx)?;
         if delimited.is_some()

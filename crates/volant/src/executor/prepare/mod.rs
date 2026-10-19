@@ -2,37 +2,46 @@
 //! Rendering one task for one host: variables, escalation, environment and loop items.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value, json};
 use volant_protocol::TaskResult;
+use volant_protocol::modules::short_name;
 
 use crate::compile::Step;
 use crate::playbook::{Flag, python_repr};
-use crate::template::{Templar, TemplateError};
+use crate::template::{ALLITEMS_KEY, Templar, TemplateError};
 use crate::transport::ConnectionDefaults;
 use crate::vars::{HostVars, VarStore};
 
 use super::coordinator::Progress;
 
+mod carry;
 mod connect;
 mod escalation;
 mod item;
+mod late;
 mod loops;
 mod plan;
 mod vars;
 
 pub(in crate::executor) use escalation::retry_name;
+pub(in crate::executor) use item::strict_boolean;
 pub(in crate::executor) use item::{
-    FINALIZING, Item, NOTIFY_FAILED, Prepared, failure_text, pause_of, undefined_name,
+    FINALIZING, Item, NOTIFY_FAILED, Prepared, failed_result, failure_text, pause_of,
+    undefined_name,
 };
+pub(in crate::executor) use late::{hide_after_failure, resolve, strategy_reads_as_true};
 pub(in crate::executor) use plan::{Gate, PlayPlan, Strategy};
 pub(in crate::executor) use vars::host_vars;
+use vars::{Named, delegate_host_vars, merged_vars, resolved};
 
+use carry::Carry;
 use connect::{connect_for, delegate_for};
 use escalation::{become_for, remove_omit};
 use item::{check_gather_subset, environment_for, flag_for, ignore_errors_for, notify_for};
-use loops::{LoopOptions, loop_list, loop_options, with_lookup_items};
+pub(in crate::executor) use loops::undefined_causes;
+use loops::{LoopOptions, loop_list, loop_options, named_undefined, with_lookup_items};
 
 #[expect(
     clippy::too_many_arguments,
@@ -55,22 +64,59 @@ pub(super) fn prepare(
         .expect("vars lock")
         .playbook_dir()
         .to_path_buf();
-    let base = host_vars(
-        host,
-        plan,
-        &task.vars,
-        step.role,
-        step.include_params.as_deref(),
-        live,
-        templar,
-        store,
-        &step.origin,
-        &playbook_dir,
-    );
+    // A looped `set_fact` hands what it sets to the items after it, so it keeps the variables
+    // before they resolve each other: see `carry`.
+    let carries = task.loop_items.is_some() && short_name(&task.module) == "set_fact";
+    let (base, mut carry) = if carries {
+        let merged = merged_vars(
+            host,
+            Named::ByTheRun,
+            plan,
+            &task.vars,
+            step.role,
+            step.include_params.as_deref(),
+            live,
+            store,
+            &step.origin,
+            &playbook_dir,
+        );
+        (resolved(merged.clone(), templar), Some(Carry::new(merged)))
+    } else {
+        let base = host_vars(
+            host,
+            plan,
+            &task.vars,
+            step.role,
+            step.include_params.as_deref(),
+            live,
+            templar,
+            store,
+            &step.origin,
+            &playbook_dir,
+        );
+        (base, None)
+    };
+    // Every item of a loop starts from these variables. They are shared rather than copied
+    // into each item, so that the memory of a loop does not grow with the size of what the host
+    // holds, a registered result for one.
+    let mut base = if task.loop_items.is_some() {
+        base.shared_by_items()
+    } else {
+        base
+    };
     // Whether the list this loop walks came from a managed host. A loop over a literal list the
     // playbook wrote binds author content; one over `{{ r.stdout_lines }}` binds data, and the
     // items of such a loop are never rendered again.
     let mut items_from_host = false;
+    // The groups and keys of `module_defaults`, and the lookups of a `with_` loop, that an include
+    // brought in while the play runs have not been asked about yet. A loop over a lookup nothing
+    // answers to is refused before its terms are read.
+    if !task.module_defaults.is_empty() || task.loop_with.is_some() {
+        plan.steps()
+            .resolved
+            .ensure([task], templar.bridge().map(|bridge| &**bridge))
+            .map_err(TemplateError)?;
+    }
     // An undefined variable in the loop is kept rather than raised, the way the reference's
     // `TaskExecutor.run` keeps `_loop_eval_error`: the task's `when`, read without an item,
     // decides first, and the error is raised only if the task would run. Any other loop error
@@ -90,19 +136,14 @@ pub(super) fn prepare(
             list.into_iter().map(Some).collect()
         }
         Some(Err(e)) if e.is_undefined() => {
-            loop_error = Some(e);
+            loop_error = Some(match &task.loop_items {
+                Some(raw) => named_undefined(raw, e),
+                None => e,
+            });
             vec![None]
         }
         Some(Err(e)) => return Err(e),
     };
-    // The groups and keys of `module_defaults` an include brought in while the play runs have
-    // not been asked about yet.
-    if !task.module_defaults.is_empty() {
-        plan.steps()
-            .resolved
-            .ensure([task], templar.bridge().map(|bridge| &**bridge))
-            .map_err(TemplateError)?;
-    }
     let mut items = Vec::new();
     // What `ansible_loop` reads: every item, kept only when the loop asks for `extended`.
     let options = if task.loop_items.is_some() {
@@ -121,10 +162,17 @@ pub(super) fn prepare(
     };
     let list_value = (options.extended && options.allitems)
         .then(|| Value::Array(list.iter().map(|v| (*v).clone()).collect()));
+    // The list of all the items is one value for the loop: an item reads it through
+    // `ansible_loop.allitems`, see `ALLITEMS_KEY`.
+    if let Some(all) = &list_value {
+        Arc::make_mut(&mut base.base).insert(ALLITEMS_KEY.into(), all.clone());
+    }
     let mut notify_failures = 0;
     let mut first_notify_error: Option<TemplateError> = None;
     for (index, element) in elements.iter().cloned().enumerate() {
-        let mut vars = base.clone();
+        let mut vars = carry
+            .as_ref()
+            .map_or_else(|| base.clone(), |c| c.vars(&base));
         if let Some(el) = &element {
             if items_from_host {
                 vars.insert_untrusted(task.loop_var.clone(), el.clone());
@@ -148,9 +196,6 @@ pub(super) fn prepare(
                 ansible_loop.insert("length".into(), Value::from(list.len()));
                 ansible_loop.insert("revindex".into(), Value::from(list.len() - index));
                 ansible_loop.insert("revindex0".into(), Value::from(last - index));
-                if let Some(all) = &list_value {
-                    ansible_loop.insert("allitems".into(), all.clone());
-                }
                 if index < last {
                     ansible_loop.insert("nextitem".into(), list[index + 1].clone());
                 }
@@ -208,7 +253,7 @@ pub(super) fn prepare(
             // the render's words before the conditional could report it, which the reference's
             // `finalize_task_arg` for `assert` does not do.
             //
-            let raw = if volant_protocol::modules::short_name(&task.module) == "assert" {
+            let raw = if short_name(&task.module) == "assert" {
                 let mut raw = task.args.clone();
                 raw.remove("that");
                 std::borrow::Cow::Owned(raw)
@@ -320,6 +365,16 @@ pub(super) fn prepare(
             set_fact_names: std::sync::OnceLock::new(),
             notify,
         });
+        if let (Some(carry), Some(item)) = (&mut carry, items.last_mut()) {
+            carry.take(item, templar);
+            // The reference renders `loop_control.label` after the item ran, so it reads the
+            // facts the item just set.
+            if let (Some(template), Some(_)) = (&task.loop_label, &item.element) {
+                let mut after = item.vars.clone();
+                carry.lay_over(&mut after);
+                item.label = Some(display(&templar.render(template, &after)?));
+            }
+        }
     }
     // Every item failing to render its `notify` is the task's own failure.
     if let Some(err) = first_notify_error.filter(|_| notify_failures == items.len()) {
@@ -330,7 +385,8 @@ pub(super) fn prepare(
     }
     let delegate = delegate_for(task, &base, templar)?;
     if is_local(&task.module) || crate::action_plugins::controller_side(&task.module) {
-        return Ok(Prepared::Local(items, delegate));
+        late::check_become(task, plan, &base, templar)?;
+        return Ok(Prepared::Local(items, delegate.map(|(name, _)| name)));
     }
     let connect = Box::new(connect_for(task, &base, templar)?);
     // A delegate's variables come back merged under the full precedence, like any host's: its
@@ -342,9 +398,10 @@ pub(super) fn prepare(
     // load-time error. The implicit spellings get their local connection from
     // `VarStore::for_host`, which is where every host's view is built and where the delegating
     // host's own implicit `localhost` gets it too.
-    let delegate = delegate.map(|name| {
-        let vars = host_vars(
+    let delegate = delegate.map(|(name, data)| {
+        let vars = delegate_host_vars(
             &name,
+            Named::ByDelegate { data },
             plan,
             &task.vars,
             step.role,

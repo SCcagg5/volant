@@ -5,6 +5,7 @@ Thanks for your interest. Bug reports, fixes, features and documentation are all
 ## Before you start
 
 - Search the existing [issues](https://github.com/lorica-labs/volant/issues) and [discussions](https://github.com/lorica-labs/volant/discussions).
+- Looking for something to work on? The [roadmap board](https://github.com/orgs/lorica-labs/projects/1) groups the planned work by release. Each issue gives the expected behaviour, the acceptance criteria and where to start; comment on it before you begin.
 - For anything larger than a fix, open an issue first so we can agree on the approach.
 - Report security problems privately, as described in [SECURITY.md](SECURITY.md), never in a public issue.
 - A playbook that behaves differently under Volant and `ansible-playbook` is a bug. The [compatibility template](https://github.com/lorica-labs/volant/issues/new?template=compat.yml) asks for what we need to reproduce it.
@@ -52,6 +53,8 @@ The `ssh_*` tests run a playbook over a real `ssh`, so `just check` leaves them 
    ```
 
    It must not be the system `python3`. The tests use it as the controller's Python, and the point of the check is that the controller and the managed host use two different interpreters.
+
+The test of the `ansible_password` variable also needs an account on that sshd that logs in with a password. Name it in `VOLANT_SSH_TEST_PASSWORD_USER` and give its password in `VOLANT_SSH_TEST_PASSWORD`. Without them the test says so and passes.
 
 The tests only talk to `localhost`, which is why CI can run them unchanged.
 

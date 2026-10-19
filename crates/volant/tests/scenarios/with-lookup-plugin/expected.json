@@ -1,0 +1,4 @@
+{
+  "code": 0,
+  "stdout": "\nPLAY [localhost] ***************************************************************\n\nTASK [A plugin beside the playbook] ********************************************\nok: [localhost] => (item=L-aa) => {\n    \"msg\": \"0:aa\"\n}\nok: [localhost] => (item=L-bb) => {\n    \"msg\": \"1:bb\"\n}\n\nPLAY RECAP *********************************************************************\nlocalhost                  : ok=1    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   \n\n"
+}

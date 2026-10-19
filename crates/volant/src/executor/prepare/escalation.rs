@@ -5,9 +5,10 @@ use serde_json::Value;
 
 use crate::playbook::PlayTask;
 use crate::template::{Templar, TemplateError};
-use crate::transport::{BecomeMethod, ConnectionDefaults, Escalation};
+use crate::transport::{BecomeMethod, ConnectionDefaults, Escalation, first_set, secret_text};
 use crate::vars::{HostVars, host_setting, omit_token};
 
+use super::late::keyword_bool;
 use super::plan::PlayPlan;
 use crate::executor::as_bool_value;
 
@@ -50,10 +51,31 @@ pub(super) fn become_for(
     defaults: &ConnectionDefaults,
     templar: &Templar,
 ) -> Result<Option<Escalation>, TemplateError> {
+    // The keyword is rendered for every task that carries it, a host variable that decides first
+    // or not: the reference validates the task's keywords all together. The layer closest to the
+    // task is the only one read, so the play's template is left alone when the task has its own.
+    let written = keyword_bool(
+        "become",
+        task.r#become,
+        task.deferred.r#become.as_deref(),
+        vars,
+        templar,
+    )?;
+    let from_play = if written.is_none() {
+        keyword_bool(
+            "become",
+            play.r#become.0,
+            play.r#become.1.as_deref(),
+            vars,
+            templar,
+        )?
+    } else {
+        None
+    };
     let on = host_setting(vars, "ansible_become")
         .and_then(as_bool_value)
-        .or(task.r#become)
-        .or(play.r#become)
+        .or(written)
+        .or(from_play)
         .unwrap_or(defaults.r#become);
     if !on {
         return Ok(None);
@@ -78,19 +100,25 @@ pub(super) fn become_for(
         .ok_or_else(|| TemplateError(format!("{source} '{method}' is not supported yet")))?;
     // `become_exe` and `become_flags` in the same order, each a template or not, then split into
     // the words the escalation program is given.
-    // The variables a setting is read from, in the reference's order: `ansible_become_*`, then
-    // the method's own `ansible_sudo_*` or `ansible_su_*`.
+    // The variables a setting is read from, in the order they win. The reference lists
+    // `ansible_become_*` and then the method's own `ansible_sudo_*` or `ansible_su_*`, and the
+    // last one a host sets applies. Measured on ansible-core 2.19.12 for the user, the program,
+    // the flags and the password: `ansible_sudo_user` beats `ansible_become_user`, and
+    // `ansible_sudo_pass` beats `ansible_become_pass`, which beats `ansible_become_password`.
     let own = match method {
         BecomeMethod::Sudo => "sudo",
         BecomeMethod::Su => "su",
     };
     let named = |suffix: &str| {
         [
-            format!("ansible_become_{suffix}"),
             format!("ansible_{own}_{suffix}"),
+            format!("ansible_become_{suffix}"),
         ]
     };
-    let first = |names: &[String]| names.iter().find_map(|n| host_setting(vars, n));
+    let first = |names: &[String]| {
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        first_set(vars, &names)
+    };
     let program = |suffix: &str, keyword: &Option<String>, default: &Option<String>| {
         let var = format!("ansible_become_{suffix}");
         let raw = match first(&named(suffix)).and_then(Value::as_str) {
@@ -159,11 +187,15 @@ pub(super) fn become_for(
     } else {
         user
     };
-    let password = host_setting(vars, "ansible_become_password")
-        .or_else(|| host_setting(vars, "ansible_become_pass"))
-        .or_else(|| host_setting(vars, &format!("ansible_{own}_pass")))
-        .and_then(Value::as_str)
-        .map(str::to_string)
+    // Spelled as three reads, each beside its own name, so the scan that checks a managed host
+    // cannot set a name the engine reads sees all three.
+    fn set(value: Option<&Value>) -> Option<&Value> {
+        value.filter(|value| !value.is_null())
+    }
+    let password = set(host_setting(vars, &format!("ansible_{own}_pass")))
+        .or_else(|| set(host_setting(vars, "ansible_become_pass")))
+        .or_else(|| set(host_setting(vars, "ansible_become_password")))
+        .and_then(secret_text)
         .or_else(|| defaults.become_password.clone());
     // Only `su` reads `prompt_l10n`; it replaces the built-in prompts.
     let prompt_l10n = match (method, host_setting(vars, "ansible_su_prompt_l10n")) {

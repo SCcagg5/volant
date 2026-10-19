@@ -1,0 +1,6 @@
+- hosts: h1
+  gather_facts: false
+  roles:
+    - {role: r2, x: []}
+  tasks:
+    - debug: {var: x}

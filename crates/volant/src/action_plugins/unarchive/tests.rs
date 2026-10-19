@@ -6,6 +6,7 @@ use serde_json::json;
 
 use super::*;
 use crate::action_plugins::files::MAX_FILE_LEN;
+use crate::config::HostNamedPaths;
 use crate::testing::scratch;
 
 /// A scratch directory holding `files/` and an existing `dest/`.
@@ -21,6 +22,16 @@ fn start_in(
     untrusted: &BTreeSet<String>,
     dir: &Path,
 ) -> Box<dyn Plugin> {
+    start_mode(HostNamedPaths::Refuse, args, untrusted, dir)
+}
+
+/// [`start_in`] under the `host_named_paths` mode `mode`.
+fn start_mode(
+    mode: HostNamedPaths,
+    args: &Map<String, Value>,
+    untrusted: &BTreeSet<String>,
+    dir: &Path,
+) -> Box<dyn Plugin> {
     let running = crate::vars::HostVars::default();
     let item_vars = crate::vars::HostVars::default();
     let templar = crate::template::Templar::new(dir.to_path_buf());
@@ -30,6 +41,7 @@ fn start_in(
     };
     let mut warnings = Vec::new();
     start(Context {
+        link: &crate::action_plugins::LinkFacts::default(),
         args,
         args_untrusted: untrusted,
         running_vars: &running,
@@ -40,6 +52,7 @@ fn start_in(
         templar: &templar,
         origin: &origin,
         playbook_dir: dir,
+        host_named_paths: mode,
         warnings: &mut warnings,
 
         environment: None,
@@ -139,6 +152,95 @@ fn a_source_a_host_named_is_never_read() {
             "{}",
             named.display()
         );
+    }
+}
+
+/// A host-named `src` is read as the mode says, and an archive that is read is staged for the
+/// module.
+#[rstest::rstest]
+#[case::allow_inside(HostNamedPaths::Allow, "bundle.tar.gz", true)]
+#[case::allow_climbing(HostNamedPaths::Allow, "../bundle.tar.gz", true)]
+#[case::contained_inside(HostNamedPaths::Contained, "bundle.tar.gz", true)]
+#[case::contained_climbing(HostNamedPaths::Contained, "../bundle.tar.gz", false)]
+#[case::refuse_inside(HostNamedPaths::Refuse, "bundle.tar.gz", false)]
+fn a_source_a_host_named_is_read_as_the_mode_says(
+    #[case] mode: HostNamedPaths,
+    #[case] name: &str,
+    #[case] read: bool,
+) {
+    let dir_guard = layout();
+    let play = dir_guard.path().join("play");
+    std::fs::create_dir_all(play.join("files")).unwrap();
+    std::fs::create_dir_all(play.join("dest")).unwrap();
+    std::fs::write(play.join("files/bundle.tar.gz"), b"in").unwrap();
+    std::fs::write(dir_guard.path().join("bundle.tar.gz"), b"out").unwrap();
+    let mut task_args = Map::new();
+    task_args.insert("src".into(), json!(name));
+    task_args.insert(
+        "dest".into(),
+        json!(play.join("dest").display().to_string()),
+    );
+    let untrusted: BTreeSet<String> = ["src".to_string()].into();
+    let mut plugin = start_mode(mode, &task_args, &untrusted, &play);
+    run(plugin.as_mut(), None);
+    let step = plugin.next(Some(TaskResult(
+        json!({"stat": {"exists": true, "isdir": true}})
+            .as_object()
+            .unwrap()
+            .clone(),
+    )));
+    match (step, read) {
+        (Step::Run(sub), true) => assert_eq!(sub.module, "unarchive"),
+        (Step::Done(result), false) => {
+            let msg = result.0["msg"].as_str().unwrap();
+            assert!(msg.contains("named by a managed host"), "{msg}");
+        }
+        (other, _) => panic!("{name}: read={read}, step {other:?}"),
+    }
+}
+
+/// `remote_src` and `copy` are read as ansible-core reads a boolean: a source on the host is not
+/// held to the directories, and the module gets it as written.
+#[rstest::rstest]
+#[case::remote_src_y(json!({"remote_src": "y"}), true)]
+#[case::remote_src_capital_t(json!({"remote_src": "T"}), true)]
+#[case::remote_src_one(json!({"remote_src": 1}), true)]
+#[case::remote_src_one_point_zero(json!({"remote_src": 1.0}), true)]
+#[case::copy_no(json!({"copy": "no"}), true)]
+#[case::copy_n(json!({"copy": "n"}), true)]
+#[case::copy_f(json!({"copy": "F"}), true)]
+#[case::copy_yes(json!({"copy": "yes"}), false)]
+#[case::copy_one(json!({"copy": 1}), false)]
+#[case::remote_src_n(json!({"remote_src": "n"}), false)]
+#[case::remote_src_one_point_zero_text(json!({"remote_src": "1.0"}), false)]
+fn the_remote_source_is_read_as_ansible_core_reads_it(#[case] extra: Value, #[case] remote: bool) {
+    let dir_guard = layout();
+    let dir = dir_guard.path().to_path_buf();
+    let mut task_args = Map::new();
+    task_args.insert("src".into(), json!("/nowhere/a.tgz"));
+    task_args.insert("dest".into(), json!(dir.join("dest").display().to_string()));
+    task_args.extend(extra.as_object().unwrap().clone());
+    let untrusted: BTreeSet<String> = ["src".to_string()].into();
+    let mut plugin = start_mode(HostNamedPaths::Contained, &task_args, &untrusted, &dir);
+    let first = run(plugin.as_mut(), None);
+    assert_eq!(first.module, "stat");
+    let step = plugin.next(Some(TaskResult(
+        json!({"stat": {"exists": true, "isdir": true}})
+            .as_object()
+            .unwrap()
+            .clone(),
+    )));
+    match (step, remote) {
+        (Step::Run(sub), true) => {
+            assert_eq!(sub.module, "unarchive");
+            assert_eq!(sub.args["src"], json!("/nowhere/a.tgz"));
+            assert!(sub.files.is_empty());
+        }
+        (Step::Done(result), false) => {
+            let msg = result.0["msg"].as_str().unwrap();
+            assert!(msg.contains("named by a managed host"), "{msg}");
+        }
+        (other, _) => panic!("remote={remote}, step {other:?}"),
     }
 }
 

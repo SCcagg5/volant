@@ -163,6 +163,9 @@ fn every_host_setting_is_stripped_from_gathered_facts() {
         bypasses.is_empty(),
         "read by name outside `host_setting`: {bypasses:?}"
     );
+    // The connection settings are read through the tables of `transport::names`, which the
+    // pattern above cannot see.
+    read.extend(crate::transport::connection_variables().map(str::to_string));
     for known in [
         "ansible_host",
         "ansible_become_password",
@@ -406,6 +409,139 @@ fn the_run_s_tag_lists_decide_the_kubeconfig_block() {
     assert_eq!(holds(&mut store), (false, json!(["all"]), json!(["foo"])));
 }
 
+/// `hostvars` answers for the three spellings of the controller, listed or not, as ansible-core
+/// 2.19.12 does: an unlisted one is an implicit local host, a spelling of a listed one is that host.
+#[rstest::rstest]
+#[case::implicit_localhost("", "web1", "localhost", "localhost", json!("local"), json!(null))]
+#[case::implicit_loopback("", "web1", "127.0.0.1", "localhost", json!("local"), json!(null))]
+#[case::implicit_v6("", "web1", "::1", "localhost", json!("local"), json!(null))]
+#[case::named_after_the_first_spelling("", "::1", "localhost", "::1", json!("local"), json!(null))]
+#[case::listed_keeps_its_vars("localhost foo=1\n", "web1", "localhost", "localhost", json!(null), json!(1))]
+#[case::another_spelling_is_the_listed_host("localhost foo=1\n", "web1", "::1", "localhost", json!(null), json!(1))]
+#[case::the_first_listed_wins("::1 foo=2\nlocalhost foo=1\n", "web1", "127.0.0.1", "::1", json!(null), json!(2))]
+fn hostvars_answers_for_every_spelling_of_the_controller(
+    #[case] listed: &str,
+    #[case] first_host: &str,
+    #[case] spelling: &str,
+    #[case] name: &str,
+    #[case] connection: Value,
+    #[case] foo: Value,
+) {
+    let tmp = scratch();
+    let dir = tmp.path();
+    write(
+        dir,
+        "inventory/hosts.ini",
+        &format!("[web]\nweb1\n{listed}"),
+    );
+    let inv = Inventory::load(&dir.join("inventory/hosts.ini")).unwrap();
+    let mut store = VarStore::new(
+        &inv,
+        Some(&dir.join("inventory/hosts.ini")),
+        &dir.join("play"),
+        Map::new(),
+    )
+    .unwrap();
+    crate::runtime::resolve::set_test_python(Some("/ctl/python3"));
+    let view = store.hostvars_shared(first_host);
+    let entry = &*settled(&view[spelling]);
+    assert_eq!(entry["inventory_hostname"], json!(name));
+    assert_eq!(
+        entry.get("ansible_connection").unwrap_or(&Value::Null),
+        &connection
+    );
+    assert_eq!(entry.get("foo").unwrap_or(&Value::Null), &foo);
+    if connection == json!("local") {
+        assert_eq!(entry["ansible_python_interpreter"], json!("/ctl/python3"));
+    }
+    assert_eq!(entry["ansible_facts"], json!({}));
+}
+
+/// Finding the controller's Python starts one, so the implicit host's entry holds a stand-in until
+/// it is read, and a layer above the inventory's own still replaces the interpreter before then.
+#[rstest::rstest]
+#[case::the_controllers_python(None, Some("/ctl/python3"), Some(json!("/ctl/python3")))]
+#[case::none_resolves(None, None, None)]
+#[case::a_host_file_wins(Some("ansible_python_interpreter: /hv/python\n"), Some("/ctl/python3"), Some(json!("/hv/python")))]
+fn the_implicit_hosts_interpreter_is_looked_up_when_its_entry_is_read(
+    #[case] host_file: Option<&str>,
+    #[case] controller: Option<&str>,
+    #[case] want: Option<Value>,
+) {
+    let tmp = scratch();
+    let dir = tmp.path();
+    write(dir, "inventory/hosts.ini", "[web]\nweb1\n");
+    if let Some(text) = host_file {
+        write(dir, "inventory/host_vars/localhost.yml", text);
+    }
+    let inv = Inventory::load(&dir.join("inventory/hosts.ini")).unwrap();
+    let mut store = VarStore::new(
+        &inv,
+        Some(&dir.join("inventory/hosts.ini")),
+        &dir.join("play"),
+        Map::new(),
+    )
+    .unwrap();
+    crate::runtime::resolve::set_test_python(controller);
+    let view = store.hostvars_shared("web1");
+    let raw = view["localhost"].get("ansible_python_interpreter");
+    if host_file.is_none() {
+        assert_eq!(raw, Some(&json!(PENDING_PYTHON)), "built without a lookup");
+    }
+    let entry = settled(&view["localhost"]);
+    assert_eq!(entry.get("ansible_python_interpreter"), want.as_ref());
+}
+
+/// What a managed host returned stays data, whichever spelling of the controller a template reads
+/// it through: the hosts that hold such text include every spelling once one of them does.
+#[rstest::rstest]
+#[case::listed("localhost\n", "localhost", true)]
+#[case::listed_loopback("127.0.0.1\n", "127.0.0.1", true)]
+#[case::implicit("", "localhost", true)]
+#[case::implicit_under_another_spelling("", "::1", true)]
+#[case::another_host("", "web1", false)]
+fn the_controller_s_text_is_data_under_every_spelling(
+    #[case] listed: &str,
+    #[case] ran_as: &str,
+    #[case] all_spellings: bool,
+) {
+    let tmp = scratch();
+    let dir = tmp.path();
+    write(
+        dir,
+        "inventory/hosts.ini",
+        &format!("[web]\nweb1\n{listed}"),
+    );
+    let inv = Inventory::load(&dir.join("inventory/hosts.ini")).unwrap();
+    let mut store = VarStore::new(&inv, None, &dir.join("play"), Map::new()).unwrap();
+    store.set_untrusted_fact(ran_as, "r", json!({"stdout": "text"}));
+    let held = store.untrusted_hosts();
+    for spelling in crate::inventory::LOCALHOST_NAMES {
+        assert_eq!(
+            held.contains(spelling),
+            all_spellings,
+            "{spelling} after a register under {ran_as}: {held:?}"
+        );
+    }
+    assert!(held.contains(ran_as));
+}
+
+/// A fact the controller gathers shows in every spelling that stands for it.
+#[test]
+fn a_spelling_of_the_controller_follows_its_host() {
+    let tmp = scratch();
+    let dir = tmp.path();
+    write(dir, "inventory/hosts.ini", "[web]\nweb1\nlocalhost\n");
+    let inv = Inventory::load(&dir.join("inventory/hosts.ini")).unwrap();
+    let mut store = VarStore::new(&inv, None, &dir.join("play"), Map::new()).unwrap();
+    assert!(store.hostvars_shared("web1")["::1"]["marker"].is_null());
+    store.set_fact("localhost", "marker", json!("set"));
+    let view = store.hostvars_shared("web1");
+    assert_eq!(view["localhost"]["marker"], json!("set"));
+    assert_eq!(view["127.0.0.1"]["marker"], json!("set"));
+    assert_eq!(view["::1"]["marker"], json!("set"));
+}
+
 /// The view `hostvars` reads: one shared map for every host of the inventory, and a completed
 /// one for a host the inventory does not carry.
 #[test]
@@ -430,7 +566,11 @@ fn the_shared_hostvars_view_answers_for_every_host() {
     );
     let implicit = store.hostvars_shared("localhost");
     assert!(
-        !view.contains_key("localhost"),
+        view.contains_key("localhost"),
+        "the controller answers in hostvars though it is in no group"
+    );
+    assert!(
+        !store.groups["all"].contains(&"localhost".to_string()),
         "an implicit localhost is in no group"
     );
     assert_eq!(
@@ -731,6 +871,7 @@ fn every_layer_keeps_its_trust_through_the_layered_view() {
             facts: Some(facts),
             untrusted: Some(&untrusted),
             untrusted_hosts: Some(&untrusted_hosts),
+            base: None,
         });
         let names = [
             "d", "i", "g", "gp", "p", "f", "rv", "t", "sf", "su", "rp", "e", "built", "groups",
@@ -749,6 +890,7 @@ fn every_layer_keeps_its_trust_through_the_layered_view() {
                             facts: Some(facts),
                             untrusted: Some(&soiled),
                             untrusted_hosts: Some(&untrusted_hosts),
+                            base: None,
                         },
                     )
                     .unwrap()
@@ -826,6 +968,7 @@ fn a_gathered_fact_reaches_a_template_lookup() {
                     facts: Some(facts),
                     untrusted: Some(&untrusted),
                     untrusted_hosts: None,
+                    base: None,
                 },
             )
             .unwrap()
@@ -1044,6 +1187,172 @@ h1
     assert!(!store.untrusted_of("n1", &scope(&["n1"])).contains("plain"));
 }
 
+const EVIL: &str = "{{ lookup('pipe','id') }}";
+const BLOCK: &str = "a{% if x %}b{% endif %}";
+const NOTE: &str = "{# note #}";
+
+/// One `add_host` and one read of it.
+struct NameRow {
+    /// The host `add_host` added, and the groups it joined.
+    name: &'static str,
+    groups: &'static [&'static str],
+    /// The host whose template reads, the hosts of its batch and of its whole play.
+    reader: &'static str,
+    batch: &'static [&'static str],
+    whole: &'static [&'static str],
+    /// The lists that taint the read, and whether `hostvars[name]` does.
+    tainted: &'static [&'static str],
+    host_is_data: bool,
+}
+
+const fn name_row(
+    name: &'static str,
+    groups: &'static [&'static str],
+    reader: &'static str,
+    play: &'static [&'static str],
+    tainted: &'static [&'static str],
+    host_is_data: bool,
+) -> NameRow {
+    NameRow {
+        name,
+        groups,
+        reader,
+        batch: play,
+        whole: play,
+        tainted,
+        host_is_data,
+    }
+}
+
+const EVERY_LIST: &[&str] = &[
+    "ansible_play_batch",
+    "ansible_play_hosts",
+    "ansible_play_hosts_all",
+    "groups",
+    crate::template::HOSTVARS_KEYS,
+    "inventory_hostname",
+    "inventory_hostname_short",
+    "play_hosts",
+];
+
+const NAME_ROWS: &[NameRow] = &[
+    name_row("web1", &["web"], "web1", &["web1"], &[], false),
+    name_row("a{b}", &["x}{y"], "a{b}", &["a{b}"], &[], false),
+    name_row(
+        "nh",
+        &[EVIL],
+        "nh",
+        &["nh"],
+        &["group_names", "groups"],
+        false,
+    ),
+    name_row("nh", &[EVIL], "h1", &["h1"], &["groups"], false),
+    name_row(
+        "nh",
+        &[NOTE],
+        "nh",
+        &["nh"],
+        &["group_names", "groups"],
+        false,
+    ),
+    name_row(EVIL, &[], EVIL, &[EVIL], EVERY_LIST, true),
+    name_row(
+        EVIL,
+        &[],
+        "h1",
+        &["h1"],
+        &["groups", crate::template::HOSTVARS_KEYS],
+        true,
+    ),
+    NameRow {
+        whole: &["h1", BLOCK],
+        ..name_row(
+            BLOCK,
+            &[],
+            "h1",
+            &["h1"],
+            &[
+                "ansible_play_hosts_all",
+                "groups",
+                crate::template::HOSTVARS_KEYS,
+            ],
+            true,
+        )
+    },
+];
+
+/// An `add_host` name that still holds a template taints each read of a list that carries it,
+/// and a read of nothing it is in stays clean.
+#[test]
+fn an_add_host_name_that_holds_a_template_is_data_wherever_it_is_read() {
+    const LISTS: [&str; 9] = [
+        "ansible_play_batch",
+        "ansible_play_hosts",
+        "ansible_play_hosts_all",
+        "group_names",
+        "groups",
+        crate::template::HOSTVARS_KEYS,
+        "inventory_hostname",
+        "inventory_hostname_short",
+        "play_hosts",
+    ];
+    for row in NAME_ROWS {
+        let tmp = scratch();
+        let inv = Inventory::parse_ini("[g]\nh1\n").unwrap();
+        let mut store = VarStore::new(&inv, None, tmp.path(), Map::new()).unwrap();
+        let strings = |v: &[&str]| v.iter().map(ToString::to_string).collect::<Vec<_>>();
+        store.add_host(row.name, &strings(row.groups), &Map::new());
+        let at = Scope {
+            play_hosts: strings(row.batch),
+            batch_hosts: strings(row.batch),
+            all_play_hosts: strings(row.whole),
+            ..Scope::default()
+        };
+        let data = store.untrusted_of(row.reader, &at);
+        let got: Vec<&str> = LISTS.into_iter().filter(|n| data.contains(*n)).collect();
+        assert_eq!(
+            got, row.tainted,
+            "{:?} added with {:?}, read by {:?}",
+            row.name, row.groups, row.reader
+        );
+        assert_eq!(
+            store.untrusted_hosts().contains(row.name),
+            row.host_is_data,
+            "{:?} as a host that holds a template",
+            row.name
+        );
+    }
+}
+
+/// `group_by` names a group from a registered result the way `add_host` does: the group, and
+/// each parent, is data when it holds a template, and a read of the lists that carry it taints.
+#[test]
+fn a_group_by_name_that_holds_a_template_is_data_wherever_it_is_read() {
+    let evil = "{{ lookup('pipe','id') }}";
+    for (group, parents) in [(evil, vec![]), ("kind", vec![evil]), ("kind", vec!["a"])] {
+        let tmp = scratch();
+        let inv = Inventory::parse_ini("[g]\nh1\n").unwrap();
+        let mut store = VarStore::new(&inv, None, tmp.path(), Map::new()).unwrap();
+        let parents: Vec<String> = parents.iter().map(ToString::to_string).collect();
+        store.add_to_group("h1", group, &parents);
+        let data = store.untrusted_of("h1", &scope(&["h1"]));
+        let holds = group == evil || parents.iter().any(|p| p == evil);
+        assert_eq!(
+            data.contains("groups"),
+            holds,
+            "groups after {group:?} under {parents:?}"
+        );
+        // A group is not among `hostvars`' keys: a nested template of a host still renders.
+        assert!(
+            !data.contains(crate::template::HOSTVARS_KEYS),
+            "hostvars after {group:?}"
+        );
+        if group == evil {
+            assert!(data.contains("group_names"), "group_names after {group:?}");
+        }
+    }
+}
+
 /// A vaulted vars file is read with the run's secrets; one it cannot read is named.
 #[test]
 fn a_vaulted_vars_file_is_decrypted_or_refused_by_name() {
@@ -1161,4 +1470,220 @@ fn a_role_default_loses_to_the_controller_python_of_the_implicit_localhost() {
         .clone();
     let v = store.for_host("localhost", &sc);
     assert_eq!(v["ansible_python_interpreter"], json!("/ctl/python3"));
+}
+
+/// The variables the items of a loop share leave the templates in the map, keep the text of a
+/// managed host as data, and still answer every read the whole map did.
+#[test]
+fn the_variables_items_share_keep_templates_apart_and_stay_readable() {
+    let mut vars = HostVars::default();
+    vars.map.insert("plain".into(), json!(1));
+    vars.map.insert("built".into(), json!("{{ item }}"));
+    vars.map.insert("printed".into(), json!("{{ 7 * 6 }}"));
+    vars.untrusted.insert("printed".into());
+    let mut vars = vars.shared_by_items();
+    assert!(vars.map.contains_key("built") && vars.map.len() == 1);
+    assert_eq!(vars.get("plain"), Some(&json!(1)));
+    assert_eq!(vars.get("printed"), Some(&json!("{{ 7 * 6 }}")));
+    assert!(vars.untrusted.contains("printed"));
+    assert_eq!(vars.own_variables().len(), 3);
+    // A write lands over the shared value and leaves the share alone.
+    vars.insert("plain".into(), json!(2));
+    assert_eq!(vars.get("plain"), Some(&json!(2)));
+    assert_eq!(vars.base.get("plain"), Some(&json!(1)));
+    let templar = Templar::new(std::env::temp_dir());
+    assert_eq!(
+        templar.render("{{ plain }}-{{ printed }}", &vars).unwrap(),
+        json!("2-{{ 7 * 6 }}")
+    );
+    // A template left in the map that reads the host's text from the share renders it as data
+    // once the item is bound, and is data itself from then on.
+    vars.insert("item".into(), json!("a"));
+    vars.insert("echo".into(), json!("{{ printed }}-{{ item }}"));
+    let (map, untrusted) = templar.resolve_vars_tainted(&vars);
+    assert_eq!(map["built"], json!("a"));
+    assert!(untrusted.contains("echo") && !untrusted.contains("built"));
+    vars.map = map;
+    vars.untrusted = untrusted;
+    assert_eq!(
+        templar.render("{{ echo }}", &vars).unwrap(),
+        json!("{{ 7 * 6 }}-a")
+    );
+}
+
+/// What a directory read gives, in order: the files and the variables. The tree holds mixed-case
+/// names, hidden entries, `sub` and `sub-b`, a nested directory and a text file.
+#[rstest::rstest]
+#[case::directories_by_path_then_files_by_name(0.0, None, &[], &["yaml", "yml", "json"], true,
+    &["A.yml", "a.yaml", "b.json", ".hid/h.yml", "sub/s.yml", "sub-b/x.yml", "sub/deep/d.yml"][..])]
+#[case::depth_one_is_the_directory_itself(1.0, None, &[], &["yaml", "yml", "json"], true,
+    &["A.yml", "a.yaml", "b.json"][..])]
+#[case::depth_two(2.0, None, &[], &["yaml", "yml", "json"], true,
+    &["A.yml", "a.yaml", "b.json", ".hid/h.yml", "sub/s.yml", "sub-b/x.yml"][..])]
+#[case::a_negative_depth_reads_nothing(-1.0, None, &[], &["yaml", "yml", "json"], true, &[][..])]
+#[case::a_fractional_depth_is_compared_as_it_is(1.5, None, &[], &["yaml", "yml", "json"], true,
+    &["A.yml", "a.yaml", "b.json"][..])]
+#[case::files_matching_searches_the_name(0.0, Some("^[ab]"), &[], &["yaml", "yml", "json"], true,
+    &["a.yaml", "b.json"][..])]
+#[case::files_matching_does_not_see_the_path(0.0, Some("sub"), &[], &["yaml", "yml", "json"], true, &[][..])]
+#[case::ignore_files_is_anchored_at_the_end(0.0, None, &["a", r".*\.json"], &["yaml", "yml", "json"], true,
+    &["A.yml", "a.yaml", ".hid/h.yml", "sub/s.yml", "sub-b/x.yml", "sub/deep/d.yml"][..])]
+#[case::extensions_replace_the_default(0.0, None, &[], &["yml"], true,
+    &["A.yml", ".hid/h.yml", "sub/s.yml", "sub-b/x.yml", "sub/deep/d.yml"][..])]
+#[case::extensions_are_compared_with_their_case(0.0, None, &[], &["YML"], true, &[][..])]
+#[case::an_extension_written_with_its_dot_matches_nothing(0.0, None, &[], &[".yml"], true, &[][..])]
+fn a_directory_is_read_in_the_references_order(
+    #[case] depth: f64,
+    #[case] matching: Option<&str>,
+    #[case] ignore: &[&str],
+    #[case] extensions: &[&str],
+    #[case] ignore_unknown: bool,
+    #[case] expected: &[&str],
+) {
+    let tmp = scratch();
+    for (rel, text) in [
+        ("A.yml", "a_upper: 1\n"),
+        ("a.yaml", "a_lower: 1\n"),
+        ("b.json", "{\"b\": 1}\n"),
+        ("notes.txt", "free text\n"),
+        (".hid/h.yml", "h: 1\n"),
+        ("sub/s.yml", "s: 1\n"),
+        ("sub/deep/d.yml", "d: 1\n"),
+        ("sub-b/x.yml", "x: 1\n"),
+    ] {
+        write(tmp.path(), rel, text);
+    }
+    let scan = Scan::new(
+        matching,
+        Ok(ignore.iter().map(ToString::to_string).collect()),
+        extensions.iter().map(|e| json!(e)).collect(),
+        ignore_unknown,
+    )
+    .unwrap()
+    .with_depth(depth);
+    let top = tmp.path().to_str().unwrap();
+    let read = include_dir(top, &scan).ok().expect("the directory reads");
+    let shown: Vec<String> = read
+        .files
+        .iter()
+        .map(|f| f.strip_prefix(&format!("{top}/")).unwrap().to_string())
+        .collect();
+    assert_eq!(shown, expected);
+    assert_eq!(read.facts.len(), expected.len());
+    assert!(!read.encrypted);
+}
+
+/// A later file replaces the keys of an earlier one whole, and a file with nothing in it adds
+/// nothing and is still listed.
+#[test]
+fn a_later_file_replaces_whole_values() {
+    let tmp = scratch();
+    write(tmp.path(), "1.yml", "k: {a: 1}\nlist: [1]\nonly: 1\n");
+    write(tmp.path(), "2.yml", "k: {b: 2}\nlist: [2]\n");
+    write(tmp.path(), "3.yml", "# nothing\n");
+    let scan = Scan::new(None, Ok(vec![]), ["yml"].map(|e| json!(e)).to_vec(), false).unwrap();
+    let read = include_dir(tmp.path().to_str().unwrap(), &scan)
+        .ok()
+        .expect("the directory reads");
+    assert_eq!(
+        Value::Object(read.facts),
+        json!({"k": {"b": 2}, "list": [2], "only": 1})
+    );
+    assert_eq!(read.files.len(), 3);
+}
+
+/// What goes wrong in a directory, as the reference words it: a returned failure keeps the
+/// variables read before it, a raised one leaves no result.
+#[rstest::rstest]
+#[case::extension_without_the_skip(&["a.yml", "sub/b.yml", "sub/c.txt"], "sub/c.txt does not have a valid extension: yaml, yml, json", &["a.yml", "sub/b.yml"], json!({"a": 1}))]
+#[case::not_a_mapping(&["a.yml", "sub/list.yml"], "sub/list.yml must be stored as a dictionary/hash", &["a.yml"], json!({"a": 1}))]
+#[case::a_scalar_is_not_a_mapping(&["scalar.yml"], "scalar.yml must be stored as a dictionary/hash", &[], json!({}))]
+fn a_directory_that_cannot_be_read_says_why(
+    #[case] names: &[&str],
+    #[case] message: &str,
+    #[case] files: &[&str],
+    #[case] facts: Value,
+) {
+    let tmp = scratch();
+    for name in names {
+        let text = match *name {
+            n if n.ends_with("list.yml") => "- 1\n",
+            n if n.ends_with("scalar.yml") => "42\n",
+            n if n.ends_with(".txt") => "text\n",
+            n if n.ends_with("b.yml") => "b: 1\n",
+            _ => "a: 1\n",
+        };
+        write(tmp.path(), name, text);
+    }
+    let top = tmp.path().to_str().unwrap();
+    let scan = Scan::new(
+        None,
+        Ok(vec![]),
+        ["yaml", "yml", "json"].map(|e| json!(e)).to_vec(),
+        false,
+    )
+    .unwrap();
+    let Err(Failure::Returned {
+        message: got,
+        facts: kept,
+        files: read,
+        ..
+    }) = include_dir(top, &scan)
+    else {
+        panic!("the module answers this failure");
+    };
+    assert_eq!(got, format!("{top}/{message}"));
+    assert_eq!(Value::Object(kept), facts);
+    let want: Vec<String> = files.iter().map(|f| format!("{top}/{f}")).collect();
+    assert_eq!(read, want);
+}
+
+/// Python's sentence for a pattern its `re` module refuses, with the position it counts.
+#[rstest::rstest]
+#[case("(", Some("missing ), unterminated subpattern at position 0"))]
+#[case("a(b(c)", Some("missing ), unterminated subpattern at position 1"))]
+#[case("ab)", Some("unbalanced parenthesis at position 2"))]
+#[case("x[ab", Some("unterminated character set at position 1"))]
+#[case("[]a", Some("unterminated character set at position 0"))]
+#[case("*a", Some("nothing to repeat at position 0"))]
+#[case("a|+", Some("nothing to repeat at position 2"))]
+#[case("(?:a)+", None)]
+#[case(r"\(a", None)]
+#[case("[(]a", None)]
+#[case("a*?", None)]
+fn a_pattern_python_refuses_is_worded_as_python_words_it(
+    #[case] pattern: &str,
+    #[case] expected: Option<&str>,
+) {
+    assert_eq!(
+        include_dir::python_regex_error(pattern).as_deref(),
+        expected
+    );
+}
+
+/// `os.path.join`: an absolute tail wins, a trailing slash is not doubled, `..` is kept.
+#[rstest::rstest]
+#[case("/a", "b", "/a/b")]
+#[case("/a/", "b", "/a/b")]
+#[case("/a", "/b", "/b")]
+#[case("/a/x", "../y", "/a/x/../y")]
+#[case("", "b", "b")]
+fn paths_join_as_python_joins_them(#[case] head: &str, #[case] tail: &str, #[case] want: &str) {
+    assert_eq!(join_path(head, tail), want);
+}
+
+/// An `ignore_files` pattern is compiled when a file is tested against it, so a directory with
+/// nothing to test passes and one with a file fails with the reference's sentence, as a cause.
+#[test]
+fn an_ignore_pattern_that_is_no_regular_expression_fails_at_the_first_file() {
+    let tmp = scratch();
+    let top = tmp.path().to_str().unwrap();
+    let scan = || Scan::new(None, Ok(vec!["(".into()]), vec![json!("yml")], false).expect("a scan");
+    assert!(include_dir(top, &scan()).is_ok());
+    write(tmp.path(), "a.yml", "a: 1\n");
+    let Err(Failure::Raised { text, chain }) = include_dir(top, &scan()) else {
+        panic!("the action raises this failure");
+    };
+    assert_eq!(text, "Invalid regular expression: (");
+    assert!(matches!(chain, Chain::Cause));
 }

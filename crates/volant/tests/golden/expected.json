@@ -568,6 +568,216 @@
   },
   {
     "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: &n 5\nb: *n"
+      }
+    },
+    "result": {
+      "a": 5,
+      "b": 5
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: &n yes\nb: [*n, *n]"
+      }
+    },
+    "result": {
+      "a": true,
+      "b": [
+        true,
+        true
+      ]
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: &k key\nm: {*k : 1}"
+      }
+    },
+    "result": {
+      "a": "key",
+      "m": {
+        "key": 1
+      }
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: &n 010\nb: *n"
+      }
+    },
+    "result": {
+      "a": 8,
+      "b": 8
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: &n \"5\"\nb: *n"
+      }
+    },
+    "result": {
+      "a": "5",
+      "b": "5"
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: &n |\n  x\n  y\nb: *n"
+      }
+    },
+    "result": {
+      "a": "x\ny\n",
+      "b": "x\ny\n"
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: !!str 5"
+      }
+    },
+    "result": {
+      "a": "5"
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: !!int \"5\""
+      }
+    },
+    "result": {
+      "a": 5
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: !!float 5"
+      }
+    },
+    "result": {
+      "a": 5.0
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: !!bool \"yes\""
+      }
+    },
+    "result": {
+      "a": true
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: !!null x"
+      }
+    },
+    "result": {
+      "a": null
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: [1:30, 190:20:30, 1:30.5]"
+      }
+    },
+    "result": {
+      "a": [
+        90,
+        685230,
+        90.5
+      ]
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: [+.5, -.5, .5, 5., 1.e+3]"
+      }
+    },
+    "result": {
+      "a": [
+        "+.5",
+        "-.5",
+        0.5,
+        5.0,
+        1000.0
+      ]
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: [010, 08, 0o10, 0x1F, 1_000, 1e3, 1.0e+3]"
+      }
+    },
+    "result": {
+      "a": [
+        8,
+        "08",
+        "0o10",
+        31,
+        1000,
+        "1e3",
+        1000.0
+      ]
+    }
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml | to_json }}",
+      "vars": {
+        "s": "a: [2020-01-02, 2020-1-2, 2020-01-02 10:11:12, 2020-01-02T10:11:12Z, 2020-01-02t10:11:12.5+01:00]"
+      }
+    },
+    "result": "{\"a\": [\"2020-01-02\", \"2020-1-2\", \"2020-01-02T10:11:12\", \"2020-01-02T10:11:12+00:00\", \"2020-01-02T10:11:12.500000+01:00\"]}"
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: !custom x"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The filter plugin 'ansible.builtin.from_yaml' failed: could not determine a constructor for the tag '!custom'\n  in \"<unicode string>\", line 1, column 4"
+  },
+  {
+    "case": {
+      "template": "{{ s | from_yaml }}",
+      "vars": {
+        "s": "a: !!int abc"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The filter plugin 'ansible.builtin.from_yaml' failed: invalid literal for int() with base 10: 'abc'"
+  },
+  {
+    "case": {
       "template": "{{ missing | default('fallback') }}"
     },
     "result": "fallback"
@@ -4409,5 +4619,1109 @@
       "template": "{{ lookup('varnames', '[', wantlist=True) }}"
     },
     "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The lookup plugin 'varnames' failed: Unable to use \"[\" as a search parameter: unterminated character set at position 0"
+  },
+  {
+    "case": {
+      "template": "{{ dict() }}"
+    },
+    "result": {}
+  },
+  {
+    "case": {
+      "template": "{{ dict(M) }}",
+      "vars": {
+        "M": {
+          "a": 1,
+          "b": 2
+        }
+      }
+    },
+    "result": {
+      "a": 1,
+      "b": 2
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(a=1, b=2) }}"
+    },
+    "result": {
+      "a": 1,
+      "b": 2
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(M, c=3) }}",
+      "vars": {
+        "M": {
+          "a": 1,
+          "b": 2
+        }
+      }
+    },
+    "result": {
+      "a": 1,
+      "b": 2,
+      "c": 3
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(M, a=3) }}",
+      "vars": {
+        "M": {
+          "a": 1,
+          "b": 2
+        }
+      }
+    },
+    "result": {
+      "a": 3,
+      "b": 2
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) }}",
+      "vars": {
+        "P": [
+          [
+            "a",
+            1
+          ],
+          [
+            "b",
+            2
+          ]
+        ]
+      }
+    },
+    "result": {
+      "a": 1,
+      "b": 2
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) }}",
+      "vars": {
+        "P": []
+      }
+    },
+    "result": {}
+  },
+  {
+    "case": {
+      "template": "{{ dict(P | list) }}",
+      "vars": {
+        "P": [
+          [
+            "a",
+            1
+          ],
+          [
+            "b",
+            2
+          ]
+        ]
+      }
+    },
+    "result": {
+      "a": 1,
+      "b": 2
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(P, a=3) }}",
+      "vars": {
+        "P": [
+          [
+            "a",
+            1
+          ],
+          [
+            "b",
+            2
+          ]
+        ]
+      }
+    },
+    "result": {
+      "a": 3,
+      "b": 2
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) }}",
+      "vars": {
+        "P": [
+          [
+            "a",
+            1
+          ],
+          [
+            "a",
+            2
+          ]
+        ]
+      }
+    },
+    "result": {
+      "a": 2
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) }}",
+      "vars": {
+        "P": [
+          [
+            "a",
+            [
+              1,
+              2
+            ]
+          ],
+          [
+            "b",
+            {
+              "c": "d"
+            }
+          ]
+        ]
+      }
+    },
+    "result": {
+      "a": [
+        1,
+        2
+      ],
+      "b": {
+        "c": "d"
+      }
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(K | zip(V)) }}",
+      "vars": {
+        "K": [
+          "a",
+          "b"
+        ],
+        "V": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": {
+      "a": 1,
+      "b": 2
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(K | zip(V)) }}",
+      "vars": {
+        "K": [
+          "a",
+          "b",
+          "c"
+        ],
+        "V": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": {
+      "a": 1,
+      "b": 2
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(K | zip(V) | list) }}",
+      "vars": {
+        "K": [
+          "a",
+          "b"
+        ],
+        "V": [
+          1,
+          2
+        ]
+      }
+    },
+    "result": {
+      "a": 1,
+      "b": 2
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(M.items()) }}",
+      "vars": {
+        "M": {
+          "a": 1,
+          "b": 2
+        }
+      }
+    },
+    "result": {
+      "a": 1,
+      "b": 2
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(M | dict2items | map(attribute='key') | zip(M | dict2items | map(attribute='value'))) }}",
+      "vars": {
+        "M": {
+          "a": 1,
+          "b": 2
+        }
+      }
+    },
+    "result": {
+      "a": 1,
+      "b": 2
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(P | map('reverse')) }}",
+      "vars": {
+        "P": [
+          [
+            "a",
+            1
+          ],
+          [
+            "b",
+            2
+          ]
+        ]
+      }
+    },
+    "result": {
+      "1": "a",
+      "2": "b"
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(P | batch(2)) }}",
+      "vars": {
+        "P": [
+          "a",
+          1,
+          "b",
+          2
+        ]
+      }
+    },
+    "result": {
+      "a": 1,
+      "b": 2
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict([['a', 1], ['b', 2]]) }}"
+    },
+    "result": {
+      "a": 1,
+      "b": 2
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(['ab', 'cd']) }}"
+    },
+    "result": {
+      "a": "b",
+      "c": "d"
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) }}",
+      "vars": {
+        "P": [
+          {
+            "a": 1,
+            "b": 2
+          }
+        ]
+      }
+    },
+    "result": {
+      "a": "b"
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) }}",
+      "vars": {
+        "P": [
+          [
+            1,
+            2
+          ],
+          [
+            true,
+            4
+          ]
+        ]
+      }
+    },
+    "result": {
+      "1": 4
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) | dict2items }}",
+      "vars": {
+        "P": [
+          [
+            "a",
+            1
+          ],
+          [
+            "b",
+            2
+          ]
+        ]
+      }
+    },
+    "result": [
+      {
+        "key": "a",
+        "value": 1
+      },
+      {
+        "key": "b",
+        "value": 2
+      }
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) | combine({'z': 1}) }}",
+      "vars": {
+        "P": [
+          [
+            "a",
+            1
+          ],
+          [
+            "b",
+            2
+          ]
+        ]
+      }
+    },
+    "result": {
+      "a": 1,
+      "b": 2,
+      "z": 1
+    }
+  },
+  {
+    "case": {
+      "template": "{{ dict(P)['b'] }}",
+      "vars": {
+        "P": [
+          [
+            "a",
+            1
+          ],
+          [
+            "b",
+            2
+          ]
+        ]
+      }
+    },
+    "result": 2
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) is mapping }}",
+      "vars": {
+        "P": [
+          [
+            "a",
+            1
+          ]
+        ]
+      }
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) }}",
+      "vars": {
+        "P": [
+          [
+            "a",
+            1,
+            2
+          ]
+        ]
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: dictionary update sequence element #0 has length 3; 2 is required"
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) }}",
+      "vars": {
+        "P": [
+          [
+            "a"
+          ]
+        ]
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: dictionary update sequence element #0 has length 1; 2 is required"
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) }}",
+      "vars": {
+        "P": [
+          "a"
+        ]
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: dictionary update sequence element #0 has length 1; 2 is required"
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) }}",
+      "vars": {
+        "P": [
+          1
+        ]
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: cannot convert dictionary update sequence element #0 to a sequence"
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) }}",
+      "vars": {
+        "P": [
+          [
+            [
+              1,
+              2
+            ],
+            3
+          ]
+        ]
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: unhashable type: '_AnsibleLazyTemplateList'"
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) }}",
+      "vars": {
+        "P": [
+          [
+            {
+              "a": 1
+            },
+            3
+          ]
+        ]
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: unhashable type: '_AnsibleLazyTemplateDict'"
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) }}",
+      "vars": {
+        "P": "abcd"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: dictionary update sequence element #0 has length 1; 2 is required"
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) }}",
+      "vars": {
+        "P": 5
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: '_AnsibleTaggedInt' object is not iterable"
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) }}",
+      "vars": {
+        "P": null
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: 'NoneType' object is not iterable"
+  },
+  {
+    "case": {
+      "template": "{{ dict(P) }}",
+      "vars": {
+        "P": true
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: 'bool' object is not iterable"
+  },
+  {
+    "case": {
+      "template": "{{ dict(P, P) }}",
+      "vars": {
+        "P": []
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: dict expected at most 1 argument, got 2"
+  },
+  {
+    "case": {
+      "template": "{{ dict(1, 2) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: dict expected at most 1 argument, got 2"
+  },
+  {
+    "case": {
+      "template": "{{ dict(nope) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': 'nope' is undefined"
+  },
+  {
+    "case": {
+      "template": "{{ dict(a=nope) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': 'nope' is undefined"
+  },
+  {
+    "case": {
+      "template": "{% set c = cycler('a', 'b') %}{{ c.next() }}{{ c.next() }}{{ c.next() }}"
+    },
+    "result": "aba"
+  },
+  {
+    "case": {
+      "template": "{% set c = cycler('a', 'b') %}{{ c.current }}{{ c.next() }}{{ c.current }}"
+    },
+    "result": "aab"
+  },
+  {
+    "case": {
+      "template": "{% set c = cycler(1, 2, 3) %}{{ c.next() }}{{ c.next() }}{{ c.reset() }}{{ c.next() }}"
+    },
+    "result": "121"
+  },
+  {
+    "case": {
+      "template": "{% set c = cycler(*items) %}{% for i in range(5) %}{{ c.next() }}{% endfor %}",
+      "vars": {
+        "items": [
+          "x",
+          "y"
+        ]
+      }
+    },
+    "result": "xyxyx"
+  },
+  {
+    "case": {
+      "template": "{% set c = cycler('a', 'b') %}{% for i in range(4) %}{{ c.next() }}{% endfor %}"
+    },
+    "result": "abab"
+  },
+  {
+    "case": {
+      "template": "{{ cycler() }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: at least one item has to be provided"
+  },
+  {
+    "case": {
+      "template": "{% set j = joiner(',') %}{{ j() }}a{{ j() }}b{{ j() }}c"
+    },
+    "result": "a,b,c"
+  },
+  {
+    "case": {
+      "template": "{% set j = joiner() %}{{ j() }}a{{ j() }}b"
+    },
+    "result": "a, b"
+  },
+  {
+    "case": {
+      "template": "{% set j = joiner(' | ') %}{% for i in range(3) %}{{ j() }}{{ i }}{% endfor %}"
+    },
+    "result": "0 | 1 | 2"
+  },
+  {
+    "case": {
+      "template": "{{ undef() }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Mandatory variable has not been overridden"
+  },
+  {
+    "case": {
+      "template": "{{ undef(hint='x is needed') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': x is needed"
+  },
+  {
+    "case": {
+      "template": "{{ undef() | default('d') }}"
+    },
+    "result": "d"
+  },
+  {
+    "case": {
+      "template": "{{ undef() is defined }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ x }}",
+      "vars": {
+        "x": "{{ undef(hint='x is needed') }}"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': x is needed"
+  },
+  {
+    "case": {
+      "template": "{{ dict([[9223372036854775808, 'a'], [9223372036854775809, 'b']]) | length }}"
+    },
+    "result": 2
+  },
+  {
+    "case": {
+      "template": "{{ dict([[18446744073709551616, 'a'], [18446744073709551617, 'b']]) | length }}"
+    },
+    "result": 2
+  },
+  {
+    "case": {
+      "template": "{{ dict([[1, 'a'], [1.0, 'b'], [true, 'c'], [9223372036854775808, 'd']]) | length }}"
+    },
+    "result": 2
+  },
+  {
+    "case": {
+      "template": "{{ dict(vars) | length }}",
+      "vars": {
+        "bad": "{{ nope }}"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': 'nope' is undefined"
+  },
+  {
+    "case": {
+      "template": "{{ d | to_json }}",
+      "vars": {
+        "base": {
+          "a": 1,
+          "b": 2
+        },
+        "d": {
+          "a": 1,
+          "b": 9,
+          "z": 0
+        }
+      }
+    },
+    "result": "{\"a\": 1, \"b\": 9, \"z\": 0}"
+  },
+  {
+    "case": {
+      "template": "{{ d | to_json }}",
+      "vars": {
+        "x": {
+          "k": "x",
+          "only_x": 1
+        },
+        "y": {
+          "k": "y",
+          "only_y": 2
+        },
+        "d": {
+          "k": "x",
+          "only_y": 2,
+          "only_x": 1,
+          "own": 3
+        }
+      }
+    },
+    "result": "{\"k\": \"x\", \"only_y\": 2, \"only_x\": 1, \"own\": 3}"
+  },
+  {
+    "case": {
+      "template": "{{ d | to_json }}",
+      "vars": {
+        "inner": {
+          "p": 1
+        },
+        "outer": {
+          "p": 1,
+          "q": 2
+        },
+        "d": {
+          "p": 1,
+          "q": 2,
+          "r": 3
+        }
+      }
+    },
+    "result": "{\"p\": 1, \"q\": 2, \"r\": 3}"
+  },
+  {
+    "case": {
+      "template": "{{ d | to_json }}",
+      "vars": {
+        "d": {
+          "a": 1,
+          "b": 4
+        }
+      }
+    },
+    "result": "{\"a\": 1, \"b\": 4}"
+  },
+  {
+    "case": {
+      "template": "{{ d | to_json }}",
+      "vars": {
+        "d": {
+          "<<": {
+            "a": 1
+          },
+          "c": 2
+        }
+      }
+    },
+    "result": "{\"<<\": {\"a\": 1}, \"c\": 2}"
+  },
+  {
+    "case": {
+      "template": "{{ d | to_json }}",
+      "vars": {
+        "d": {
+          "a": 1
+        }
+      }
+    },
+    "result": "{\"a\": 1}"
+  },
+  {
+    "case": {
+      "template": "{% raw %}{{ x }}{% endraw %}",
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": "{{ x }}"
+  },
+  {
+    "case": {
+      "template": "a{% raw %}{{ x }}{% endraw %}b{{ x }}",
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": "a{{ x }}b5"
+  },
+  {
+    "case": {
+      "template": "{%- raw -%} {{ x }} {%- endraw -%}",
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": "{{ x }}"
+  },
+  {
+    "case": {
+      "template": "{% raw %}{% if x %}{% endraw %}",
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": "{% if x %}"
+  },
+  {
+    "case": {
+      "template": "{{ y }}",
+      "vars": {
+        "x": 5,
+        "y": "{% raw %}{{ x }}{% endraw %}"
+      }
+    },
+    "result": "{{ x }}"
+  },
+  {
+    "case": {
+      "template": "{{ z }}",
+      "vars": {
+        "x": 5,
+        "y": "{% raw %}{{ x }}{% endraw %}",
+        "z": "{{ y }}"
+      }
+    },
+    "result": "{{ x }}"
+  },
+  {
+    "case": {
+      "template": "{{ '{{' }} x {{ '}}' }}",
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": "{{ x }}"
+  },
+  {
+    "case": {
+      "template": "{{ ['{% raw %}{{ x }}{% endraw %}'] }}",
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": [
+      "{% raw %}{{ x }}{% endraw %}"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ r }}|{% raw %}{{ r }}{% endraw %}",
+      "untrusted": {
+        "r": "{% raw %}{{ x }}{% endraw %}{{ x }}"
+      },
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": "{% raw %}{{ x }}{% endraw %}{{ x }}|{{ r }}"
+  },
+  {
+    "case": {
+      "template": "{{ s }}",
+      "vars": {
+        "c": 7,
+        "b": "{{ c }}",
+        "s": "{{ b | int + 1 }}"
+      }
+    },
+    "result": 8
+  },
+  {
+    "case": {
+      "template": "{{ b | int }}",
+      "vars": {
+        "c": 7,
+        "b": "{{ c }}"
+      }
+    },
+    "result": 7
+  },
+  {
+    "case": {
+      "template": "{{ d3 }}",
+      "vars": {
+        "c": 7,
+        "d1": "{{ c }}",
+        "d2": "{{ d1 }}",
+        "d3": "{{ d2 | int * 2 }}"
+      }
+    },
+    "result": 14
+  },
+  {
+    "case": {
+      "template": "{{ url | length }}|{{ url | regex_replace('example', 'zz') }}|{{ url | b64encode }}",
+      "vars": {
+        "host": "example.org",
+        "url": "http://{{ host }}:8080/x"
+      }
+    },
+    "result": "25|http://zz.org:8080/x|aHR0cDovL2V4YW1wbGUub3JnOjgwODAveA=="
+  },
+  {
+    "case": {
+      "template": "{{ l | map('upper') | list }}",
+      "vars": {
+        "host": "example.org",
+        "l": [
+          "{{ host }}"
+        ]
+      }
+    },
+    "result": [
+      "EXAMPLE.ORG"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ d.k | int + d.n.m | int }}",
+      "vars": {
+        "c": 7,
+        "d": {
+          "k": "{{ c }}",
+          "n": {
+            "m": "{{ c }}"
+          }
+        }
+      }
+    },
+    "result": 14
+  },
+  {
+    "case": {
+      "template": "{{ e.k | int + 1 }}",
+      "vars": {
+        "c": 7,
+        "d": {
+          "k": "{{ c }}"
+        },
+        "e": "{{ d }}"
+      }
+    },
+    "result": 8
+  },
+  {
+    "case": {
+      "template": "{{ d.ok }}",
+      "vars": {
+        "d": {
+          "bad": "{{ missing }}",
+          "ok": 1
+        }
+      }
+    },
+    "result": 1
+  },
+  {
+    "case": {
+      "when": "cond",
+      "vars": {
+        "port_s": "{{ 8080 }}",
+        "cond": "{{ port_s | int > 8000 }}"
+      }
+    },
+    "result": "ran"
+  },
+  {
+    "case": {
+      "template": "{{ u | default('dflt') }}",
+      "vars": {
+        "u": "{{ missing }}"
+      }
+    },
+    "result": "dflt"
+  },
+  {
+    "case": {
+      "template": "{{ u is defined }}",
+      "vars": {
+        "u": "{{ missing }}"
+      }
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ u }}",
+      "vars": {
+        "u": "{{ missing }}"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': 'missing' is undefined"
+  },
+  {
+    "case": {
+      "template": "{{ u | upper }}",
+      "vars": {
+        "u": "{{ v }}",
+        "v": "{{ missing }}"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': 'missing' is undefined"
+  },
+  {
+    "case": {
+      "template": "{{ a }}",
+      "vars": {
+        "a": "{{ a }}"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Recursive loop detected in template: maximum recursion depth exceeded"
+  },
+  {
+    "case": {
+      "template": "{{ a }}",
+      "vars": {
+        "a": "{{ b }}",
+        "b": "{{ a }}"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Recursive loop detected in template: maximum recursion depth exceeded"
+  },
+  {
+    "case": {
+      "template": "{{ a | default('x') }}",
+      "vars": {
+        "a": "{{ a | default('x') }}"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Recursive loop detected in template: maximum recursion depth exceeded"
+  },
+  {
+    "case": {
+      "template": "{{ a | default('x') }}",
+      "vars": {
+        "a": "{{ 1 | nosuchfilter }}"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Syntax error in template: No filter named 'nosuchfilter'."
+  },
+  {
+    "case": {
+      "template": "{{ d | length }}|{{ d | upper }}|{{ (d | length) ~ (d | upper) }}",
+      "vars": {
+        "c": 7,
+        "d": "{{ reg }}"
+      },
+      "untrusted": {
+        "reg": "{{ c }}"
+      }
+    },
+    "result": "7|{{ C }}|7{{ C }}"
+  },
+  {
+    "case": {
+      "template": "{{ e | length }}|{{ e }}",
+      "vars": {
+        "c": 7,
+        "d": "{{ reg }}",
+        "e": "{{ d | upper }}"
+      },
+      "untrusted": {
+        "reg": "{{ c }}"
+      }
+    },
+    "result": "7|{{ C }}"
   }
 ]

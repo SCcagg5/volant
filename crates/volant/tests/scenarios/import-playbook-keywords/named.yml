@@ -1,0 +1,2 @@
+- name: the import
+  import_playbook: sub.yml

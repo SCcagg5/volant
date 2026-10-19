@@ -1,0 +1,15 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: include, off
+      include_role:
+        name: sp
+        rolespec_validate: false
+    - name: import, off
+      import_role:
+        name: sp
+        rolespec_validate: false
+    - name: include, off as a word
+      include_role:
+        name: sp
+        rolespec_validate: "no"

@@ -12,20 +12,24 @@ mod env;
 mod file;
 mod filters;
 pub(crate) use filters::python_json;
+mod globals;
 mod lookups;
+mod one_pass;
+mod resolve;
 mod templar;
 mod test_plugins;
 mod vm;
 mod yaml_dump;
 
-pub use context::Vars;
-use context::{Context, TaintSink, context_of};
+pub use context::{ALLITEMS_KEY, Vars, complete_loop, with_allitems};
+use context::{Context, TaintSink, context_of, take_failure};
 pub(crate) use env::{
     add_filter, add_test, add_text_filter, holds_undefined, truthy, undefined_through,
 };
 use env::{any_undefined, environment, type_name};
 pub use templar::Templar;
-use vm::{convert_error, holds_template, render_str};
+pub(crate) use vm::holds_template;
+use vm::{convert_error, render_str};
 
 pub use bridged::{bridged_name, not_sent_reason};
 pub use file::FileRender;
@@ -33,7 +37,12 @@ pub use lookups::supported as lookup_supported;
 
 /// Prefix of every error raised because a variable had no value, the one template failure
 /// Ansible treats as recoverable in places such as `vars_files`.
-const UNDEFINED: &str = "The task includes an option with an undefined variable.";
+pub(crate) const UNDEFINED: &str = "The task includes an option with an undefined variable.";
+
+/// What the reference says when a variable's value is a template that reads the variable again,
+/// directly or through others.
+pub(crate) const RECURSION: &str =
+    "Recursive loop detected in template: maximum recursion depth exceeded";
 
 /// What [`Templar::render_map_tainted`] puts before a plugin's failure, then the key in quotes.
 pub(crate) const RESOLVING: &str = "Error while resolving value for ";
@@ -46,6 +55,10 @@ impl TemplateError {
     /// an unknown filter or an illegal operation.
     pub fn is_undefined(&self) -> bool {
         self.0.starts_with(UNDEFINED)
+            || self
+                .0
+                .strip_prefix("Task failed: '")
+                .is_some_and(|rest| rest.ends_with("' is undefined"))
     }
 }
 
@@ -66,6 +79,12 @@ pub(crate) type Tainted = Arc<AtomicBool>;
 /// identifier, so no playbook can write it as a variable or shadow it; `lookup('vars', ...)`
 /// reaches it, and hands back an object whose only method marks the render as data.
 pub(crate) const TAINT_KEY: &str = "volant::tainted";
+
+/// Among a render's untrusted names when a host name came from a managed host: listing the
+/// hosts of `hostvars` then taints the render, while reading one host is `untrusted_hosts`' case,
+/// so a nested template of a trusted host still renders. Unwritable for the same reason as
+/// `TAINT_KEY`.
+pub(crate) const HOSTVARS_KEYS: &str = "volant::hostvars_keys";
 
 /// The name `Context` answers with itself, for `lookup('template')`, which renders a file
 /// against the same variables and the same trust as the render that called it. Unreachable from

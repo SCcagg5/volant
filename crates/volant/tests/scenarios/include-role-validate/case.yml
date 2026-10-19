@@ -1,0 +1,7 @@
+# `rolespec_validate: false` leaves out the argument check; a value that is not a boolean is refused.
+runs:
+  - args: [-i, inv.ini, off.yml]
+  - args: [-i, inv.ini, on.yml]
+  - args: [-i, inv.ini, bad-validate.yml]
+  - args: [-i, inv.ini, bad-public.yml]
+  - args: [-i, inv.ini, bad-import.yml]

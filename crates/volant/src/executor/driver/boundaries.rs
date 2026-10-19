@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use serde_json::{Map, Value};
-use volant_protocol::modules::{is_builtin, short_name};
+use volant_protocol::modules::{is_builtin, resolved_name, short_name};
 
 use crate::compile::{Compiled, Step, after, after_failure, rescue_target};
 use crate::playbook::PlayTask;
@@ -86,7 +86,7 @@ pub(super) const FACT_MODULES: [&str; 10] = [
 /// as they stood before. A builtin answers from [`FACT_MODULES`]; any other module - a
 /// collection's, a role's `library/` - may return `ansible_facts`, so it ends its batch too.
 pub(super) fn writes_facts(task: &PlayTask) -> bool {
-    !is_builtin(&task.module) || FACT_MODULES.contains(&short_name(&task.module))
+    !is_builtin(&task.module) || FACT_MODULES.contains(&resolved_name(&task.module))
 }
 
 /// Whether rendering a task calls a lookup: `lookup`, `query` or `q` in an expression, or a
@@ -200,6 +200,25 @@ pub(crate) fn task_strings(task: &PlayTask) -> (Vec<&str>, Vec<&str>) {
     if let Some(crate::playbook::Flag::Template(text)) = &task.ignore_errors {
         bare.push(text);
     }
+    // The other keywords written as templates render for the host that runs the task, and may
+    // read another host's variables as an argument does.
+    let d = &task.deferred;
+    text.extend(
+        [
+            &d.r#become,
+            &d.no_log,
+            &d.run_once,
+            &d.any_errors_fatal,
+            &d.ignore_unreachable,
+            &d.delegate_facts,
+            &d.timeout,
+            &d.async_val,
+            &d.poll,
+        ]
+        .into_iter()
+        .flatten()
+        .map(String::as_str),
+    );
     let module = short_name(&task.module);
     for (key, value) in &task.args {
         if (module == "debug" && key == "var") || (module == "assert" && key == "that") {
@@ -324,10 +343,10 @@ pub(in crate::executor) fn mark_boundaries(
     // reads them as its own, through a name no scan can tie back to the writer. The writer and
     // every step behind it are boundaries, so no host can write before the others have read what
     // came before, nor run past the write.
-    let writes_elsewhere = c
-        .steps
-        .iter()
-        .position(|s| s.task.delegates_facts() && s.task.delegate_to.is_some());
+    let writes_elsewhere = c.steps.iter().position(|s| {
+        (s.task.delegates_facts() || s.task.deferred.delegate_facts.is_some())
+            && s.task.delegate_to.is_some()
+    });
     // A file one host fetched, or wrote on the controller, is read by the others from the
     // controller: every task behind the first writer that reads a controller file waits for it.
     let controller_written = c

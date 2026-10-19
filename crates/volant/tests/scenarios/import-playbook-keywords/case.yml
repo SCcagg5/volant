@@ -1,0 +1,11 @@
+# An `import_playbook` takes the attributes of a PlaybookInclude and nothing else. Most of them
+# do nothing: `ignore_errors`, `environment` and the rest are not passed to the imported plays.
+runs:
+  - args: [-i, inv.ini, ignore.yml]
+  - args: [-i, inv.ini, env.yml]
+  - args: [-i, inv.ini, named.yml]
+  - args: [-i, inv.ini, bad-attr.yml]
+  - args: [-i, inv.ini, bad-gather.yml]
+  - args: [-i, inv.ini, bad-vars.yml]
+  - args: [-i, inv.ini, bad-tags.yml]
+needs: [ansible-core]

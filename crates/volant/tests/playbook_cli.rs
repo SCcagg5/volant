@@ -1016,6 +1016,71 @@ fn an_unreadable_ansible_cfg_is_ignored_with_a_warning() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// A planted `ansible.cfg` in a world-writable directory (sticky bit or not) is ignored with the
+/// reference's warning on stderr; a directory without the world-write bit is read as before.
+#[rstest]
+#[case::world_writable(0o777, false)]
+#[case::sticky_and_world_writable(0o1777, false)]
+#[case::only_the_world_bit(0o757, false)]
+#[case::group_writable(0o770, true)]
+#[case::owner_only(0o755, true)]
+fn an_ansible_cfg_in_a_world_writable_directory_is_ignored_with_a_warning(
+    #[case] mode: u32,
+    #[case] read: bool,
+) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let work = dir.path();
+    std::fs::write(
+        work.join("ansible.cfg"),
+        "[defaults]\nvault_password_file = ./pw.sh\n",
+    )
+    .unwrap();
+    std::fs::write(work.join("pw.sh"), "#!/bin/sh\ntouch PLANTED\necho pw\n").unwrap();
+    std::fs::set_permissions(work.join("pw.sh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        work.join("inventory.ini"),
+        "[all]\nh1 ansible_connection=local\n",
+    )
+    .unwrap();
+    std::fs::write(
+        work.join("playbook.yml"),
+        "- hosts: h1\n  gather_facts: false\n  tasks:\n    - debug:\n        msg: hi\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(work, std::fs::Permissions::from_mode(mode)).unwrap();
+    let out = volant_within_full(
+        &["playbook", "-i", "inventory.ini", "playbook.yml"],
+        DEFAULT_DEADLINE,
+        None,
+        None,
+        Some(work),
+        None,
+        &[("HOME", &home.path().display().to_string())],
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{text}\n{err}");
+    assert!(
+        text.contains("\"msg\": \"hi\""),
+        "the play still runs: {text}\n{err}"
+    );
+    assert_eq!(work.join("PLANTED").exists(), read, "{text}\n{err}");
+    let warning = format!(
+        "[WARNING]: Ansible is being run in a world writable directory ({}), ignoring it as an \
+         ansible.cfg source. For more information see \
+         https://docs.ansible.com/ansible/devel/reference_appendices/config.html#cfg-in-world-writable-dir\n",
+        work.canonicalize().unwrap().display()
+    );
+    assert_eq!(err.contains(&warning), !read, "{err}");
+    assert!(
+        !text.contains("world writable"),
+        "the warning is on stderr: {text}"
+    );
+    std::fs::set_permissions(work, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
 #[test]
 fn the_agent_connection_survives_across_plays() {
     let out = volant(&["playbook", &fixture("reuse.yml")]);
@@ -1301,6 +1366,146 @@ fn su_answers_its_prompt_with_the_password(
         !asked.contains("s3cret-su") && !text.contains("s3cret-su"),
         "the password reaches neither su's arguments nor the output"
     );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// [`fake_su_host`] with an `ssh` that wants a password. It logs its program name and arguments
+/// to `ssh.log` and its environment to `ssh.log.env`, and lets the command in only when it was
+/// started with `BatchMode=no` and its askpass answers the password in `expected`. Anything else
+/// is `Permission denied`, as `sshd` says it. `ssh-alt` is the same program under another name.
+fn fake_password_host(name: &str, expected: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = fake_su_host(name);
+    std::fs::write(dir.join("expected"), expected).unwrap();
+    let script = "#!/bin/sh\n\
+        printf '%s\n' \"$0 $*\" >> \"$FAKE_SSH_DIR/ssh.log\"\n\
+        env | sort >> \"$FAKE_SSH_DIR/ssh.log.env\"\n\
+        ask=\n\
+        case \" $* \" in *' BatchMode=no '*) ask=1;; esac\n\
+        given=\n\
+        [ -n \"$ask\" ] && [ -n \"$SSH_ASKPASS\" ] && given=$(\"$SSH_ASKPASS\" \"tester@fake-host's password: \")\n\
+        if [ \"$given\" != \"$(cat \"$FAKE_SSH_DIR/expected\")\" ]; then\n\
+          echo 'tester@fake-host: Permission denied (publickey,password).' >&2\n\
+          exit 255\n\
+        fi\n\
+        while [ $# -gt 0 ] && [ \"$1\" != -- ]; do shift; done\n\
+        [ $# -gt 1 ] || exit 0\n\
+        exec sh -c \"$2\"\n";
+    for file in ["ssh", "ssh-alt"] {
+        let path = dir.join("bin").join(file);
+        std::fs::write(&path, script).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    dir
+}
+
+/// A password variable reaches `ssh` only through `SSH_ASKPASS`, in the reference's name order and
+/// over the password file: at `-vvvv` no output, argument or environment holds it.
+#[rstest]
+#[case::password("ansible_password=s3cret-conn-pw", &[], 0, "changed: [box]")]
+#[case::ssh_pass("ansible_ssh_pass=s3cret-conn-pw", &[], 0, "changed: [box]")]
+#[case::ssh_password("ansible_ssh_password=s3cret-conn-pw", &[], 0, "changed: [box]")]
+#[case::ssh_pass_over_password(
+    "ansible_password=wrong-conn-pw ansible_ssh_pass=s3cret-conn-pw", &[], 0, "changed: [box]"
+)]
+#[case::password_under_ssh_pass(
+    "ansible_password=s3cret-conn-pw ansible_ssh_pass=wrong-conn-pw", &[], 4, "Permission denied"
+)]
+#[case::wrong_password("ansible_password=wrong-conn-pw", &[], 4, "Permission denied")]
+#[case::empty_password("ansible_password=''", &[], 4, "Permission denied")]
+#[case::no_password("", &[], 4, "Permission denied")]
+#[case::variable_over_file(
+    "ansible_password=s3cret-conn-pw", &["wrong-conn-pw"], 0, "changed: [box]"
+)]
+#[case::wrong_variable_over_file(
+    "ansible_password=wrong-conn-pw", &["s3cret-conn-pw"], 4, "Permission denied"
+)]
+#[case::file_alone("", &["s3cret-conn-pw"], 0, "changed: [box]")]
+#[case::own_ssh_program(
+    "ansible_password=s3cret-conn-pw ansible_ssh_executable={dir}/bin/ssh-alt", &[], 0, "changed: [box]"
+)]
+fn a_connection_password_variable_reaches_ssh_through_askpass_only(
+    #[case] vars: &str,
+    #[case] file: &[&str],
+    #[case] code: i32,
+    #[case] says: &str,
+) {
+    // One directory per case: the cases run side by side under `cargo test`.
+    let name = {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (vars, file).hash(&mut hasher);
+        format!("pw-{:x}", hasher.finish())
+    };
+    let dir = fake_password_host(&name, "s3cret-conn-pw");
+    let vars = vars.replace("{dir}", &dir.display().to_string());
+    std::fs::write(
+        dir.join("inv.ini"),
+        format!(
+            "box ansible_host=fake-host ansible_user=tester ansible_remote_tmp={} {vars}\n",
+            dir.join("remote").display()
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("play.yml"),
+        "- hosts: box\n  gather_facts: false\n  tasks:\n    - command: id -un\n",
+    )
+    .unwrap();
+    let (inv, play, agents, dir_text) = (
+        dir.join("inv.ini").display().to_string(),
+        dir.join("play.yml").display().to_string(),
+        dir.join("agents").display().to_string(),
+        dir.display().to_string(),
+    );
+    let mut args = vec!["playbook", "-vvvv", "-i", &inv];
+    let file_text;
+    if let Some(password) = file.first() {
+        std::fs::write(dir.join("conn.pw"), password).unwrap();
+        file_text = dir.join("conn.pw").display().to_string();
+        args.extend(["--connection-password-file", &file_text]);
+    }
+    args.push(&play);
+    let out = volant_within_with_path(
+        &args,
+        DEFAULT_DEADLINE,
+        Some(&dir.join("bin")),
+        &[("VOLANT_AGENT_DIR", &agents), ("FAKE_SSH_DIR", &dir_text)],
+    );
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.status.code(), Some(code), "{text}");
+    assert!(text.contains(says), "{text}");
+    let ran = |file: &str| std::fs::read_to_string(dir.join(file)).unwrap_or_default();
+    let (log, env) = (ran("ssh.log"), ran("ssh.log.env"));
+    assert!(!log.is_empty(), "the fake ssh never ran: {text}");
+    for password in ["s3cret-conn-pw", "wrong-conn-pw"] {
+        for (what, seen) in [
+            ("the output", &text),
+            ("an argument of ssh", &log),
+            ("the environment of ssh", &env),
+        ] {
+            assert!(!seen.contains(password), "{password} is in {what}:\n{seen}");
+        }
+    }
+    if vars.contains("ssh_executable") {
+        assert!(
+            log.lines().all(|line| line.contains("/bin/ssh-alt ")),
+            "a call went to another program than the host named: {log}"
+        );
+    }
+    if let Some(offered) = env
+        .lines()
+        .find_map(|line| line.strip_prefix("VOLANT_ASKPASS_FILE="))
+    {
+        assert!(
+            !Path::new(offered).exists(),
+            "the password file outlived the run: {offered}"
+        );
+    }
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -2112,8 +2317,9 @@ fn an_undefined_loop_under_a_true_when_fails_the_task() {
     let out = volant_within(&["playbook", &path.display().to_string()], PROBE_DEADLINE);
     let text = String::from_utf8(out.stdout).unwrap();
     assert_eq!(out.status.code(), Some(2), "{text}");
+    let copy = section(&text, "Copy");
     assert!(
-        section(&text, "Copy").contains("The task includes an option with an undefined variable."),
+        copy.contains("Task failed: 'nope' is undefined") && copy.contains("<<< caused by >>>"),
         "{text}"
     );
     std::fs::remove_dir_all(&dir).unwrap();
@@ -4762,46 +4968,20 @@ fn an_include_that_includes_itself_is_bounded() {
     );
 }
 
-/// An argument an include statement does not take, or takes and this release cannot honour, is
-/// refused by its own name before the first connection.
+/// `include_tasks` takes `file`, `_raw_params` and `apply`, and refuses any other key.
 #[test]
-fn an_include_statement_refuses_an_argument_it_cannot_honour() {
-    for (file, message) in [
-        ("include/refused.yml", "'include_role' option 'public'"),
-        ("include/vars-dir.yml", "'include_vars' option 'dir'"),
-    ] {
-        let out = volant(&[
-            "playbook",
-            "-i",
-            &fixture("include/inv.ini"),
-            &fixture(file),
-        ]);
-        let text = format!(
-            "{}{}",
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
-        );
-        assert_eq!(out.status.code(), Some(4), "{text}");
-        assert!(text.contains(message), "{text}");
-        assert!(!text.contains("PLAY ["), "nothing runs before it: {text}");
-    }
-}
-
-/// `include_tasks` takes `file`, `_raw_params` and `apply`, and `apply` itself is refused: this
-/// release has no layer to put the keywords it carries on.
-#[test]
-fn include_tasks_refuses_apply_and_an_unknown_key() {
+fn include_tasks_refuses_an_unknown_key() {
     let dir = probe_dir("include-tasks-options");
     std::fs::write(dir.join("sub.yml"), "- name: T\n  command: echo hi\n")
         .expect("the probe include target is written");
     for (body, message) in [
         (
-            "- hosts: localhost\n  gather_facts: false\n  tasks:\n    - include_tasks:\n        file: sub.yml\n        apply:\n          become: true\n",
-            "'include_tasks' option 'apply'",
-        ),
-        (
             "- hosts: localhost\n  gather_facts: false\n  tasks:\n    - include_tasks:\n        file: sub.yml\n        nosuchkey: true\n",
             "Invalid options for include_tasks: nosuchkey",
+        ),
+        (
+            "- hosts: localhost\n  gather_facts: false\n  tasks:\n    - include_vars:\n        dir: vars\n        nosuchkey: true\n",
+            "Invalid options for include_vars: nosuchkey",
         ),
     ] {
         std::fs::write(dir.join("site.yml"), body).expect("the probe playbook is written");
@@ -4865,6 +5045,39 @@ fn import_playbook_written_as_a_task_is_refused_by_its_own_name() {
         ),
         "{err}"
     );
+    std::fs::remove_dir_all(&dir).expect("the probe directory is removed");
+}
+
+/// A templated `tags` on an `import_playbook` is refused, so that `--skip-tags` cannot run what the
+/// reference would skip: it would otherwise be a literal tag named `{{ pkgtag }}`.
+#[test]
+fn templated_import_tags_are_refused_whatever_the_tag_selection() {
+    let dir = probe_dir("import-templated-tags");
+    std::fs::write(
+        dir.join("sub.yml"),
+        "- hosts: localhost\n  gather_facts: false\n  tasks:\n    - debug: {msg: ran}\n",
+    )
+    .expect("the imported playbook is written");
+    std::fs::write(
+        dir.join("site.yml"),
+        "- import_playbook: sub.yml\n  tags: ['{{ pkgtag }}']\n",
+    )
+    .expect("the probe playbook is written");
+    let path = dir.join("site.yml").display().to_string();
+    for selection in [
+        &["--skip-tags", "packages"][..],
+        &["--tags", "packages"][..],
+    ] {
+        let mut args = vec!["playbook", "-e", "pkgtag=packages"];
+        args.extend_from_slice(selection);
+        args.push(&path);
+        let out = volant(&args);
+        let text = String::from_utf8_lossy(&out.stdout).to_string();
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        assert_eq!(out.status.code(), Some(4), "{text}{err}");
+        assert!(err.contains("holds a template"), "{err}");
+        assert!(!text.contains("TASK"), "{text}");
+    }
     std::fs::remove_dir_all(&dir).expect("the probe directory is removed");
 }
 
@@ -4969,6 +5182,104 @@ fn a_fact_carrying_a_result_cannot_name_a_variable() {
         "the carried result should be refused:\n{stdout}"
     );
     assert_eq!(out.status.code(), Some(0), "{stdout}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A `delegate_to` built from text a managed host returned names a host of that text: it stays
+/// text in the delegate's variables, `hostvars` and output, and nothing of it runs here.
+#[rstest]
+#[case::run_once("delegate-run-once.yml", "UNREACHABLE")]
+#[case::loop_("delegate-loop.yml", "UNREACHABLE")]
+#[case::each_item_names_one("delegate-loop-item.yml", "")]
+#[case::facts_written_on_it("delegate-facts.yml", "changed: [h1 -> {{ lookup('pipe', 'touch ")]
+#[case::its_name_in_a_variable(
+    "delegate-name-in-vars.yml",
+    "changed: [h1 -> {{ lookup('pipe', 'touch "
+)]
+#[case::braces_built_in_a_loop("delegate-braces-loop.yml", "UNREACHABLE")]
+#[case::braces_built_in_a_handler("delegate-braces-handler.yml", "UNREACHABLE")]
+#[case::a_host_add_host_made("delegate-added-host.yml", "changed: [h1 -> lookup('pipe', 'touch ")]
+#[case::a_host_the_playbook_made(
+    "delegate-added-host-by-author.yml",
+    "changed: [h1 -> made-by-the-playbook]"
+)]
+fn a_delegate_named_by_a_result_stays_text(#[case] playbook: &str, #[case] shown: &str) {
+    let (dir, marker) = trust_dir(
+        &format!("delegate-{}", playbook.trim_end_matches(".yml")),
+        "h1 ansible_connection=local\n",
+    );
+    // `add_host` is the controller's ansible-core action: without it the row has nothing to say.
+    let python = python::reference_python().map(|p| p.display().to_string());
+    if playbook.contains("added-host") && python.is_none() {
+        return;
+    }
+    let envs: Vec<(&str, &str)> = python
+        .iter()
+        .map(|p| ("VOLANT_PYTHON", p.as_str()))
+        .collect();
+    let out = volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            "-e",
+            &format!("payload={}", dir.join("payload.txt").display()),
+            "-e",
+            &format!("bare={}", dir.join("bare.txt").display()),
+            &fixture(&format!("trust/{playbook}")),
+        ],
+        std::time::Duration::from_secs(30),
+        &envs,
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !marker.exists(),
+        "the text a host returned ran on the controller:\n{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains(shown), "{playbook}:\n{stdout}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Text a managed host printed is text, whatever raw tags it holds: a raw block around an
+/// expression, or tags that close one the author wrote, never makes the expression run.
+#[test]
+fn host_text_holding_raw_tags_is_never_rendered() {
+    let (dir, marker) = trust_dir("raw-wrapped", "h1 ansible_connection=local\n");
+    let call = format!("{{{{ lookup('pipe', 'touch {}') }}}}", marker.display());
+    let payloads = [
+        ("wrapped", format!("{{% raw %}}{call}{{% endraw %}}")),
+        ("split", format!("{{% endraw %}}{call}{{% raw %}}")),
+        ("opened", format!("{{% raw %}}{{% endraw %}}{call}")),
+    ];
+    for (name, text) in payloads {
+        let payload = dir.join(format!("{name}.txt"));
+        std::fs::write(&payload, &text).expect("the payload");
+        let out = volant_within(
+            &[
+                "playbook",
+                "-i",
+                dir.join("inv.ini").to_str().expect("a path"),
+                "-e",
+                &format!("payload={}", payload.display()),
+                &fixture("trust/raw-wrapped-host-text.yml"),
+            ],
+            std::time::Duration::from_secs(30),
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            !marker.exists(),
+            "{name}: text from a host ran on the controller:\n{stdout}"
+        );
+        assert_eq!(out.status.code(), Some(0), "{name}: {stdout}");
+        let shown = text.replace('"', "\\\"");
+        assert!(
+            stdout.contains(&format!(
+                "\"msg\": \"{shown}|{{{{ r.stdout }}}}|{{{{ r.stdout }}}}|{shown}\""
+            )),
+            "{name}: the text is shown as it came:\n{stdout}"
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -5318,7 +5629,7 @@ fn fake_python_answering(dir: &Path, answers: &[&[u8]]) -> std::path::PathBuf {
         &script,
         format!(
             "#!/bin/sh\n\
-             if [ \"$2\" = 'import ansible' ]; then exit 0; fi\n\
+             for word in \"$@\"; do if [ \"$word\" = 'import ansible' ]; then exit 0; fi; done\n\
              echo start >> '{dir}/starts.log'\n\
              cat '{dir}/answer.bin'\n\
              cat > /dev/null\n",
@@ -5581,6 +5892,163 @@ fn the_implicit_localhost_runs_under_the_controller_python() {
         !stdout.contains("discovered Python interpreter") && !stderr.contains("discovered Python"),
         "the interpreter was discovered:
 {stdout}{stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An inventory with no host warns once, as ansible-core 2.19.12 does, unless `localhost_warning`
+/// is off.
+#[rstest::rstest]
+#[case::no_host("", &[], true)]
+#[case::a_host("h1 ansible_connection=local\n", &[], false)]
+#[case::silenced_by_the_environment("", &[("ANSIBLE_LOCALHOST_WARNING", "false")], false)]
+#[case::the_environment_can_ask_for_it("", &[("ANSIBLE_LOCALHOST_WARNING", "true")], true)]
+fn an_inventory_with_no_host_warns_that_only_localhost_is_left(
+    #[case] inventory: &str,
+    #[case] envs: &[(&str, &str)],
+    #[case] warns: bool,
+) {
+    let dir = probe_dir(&format!(
+        "empty-inventory-{}-{}",
+        inventory.len(),
+        envs.len()
+    ));
+    std::fs::write(dir.join("inv.ini"), inventory).expect("an inventory");
+    std::fs::write(
+        dir.join("play.yml"),
+        "- hosts: localhost\n  gather_facts: false\n  tasks:\n    - debug: msg=ok\n",
+    )
+    .expect("the play");
+    let out = volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            dir.join("play.yml").to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(60),
+        envs,
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "the run failed: {stderr}");
+    assert_eq!(
+        stderr.matches(
+            "[WARNING]: provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'"
+        )
+        .count(),
+        usize::from(warns),
+        "{stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A `localhost_warning` that is not a boolean stops the run before it starts, as the other
+/// boolean settings do, and names the setting and where it was set.
+#[rstest::rstest]
+#[case::env("env", "ANSIBLE_LOCALHOST_WARNING", "maybe")]
+#[case::ini("ini", "ANSIBLE_CONFIG", "maybe")]
+fn a_localhost_warning_that_is_not_a_boolean_is_refused(
+    #[case] source: &str,
+    #[case] var: &str,
+    #[case] value: &str,
+) {
+    let dir = probe_dir(&format!("bad-localhost-warning-{source}"));
+    std::fs::write(dir.join("inv.ini"), "h1 ansible_connection=local\n").expect("an inventory");
+    std::fs::write(
+        dir.join("play.yml"),
+        "- hosts: h1\n  gather_facts: false\n  tasks:\n    - debug: msg=ok\n",
+    )
+    .expect("the play");
+    let cfg = dir.join("ansible.cfg");
+    std::fs::write(&cfg, format!("[defaults]\nlocalhost_warning = {value}\n")).expect("a config");
+    let setting = if source == "env" {
+        value.to_string()
+    } else {
+        cfg.display().to_string()
+    };
+    let out = volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            dir.join("play.yml").to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(60),
+        &[(var, &setting)],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(5), "{stderr}");
+    assert!(
+        stderr.contains("Config 'LOCALHOST_WARNING' from") && stderr.contains("'maybe'"),
+        "{stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The register of the controller host is data when it is read through any of the three
+/// spellings, from any inventory shape: the text comes back as it was, never rendered.
+#[rstest::rstest]
+fn the_controller_s_register_stays_data_through_every_spelling(
+    #[values("localhost", "127.0.0.1", "::1")] ran_as: &str,
+    #[values("localhost", "127.0.0.1", "::1")] read_as: &str,
+    #[values(
+        "",
+        "localhost ansible_connection=local\n",
+        "localhost ansible_host=192.0.2.9 ansible_connection=local\n"
+    )]
+    listed: &str,
+) {
+    let dir = probe_dir(&format!(
+        "controller-data-{}-{}-{}",
+        ran_as.len(),
+        read_as.len(),
+        listed.len()
+    ));
+    std::fs::write(
+        dir.join("inv.ini"),
+        format!("[web]\nw1 ansible_connection=local\n{listed}"),
+    )
+    .expect("an inventory");
+    std::fs::write(dir.join("text.txt"), "{{ 'MARK' ~ 'ED' }}").expect("the text");
+    let play = format!(
+        "- hosts: \"{ran_as}\"
+  gather_facts: false
+  tasks:
+    - command: cat {dir}/text.txt
+      register: r
+- hosts: w1
+  gather_facts: false
+  vars:
+    from_vars: \"{{{{ hostvars['{read_as}'].r.stdout }}}}\"
+  tasks:
+    - set_fact:
+        copied: \"{{{{ hostvars['{read_as}'].r.stdout }}}}\"
+        whole: \"{{{{ hostvars['{read_as}'].r }}}}\"
+    - debug:
+        msg: \"read={{{{ hostvars['{read_as}'].r.stdout }}}} copied={{{{ copied }}}} vars={{{{ from_vars }}}} whole={{{{ whole.stdout }}}}\"
+",
+        dir = dir.display()
+    );
+    std::fs::write(dir.join("play.yml"), play).expect("the play");
+    let out = volant_within(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            dir.join("play.yml").to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(60),
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stdout}{stderr}");
+    assert!(
+        !stdout.contains("MARKED"),
+        "the text was rendered: {stdout}"
+    );
+    assert!(
+        stdout.contains("read={{ 'MARK' ~ 'ED' }} copied={{ 'MARK' ~ 'ED' }} vars={{ 'MARK' ~ 'ED' }} whole={{ 'MARK' ~ 'ED' }}"),
+        "{stdout}{stderr}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -6572,4 +7040,576 @@ fn the_system_runtime_keeps_the_refusal_and_installs_nothing() {
         "{stderr}"
     );
     assert!(!data.exists(), "a runtime was installed");
+}
+
+/// A templated `no_log` hides a failed task's result as a literal one does, at whatever step of
+/// preparing it failed; unreadable or not a boolean, the result stays hidden.
+#[rstest]
+fn a_templated_no_log_hides_a_task_that_failed_before_it_ran(
+    #[values(
+        "arguments",
+        "when",
+        "loop",
+        "label",
+        "delegate",
+        "vars",
+        "environment",
+        "notify",
+        "set_fact",
+        "handler"
+    )]
+    kind: &str,
+    #[values("task", "block", "play")] level: &str,
+) {
+    // A name only this host's inventory entry carries, in the text each of these failures shows.
+    let fails = "{{ lookup('file', '/nonexistent/' ~ sec) }}";
+    let task = match kind {
+        "arguments" => format!("debug: {{msg: \"{fails}\"}}"),
+        "when" => format!("debug: {{msg: x}}\nwhen: \"{fails}\""),
+        "loop" => format!("debug: {{msg: x}}\nloop: \"{fails}\""),
+        "label" => {
+            format!("debug: {{msg: x}}\nloop: [1]\nloop_control: {{label: \"{fails}\"}}")
+        }
+        "delegate" => format!("debug: {{msg: x}}\ndelegate_to: \"{fails}\""),
+        "vars" => format!("debug: {{msg: \"{{{{ v }}}}\"}}\nvars: {{v: \"{fails}\"}}"),
+        "environment" => format!("command: \"true\"\nenvironment: {{X: \"{fails}\"}}"),
+        "notify" => format!("command: \"true\"\nchanged_when: true\nnotify: \"{fails}\""),
+        "set_fact" => format!("set_fact: {{y: \"{fails}\"}}"),
+        _ => "command: \"true\"\nchanged_when: true\nnotify: h".to_string(),
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let inventory = dir.path().join("inv.ini");
+    std::fs::write(
+        &inventory,
+        "h1 ansible_connection=local ansible_python_interpreter=/usr/bin/python3 sec=SECRETVALUE\n",
+    )
+    .unwrap();
+    // What `no_log` is written as, and whether the result is then hidden.
+    for (written, hidden) in [
+        ("\"{{ hide }}\"", true),
+        ("\"{{ show }}\"", false),
+        ("\"{{ nowhere }}\"", true),
+        ("\"{{ 'maybe' }}\"", true),
+        ("true", true),
+    ] {
+        let indent = |text: &str, by: usize| text.replace('\n', &format!("\n{}", " ".repeat(by)));
+        let line = format!("no_log: {written}");
+        let (play_keyword, body) = match (kind, level) {
+            ("handler", _) => (
+                String::new(),
+                format!(
+                    "    - {}\n  handlers:\n    - name: h\n      debug: {{msg: \"{fails}\"}}\n      {line}\n",
+                    indent(&task, 6)
+                ),
+            ),
+            (_, "task") => (
+                String::new(),
+                format!("    - {}\n      {line}\n", indent(&task, 6)),
+            ),
+            (_, "block") => (
+                String::new(),
+                format!(
+                    "    - block:\n        - {}\n      {line}\n",
+                    indent(&task, 10)
+                ),
+            ),
+            _ => (
+                format!("  {line}\n"),
+                format!("    - {}\n", indent(&task, 6)),
+            ),
+        };
+        let book = dir.path().join("play.yml");
+        std::fs::write(
+            &book,
+            format!(
+                "- hosts: h1\n  gather_facts: false\n  vars: {{hide: true, show: false}}\n{play_keyword}  tasks:\n{body}"
+            ),
+        )
+        .unwrap();
+        let out = volant_within(
+            &[
+                "playbook",
+                "-i",
+                &inventory.display().to_string(),
+                &book.display().to_string(),
+            ],
+            DEFAULT_DEADLINE,
+        );
+        let shown = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let what = format!("{kind} at {level} with no_log: {written}\n{shown}");
+        if kind == "handler" && level != "task" {
+            // The handler is written under `handlers:`, where only its own `no_log` applies.
+            continue;
+        }
+        assert!(shown.contains("FAILED!"), "the task did not fail: {what}");
+        if hidden {
+            assert!(!shown.contains("SECRETVALUE"), "{what}");
+            assert!(shown.contains("the output has been hidden"), "{what}");
+        } else {
+            assert!(shown.contains("SECRETVALUE"), "{what}");
+            assert!(!shown.contains("the output has been hidden"), "{what}");
+        }
+    }
+}
+
+/// A host that answers with a YAML document nested far past any real one fails its own task, and
+/// the run goes on for the other host instead of the process aborting on a stack overflow.
+#[test]
+fn a_deeply_nested_yaml_text_from_a_host_fails_only_that_hosts_task() {
+    let dir = probe_dir("deep-yaml-text");
+    std::fs::write(
+        dir.join("inv.ini"),
+        "h1 ansible_connection=local\nh2 ansible_connection=local\n",
+    )
+    .expect("an inventory");
+    std::fs::write(dir.join("h1.yml"), format!("{}x\n", "- ".repeat(100_000))).expect("h1.yml");
+    std::fs::write(dir.join("h2.yml"), "- fine\n").expect("h2.yml");
+    std::fs::write(
+        dir.join("play.yml"),
+        "- hosts: all\n  gather_facts: false\n  tasks:\n    \
+         - command: cat {{ inventory_hostname }}.yml\n      register: r\n    \
+         - debug: {msg: \"items={{ r.stdout | from_yaml | length }}\"}\n",
+    )
+    .expect("the play");
+    let out = volant_within_full(
+        &["playbook", "-i", "inv.ini", "play.yml"],
+        PROBE_DEADLINE,
+        None,
+        None,
+        Some(&dir),
+        None,
+        &[],
+    );
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // Exit code 2 is a failed host: a SIGABRT has no code at all.
+    assert_eq!(out.status.code(), Some(2), "{text}");
+    assert!(!text.contains("overflowed its stack"), "{text}");
+    assert!(text.contains("maximum recursion depth exceeded"), "{text}");
+    assert!(text.contains(r#""msg": "items=1""#), "{text}");
+    let recap = |host: &str| {
+        text.lines()
+            .find(|l| l.starts_with(host) && l.contains("ok="))
+            .unwrap_or_else(|| panic!("no recap line for {host}: {text}"))
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    assert!(
+        recap("h1").contains("ok=1") && recap("h1").contains("failed=1"),
+        "{text}"
+    );
+    assert!(
+        recap("h2").contains("ok=2") && recap("h2").contains("failed=0"),
+        "{text}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A file nested past the limit is a load error, as a syntax error is: `vars_files` and the
+/// playbook itself exit with 4, `-e @file` with 1.
+#[test]
+fn a_deeply_nested_yaml_file_is_a_load_error() {
+    let dir = probe_dir("deep-yaml-file");
+    std::fs::write(dir.join("inv.ini"), "h1 ansible_connection=local\n").expect("an inventory");
+    let deep = format!("v:\n  {}x\n", "- ".repeat(100_000));
+    std::fs::write(dir.join("deep.yml"), &deep).expect("deep.yml");
+    let tasks = "  gather_facts: false\n  tasks:\n    - debug: {msg: ok}\n";
+    std::fs::write(
+        dir.join("vars_files.yml"),
+        format!("- hosts: all\n  vars_files: [deep.yml]\n{tasks}"),
+    )
+    .expect("the play");
+    std::fs::write(dir.join("plain.yml"), format!("- hosts: all\n{tasks}")).expect("the play");
+    let in_playbook = format!(
+        "- hosts: all\n  gather_facts: false\n  vars:\n    v:\n      {}x\n",
+        "- ".repeat(100_000)
+    );
+    std::fs::write(dir.join("in_playbook.yml"), in_playbook).expect("the deep play");
+    for (args, code) in [
+        (vec!["vars_files.yml"], 4),
+        (vec!["in_playbook.yml"], 4),
+        (vec!["plain.yml", "-e", "@deep.yml"], 1),
+    ] {
+        let mut argv = vec!["playbook", "-i", "inv.ini"];
+        argv.extend(args.iter().copied());
+        let out = volant_within_full(&argv, PROBE_DEADLINE, None, None, Some(&dir), None, &[]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(code), "{args:?}: {stderr}");
+        assert!(
+            stderr.contains("maximum recursion depth exceeded"),
+            "{args:?}: {stderr}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A cacheable fact built from nested host text is read back by the next run, though its file
+/// nests deeper than the default recursion limit of `serde_json`.
+#[test]
+fn a_nested_cacheable_fact_does_not_break_the_next_run() {
+    let dir = probe_dir("deep-cached-fact");
+    std::fs::write(dir.join("inv.ini"), "h1 ansible_connection=local\n").expect("an inventory");
+    std::fs::write(dir.join("doc.yml"), format!("{}x\n", "- ".repeat(200))).expect("doc.yml");
+    std::fs::write(
+        dir.join("ansible.cfg"),
+        format!(
+            "[defaults]\nfact_caching = jsonfile\nfact_caching_connection = {}\n",
+            dir.join("cache").display()
+        ),
+    )
+    .expect("ansible.cfg");
+    std::fs::write(
+        dir.join("play.yml"),
+        "- hosts: all\n  gather_facts: false\n  tasks:\n    \
+         - command: cat doc.yml\n      register: r\n    \
+         - set_fact: {deep: \"{{ r.stdout | from_yaml }}\", cacheable: true}\n",
+    )
+    .expect("the play");
+    for run in 1..=2 {
+        let out = volant_within_full(
+            &["playbook", "-i", "inv.ini", "play.yml"],
+            PROBE_DEADLINE,
+            None,
+            None,
+            Some(&dir),
+            None,
+            &[],
+        );
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.status.code(), Some(0), "run {run}: {text}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The terms of a `with_` loop reach the lookup as values. Host-provided text among them stays
+/// data, and nothing it holds runs on the controller.
+#[rstest::rstest]
+#[case::dict("with_dict", r#"{a: "{{ r.stdout }}"}"#, true)]
+#[case::together("with_together", r#"[["{{ r.stdout }}"], ["x"]]"#, true)]
+#[case::subelements(
+    "with_subelements",
+    r#"[[{name: x, k: ["{{ r.stdout }}"]}], "k"]"#,
+    true
+)]
+#[case::sequence("with_sequence", r#""{{ r.stdout }}""#, false)]
+#[case::template("with_template", r#"["{{ r.stdout }}"]"#, false)]
+#[case::url("with_url", r#"["{{ r.stdout }}"]"#, false)]
+#[case::varnames("with_varnames", r#"["{{ r.stdout }}"]"#, false)]
+#[case::vars("with_vars", r#"["{{ r.stdout }}"]"#, false)]
+fn host_text_in_the_terms_of_a_with_loop_stays_data(
+    #[case] keyword: &str,
+    #[case] terms: &str,
+    #[case] prints_the_text: bool,
+) {
+    let (dir, marker) = trust_dir(keyword, "h1 ansible_connection=local\n");
+    let playbook = dir.join("pb.yml");
+    std::fs::write(
+        &playbook,
+        format!(
+            "- hosts: h1\n  gather_facts: false\n  tasks:\n    - command: cat {}\n      register: r\n    - debug:\n        msg: \"{{{{ item }}}}\"\n      {keyword}: {terms}\n      ignore_errors: true\n",
+            dir.join("payload.txt").display()
+        ),
+    )
+    .expect("the playbook");
+    // The lookups that only ansible-core implements need its Python; the others run without it.
+    let python = std::env::var("VOLANT_PYTHON").ok();
+    let envs: Vec<(&str, &str)> = python
+        .iter()
+        .map(|p| ("VOLANT_PYTHON", p.as_str()))
+        .collect();
+    let out = volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            playbook.to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(60),
+        &envs,
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !marker.exists(),
+        "{keyword}: host text in a term ran on the controller:\n{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    if prints_the_text && python.is_some() {
+        assert!(stdout.contains("lookup("), "{keyword}: {stdout}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A variable that reads the group names, and a second that reads the first, keep host-provided
+/// group names as data.
+#[test]
+fn group_names_read_through_two_variables_stay_data() {
+    // `add_host` is a Python module.
+    let Ok(python) = std::env::var("VOLANT_PYTHON") else {
+        eprintln!("skipped: VOLANT_PYTHON not set. Set it to a real ansible-core python.");
+        return;
+    };
+    let (dir, marker) = trust_dir("nested-groups", "h1 ansible_connection=local\n");
+    let playbook = dir.join("pb.yml");
+    std::fs::write(
+        &playbook,
+        format!(
+            "- hosts: h1\n  gather_facts: false\n  vars:\n    gn: \"{{{{ groups }}}}\"\n    gk: \"{{{{ gn | list }}}}\"\n  tasks:\n    - command: cat {}\n      register: r\n    - add_host:\n        name: extra\n        groups: [\"{{{{ r.stdout }}}}\"]\n        ansible_connection: local\n    - debug:\n        msg: after\n",
+            dir.join("payload.txt").display()
+        ),
+    )
+    .expect("the playbook");
+    let out = volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            playbook.to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(60),
+        &[("VOLANT_PYTHON", &python)],
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !marker.exists(),
+        "a group name from a host ran on the controller:\n{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains("\"msg\": \"after\""), "{stdout}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Runs `playbook` in `dir` with the local inventory of `trust_dir`, with the ansible-core Python
+/// when `VOLANT_PYTHON` names one, and returns the output.
+fn run_trust_playbook(dir: &Path, playbook: &str) -> Output {
+    let path = dir.join("pb.yml");
+    std::fs::write(&path, playbook).expect("the playbook");
+    let python = std::env::var("VOLANT_PYTHON").ok();
+    let envs: Vec<(&str, &str)> = python
+        .iter()
+        .map(|p| ("VOLANT_PYTHON", p.as_str()))
+        .collect();
+    volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            path.to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(120),
+        &envs,
+    )
+}
+
+/// The expression of the `k`th variable of a chain: the first reads `source`, each next one the
+/// one before.
+fn chain_expr(source: &str, k: usize) -> String {
+    if k == 1 {
+        source.to_string()
+    } else {
+        format!("v{} | list", k - 1)
+    }
+}
+
+/// The five variables of a chain, each line indented by `indent`.
+fn variable_chain(source: &str, indent: &str) -> String {
+    use std::fmt::Write;
+    let mut text = String::new();
+    for k in 1..=5 {
+        let _ = writeln!(
+            text,
+            "{indent}v{k}: \"{{{{ {} }}}}\"",
+            chain_expr(source, k)
+        );
+    }
+    text
+}
+
+/// One task per depth of the chain, then one that reads nothing.
+fn chain_reads(indent: &str) -> String {
+    use std::fmt::Write;
+    let mut text = String::new();
+    for k in 1..=5 {
+        let _ = writeln!(
+            text,
+            "{indent}- debug: {{msg: \"{{{{ v{k} | length }}}}\"}}"
+        );
+    }
+    let _ = writeln!(text, "{indent}- debug: {{msg: after}}");
+    text
+}
+
+/// Host text read through chains of up to five variables, in every layer, never runs on the
+/// controller. A `set_fact` stores rendered text, so that layer checks the registered result only.
+#[rstest::rstest]
+#[case::groups("groups", "name: extra, groups: [\"{{ r.stdout }}\"]")]
+#[case::play_hosts("ansible_play_hosts_all", "name: \"{{ r.stdout }}\"")]
+#[case::hostvars("hostvars", "name: \"{{ r.stdout }}\"")]
+#[case::registered("[r.stdout]", "")]
+fn host_text_stays_data_through_chains_of_variables(#[case] source: &str, #[case] added: &str) {
+    use std::fmt::Write;
+    if !added.is_empty() && std::env::var_os("VOLANT_PYTHON").is_none() {
+        eprintln!("skipped: VOLANT_PYTHON not set. Set it to a real ansible-core python.");
+        return;
+    }
+    for layer in [
+        "play",
+        "task",
+        "block",
+        "vars_files",
+        "set_fact",
+        "include_vars",
+        "role_defaults",
+        "role_vars",
+    ] {
+        if layer == "set_fact" && !added.is_empty() {
+            continue;
+        }
+        let (dir, marker) = trust_dir(
+            &format!("chain-{layer}-{}", source.len()),
+            "h1 ansible_connection=local\n",
+        );
+        let chain_file = variable_chain(source, "");
+        std::fs::write(dir.join("chain.yml"), &chain_file).expect("a vars file");
+        for part in ["defaults", "vars"] {
+            std::fs::create_dir_all(dir.join(format!("roles/ch/{part}"))).expect("a role");
+            let wanted = part == layer.trim_start_matches("role_");
+            std::fs::write(
+                dir.join(format!("roles/ch/{part}/main.yml")),
+                if wanted {
+                    chain_file.as_str()
+                } else {
+                    "unused: 1\n"
+                },
+            )
+            .expect("a role file");
+        }
+        std::fs::create_dir_all(dir.join("roles/ch/tasks")).expect("a role");
+        std::fs::write(dir.join("roles/ch/tasks/main.yml"), chain_reads("")).expect("a role task");
+        let mut text = String::from("- hosts: h1\n  gather_facts: false\n  ignore_errors: true\n");
+        let mut tasks = format!(
+            "  tasks:\n    - command: cat {}\n      register: r\n",
+            dir.join("payload.txt").display()
+        );
+        if !added.is_empty() {
+            let _ = writeln!(
+                tasks,
+                "    - add_host: {{{added}, ansible_connection: local}}"
+            );
+        }
+        match layer {
+            "play" => {
+                let _ = write!(text, "  vars:\n{}", variable_chain(source, "    "));
+                tasks.push_str(&chain_reads("    "));
+            }
+            "task" => {
+                for k in 1..=5 {
+                    let _ = write!(
+                        tasks,
+                        "    - debug: {{msg: \"{{{{ v{k} | length }}}}\"}}\n      vars:\n{}",
+                        variable_chain(source, "        ")
+                    );
+                }
+                tasks.push_str("    - debug: {msg: after}\n");
+            }
+            "block" => {
+                let _ = write!(
+                    tasks,
+                    "    - block:\n{}      vars:\n{}",
+                    chain_reads("        "),
+                    variable_chain(source, "        ")
+                );
+            }
+            "vars_files" => {
+                text.push_str("  vars_files: [chain.yml]\n");
+                tasks.push_str(&chain_reads("    "));
+            }
+            "set_fact" => {
+                for k in 1..=5 {
+                    let _ = writeln!(
+                        tasks,
+                        "    - set_fact:\n        v{k}: \"{{{{ {} }}}}\"",
+                        chain_expr(source, k)
+                    );
+                }
+                tasks.push_str(&chain_reads("    "));
+            }
+            "include_vars" => {
+                tasks.push_str("    - include_vars: {file: chain.yml}\n");
+                tasks.push_str(&chain_reads("    "));
+            }
+            _ => tasks.push_str("    - include_role: {name: ch}\n"),
+        }
+        text.push_str(&tasks);
+        let out = run_trust_playbook(&dir, &text);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            !marker.exists(),
+            "{layer} over {source}: host text ran on the controller:\n{text}\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            stdout.contains("PLAY RECAP"),
+            "{layer} over {source}: {stdout}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// A chain of three variables over the group names, in play vars and in task vars, with the last
+/// one read and with a later task that reads nothing.
+#[rstest::rstest]
+#[case::play_not_read(
+    "  vars:\n    gn: \"{{ groups }}\"\n    gk: \"{{ gn | list }}\"\n    gl: \"{{ gk | last }}\"\n",
+    "",
+    "hi"
+)]
+#[case::play_read(
+    "  vars:\n    gn: \"{{ groups }}\"\n    gk: \"{{ gn | list }}\"\n    gl: \"{{ gk | last }}\"\n",
+    "",
+    "{{ gl }}"
+)]
+#[case::task_not_read(
+    "",
+    "      vars: {gn: \"{{ groups }}\", gk: \"{{ gn | list }}\", gl: \"{{ gk | last }}\"}\n",
+    "hi"
+)]
+#[case::task_read(
+    "",
+    "      vars: {gn: \"{{ groups }}\", gk: \"{{ gn | list }}\", gl: \"{{ gk | last }}\"}\n",
+    "{{ gl }}"
+)]
+fn group_names_read_through_three_variables_stay_data(
+    #[case] play_vars: &str,
+    #[case] task_vars: &str,
+    #[case] message: &str,
+) {
+    let Ok(python) = std::env::var("VOLANT_PYTHON") else {
+        eprintln!("skipped: VOLANT_PYTHON not set. Set it to a real ansible-core python.");
+        return;
+    };
+    let _ = python;
+    let (dir, marker) = trust_dir("three-variables", "h1 ansible_connection=local\n");
+    let text = format!(
+        "- hosts: h1\n  gather_facts: false\n  ignore_errors: true\n{play_vars}  tasks:\n    - command: cat {}\n      register: r\n    - add_host: {{name: extra, groups: [\"{{{{ r.stdout }}}}\"], ansible_connection: local}}\n    - debug: {{msg: \"{message}\"}}\n{task_vars}",
+        dir.join("payload.txt").display()
+    );
+    let out = run_trust_playbook(&dir, &text);
+    assert!(
+        !marker.exists(),
+        "a group name from a host ran on the controller:\n{text}\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

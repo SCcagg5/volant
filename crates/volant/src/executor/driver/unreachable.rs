@@ -7,7 +7,6 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use volant_protocol::TaskResult;
 
-use crate::compile::Compiled;
 use crate::playbook::PlayTask;
 use crate::vars::VarStore;
 
@@ -70,7 +69,7 @@ pub(super) async fn ignore_the_batch(
     driver: &mut Driver<'_>,
     tx: &mpsc::Sender<Event>,
     host: &str,
-    compiled: &Compiled,
+    task: &PlayTask,
     index: usize,
     msg: String,
     delegate: Option<&str>,
@@ -78,7 +77,6 @@ pub(super) async fn ignore_the_batch(
     undecided: Option<usize>,
     pos: &mut usize,
 ) -> bool {
-    let task = &compiled.steps[index].task;
     let live = driver.progress.borrow().live_hosts.clone();
     let targets = fact_targets(task, host, &live);
     ignore_unreachable(tx, host, index, task, msg, delegate, store, &targets).await;

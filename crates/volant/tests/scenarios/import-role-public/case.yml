@@ -1,0 +1,3 @@
+# An import_role lends the variables of its role unless it says `public: false`.
+runs:
+  - args: [-i, inv.ini, import.yml]

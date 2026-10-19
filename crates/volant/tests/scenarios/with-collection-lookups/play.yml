@@ -1,0 +1,36 @@
+- hosts: localhost
+  gather_facts: false
+  vars:
+    l1: [x, y]
+    l2: [1, 2]
+  tasks:
+    - name: dependent
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_community.general.dependent:
+        - name: [a, b]
+        - kv: ["{{ [1, 2] }}"]
+      loop_control:
+        label: "L-{{ item.name }}"
+        index_var: i
+
+    - name: flattened by its full name
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_community.general.flattened: [[a, [b]], c]
+      loop_control:
+        label: "L-{{ item }}"
+        index_var: i
+
+    - name: cartesian by its full name
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_community.general.cartesian: ["{{ l1 }}", "{{ l2 }}"]
+      loop_control:
+        label: "L-{{ item }}"
+        index_var: i
+
+    - name: flattened under ansible.builtin
+      debug:
+        msg: "{{ item }}"
+      with_ansible.builtin.flattened: [[a, [b]], c]

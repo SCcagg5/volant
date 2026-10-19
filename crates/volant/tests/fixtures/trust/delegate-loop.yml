@@ -1,0 +1,11 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: Read a file whose text looks like a template
+      command: cat {{ payload }}
+      register: r
+    - name: Delegate a loop to the text
+      command: id
+      delegate_to: "{{ r.stdout }}"
+      loop: [1, 2]
+      ignore_unreachable: true

@@ -26,7 +26,7 @@ pub(super) const CONTROL_PATH_MAX: usize = 104 - 1 - 17;
 pub(super) const SERVER_ALIVE_INTERVAL: u32 = 5;
 pub(super) const SERVER_ALIVE_COUNT_MAX: u32 = 3;
 
-/// The client every connection runs.
+/// The client a connection runs unless `ansible_ssh_executable` names another.
 pub(super) const SSH_PROGRAM: &str = "ssh";
 
 /// The `ssh -G` keywords that only time a connection and say nothing of where it goes. A
@@ -105,8 +105,26 @@ pub(super) fn control_path_for(
         hasher.update(b"\0");
         hasher.update(word.as_bytes());
     }
+    // A connection that a password opened is not offered to a run that gives another: a master
+    // outlives its run by `ControlPersist`, and a wrong password would ride it into the host.
+    // The password itself stays out of the name, which `-vvvv` prints.
+    if target.offers_password() {
+        hasher.update(b"\0run\0");
+        hasher.update(run_id().as_bytes());
+    }
     let path = dir.join(&hasher.finalize().to_hex()[..16]);
     (path.as_os_str().len() <= CONTROL_PATH_MAX).then(|| path.into_boxed_path())
+}
+
+/// What tells this run from every other: its process number and the time it started.
+fn run_id() -> &'static str {
+    static ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ID.get_or_init(|| {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos());
+        format!("{}-{nanos}", std::process::id())
+    })
 }
 
 /// The directory for the shared connections' sockets, for this user (see `control_dir_in`),

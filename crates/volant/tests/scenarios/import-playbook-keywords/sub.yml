@@ -1,0 +1,9 @@
+- name: sub play
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: boom
+      fail: {msg: boom}
+      register: r
+    - name: env
+      debug: {msg: "{{ lookup('env', 'IMPORT_ENV') | default('unset', true) }}"}

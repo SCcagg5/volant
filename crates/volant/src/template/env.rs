@@ -14,6 +14,7 @@ use serde_json::Value;
 use crate::bridge::Bridge;
 
 use super::filters;
+use super::globals;
 use super::vm::concat;
 use super::{ATTR_KEY, CONCAT_KEY, ITEM_KEY};
 
@@ -45,6 +46,10 @@ pub(super) fn environment(base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) -> En
     filters::register(&mut env, base_dir, bridge);
     env.add_function(CONCAT_KEY, concat);
     env.add_function("range", range);
+    env.add_function("dict", globals::dict);
+    env.add_function("cycler", globals::cycler);
+    env.add_function("joiner", minijinja_contrib::globals::joiner);
+    env.add_function("undef", globals::undef);
     env.add_function(ITEM_KEY, chained_item);
     env
 }

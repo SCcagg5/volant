@@ -1,0 +1,3 @@
+# An alias, a tag and a plain scalar load the value PyYAML gives them: in the play's own vars, in
+# a group_vars file and in an included vars file. Only values that print as JSON are compared.
+args: [-i, inv.ini, site.yml]

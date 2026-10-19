@@ -34,6 +34,7 @@ fn start_vars(
     let origin = crate::compile::Origin::default();
     let mut warnings = Vec::new();
     start(Context {
+        link: &crate::action_plugins::LinkFacts::default(),
         args: &args,
         args_untrusted: untrusted,
         running_vars: &running,
@@ -44,6 +45,8 @@ fn start_vars(
         templar: &templar,
         origin: &origin,
         playbook_dir: &dir,
+        // A write on the controller is refused whatever the mode says about reads.
+        host_named_paths: crate::config::HostNamedPaths::Allow,
         warnings: &mut warnings,
 
         environment: None,

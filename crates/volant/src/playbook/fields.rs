@@ -9,7 +9,8 @@ use volant_protocol::modules::short_name;
 use crate::keywords::BLOCK_SECTIONS;
 use crate::yaml::{field, to_json};
 
-use super::keywords::is_free_form;
+use super::deferred::{Deferred, seconds_or_template};
+use super::keywords::{is_command_line, is_free_form};
 use super::model::{HandlerTask, Throttle};
 use super::origin::{Origin, value_origin};
 use super::task::parse_task;
@@ -60,20 +61,13 @@ fn collect_tags(node: Option<&Yaml>, context: &str, out: &mut Vec<String>) -> an
     }
 }
 
-/// `timeout`, on a task or on a block.
-pub(super) fn timeout(yaml: &Yaml, context: &str) -> anyhow::Result<Option<u64>> {
-    seconds(yaml, "timeout", context)
-}
-
-/// A keyword counting seconds: `timeout`, `async`, `poll`.
-pub(super) fn seconds(yaml: &Yaml, key: &str, context: &str) -> anyhow::Result<Option<u64>> {
-    match field(yaml, key) {
-        None | Some(Yaml::Value(Scalar::Null)) => Ok(None),
-        Some(Yaml::Value(Scalar::Integer(i))) if *i >= 0 => Ok(Some(*i as u64)),
-        Some(other) => {
-            bail!("{context}'{key}' must be a non-negative integer, found {other:?}")
-        }
-    }
+/// `timeout`, on a play, on a task or on a block.
+pub(super) fn timeout(
+    yaml: &Yaml,
+    context: &str,
+    deferred: &mut Deferred,
+) -> anyhow::Result<Option<u64>> {
+    seconds_or_template(yaml, "timeout", context, &mut deferred.timeout)
 }
 
 /// `throttle`, wherever it is written, kept as written: the reference renders and converts it
@@ -235,12 +229,10 @@ pub(super) fn module_args(module: &str, value: &Yaml) -> anyhow::Result<Map<Stri
                 args = map;
             }
         }
-        // `script`'s line is the reference's `parse_kv` with `check_raw`: its options come out,
-        // the rest is the script and its arguments.
-        Yaml::Value(Scalar::String(s))
-            if crate::action_plugins::kind(module)
-                == Some(crate::action_plugins::Kind::Bridged("script")) =>
-        {
+        // The line of `command`, `shell`, `raw` and `script` is the reference's `parse_kv` with
+        // `check_raw`: the command options come out, the rest is the command or the script and
+        // its arguments, and a `key=value` word that is not an option stays in it.
+        Yaml::Value(Scalar::String(s)) if is_command_line(module) => {
             let (options, raw) = crate::splitter::parse_kv_raw(s)?;
             for (k, v) in options {
                 args.insert(k, Value::String(v));

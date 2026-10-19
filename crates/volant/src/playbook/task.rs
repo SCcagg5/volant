@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Parsing a block and a task.
 
+use std::sync::Arc;
+
 use anyhow::{Context, anyhow, bail};
 use saphyr::{Scalar, Yaml};
 use serde_json::{Map, Value};
@@ -9,14 +11,13 @@ use volant_protocol::modules::{import_module, include_module, is_known, short_na
 use crate::keywords::{block_keyword, handler_keyword, loop_control_keyword, task_keyword};
 use crate::yaml::{field, to_json};
 
+use super::deferred::{Deferred, boolean_or_template, seconds_or_template};
 use super::fields::{
-    condition, conditions, debugger, mapping, module_args, names, seconds, tags, throttle, timeout,
+    condition, conditions, debugger, mapping, module_args, names, tags, throttle, timeout,
 };
-use super::keywords::{
-    META, action_statement, boolean, connect_keywords, delegation, escalation, flag,
-};
+use super::keywords::{META, action_statement, connect_keywords, delegation, escalation, flag};
 use super::load::task_list;
-use super::model::{Block, PlayTask};
+use super::model::{Apply, Block, PlayTask};
 use super::origin::{key_origin, task_origin, value_origin};
 use super::play::{collections, environment, module_defaults};
 /// A block, with its three sections parsed recursively and its inherited keywords read into a
@@ -26,13 +27,28 @@ use super::play::{collections, environment, module_defaults};
 /// on a task and not on a block - `loop`, `register`, `until` - is refused in the reference's
 /// words instead of being taken for a module or quietly ignored.
 pub(super) fn parse_block(yaml: &Yaml) -> anyhow::Result<Block> {
-    let map = yaml
-        .as_mapping()
-        .ok_or_else(|| anyhow!("a block must be a mapping"))?;
+    if yaml.as_mapping().is_none() {
+        bail!("a block must be a mapping");
+    }
     let name = field(yaml, "name")
         .and_then(Yaml::as_str)
         .unwrap_or("block")
         .to_string();
+    let keywords = block_keywords(yaml, &name)?;
+    Ok(Block {
+        body: task_list(field(yaml, "block"), "block")?,
+        rescue: task_list(field(yaml, "rescue"), "rescue")?,
+        always: task_list(field(yaml, "always"), "always")?,
+        keywords,
+    })
+}
+
+/// The keywords a block's tasks inherit, read into a module-less [`PlayTask`], with every key
+/// checked against the reference's own Block attribute list.
+fn block_keywords(yaml: &Yaml, name: &str) -> anyhow::Result<PlayTask> {
+    let map = yaml
+        .as_mapping()
+        .ok_or_else(|| anyhow!("a block must be a mapping"))?;
     for (key, _) in map {
         let key = key
             .as_str()
@@ -44,39 +60,77 @@ pub(super) fn parse_block(yaml: &Yaml) -> anyhow::Result<Block> {
         }
     }
     let context = format!("block '{name}': ");
-    let (r#become, become_user) = escalation(yaml, &context)?;
-    let (delegate_facts, delegate_to) = delegation(yaml, &context)?;
-    Ok(Block {
-        body: task_list(field(yaml, "block"), "block")?,
-        rescue: task_list(field(yaml, "rescue"), "rescue")?,
-        always: task_list(field(yaml, "always"), "always")?,
-        keywords: PlayTask {
-            name,
-            tags: tags(yaml, &context)?,
-            ignore_errors: flag(yaml, "ignore_errors")?,
-            timeout: timeout(yaml, &context)?,
-            throttle: throttle(yaml)?,
-            debugger: debugger(yaml, &context)?,
-            vars: mapping(yaml, "vars", &context)?,
-            when: conditions(yaml, "when", &context)?,
-            r#become,
-            become_user,
-            connect: connect_keywords(yaml, &context)?,
-            notify: names(yaml, "notify", &context)?,
-            no_log: boolean(yaml, "no_log")?,
-            environment: environment(yaml, &context)?,
-            module_defaults: module_defaults(yaml, &context)?,
-            collections: collections(yaml, &context)?,
-            check_mode: flag(yaml, "check_mode")?,
-            diff: flag(yaml, "diff")?,
-            run_once: boolean(yaml, "run_once")?,
-            any_errors_fatal: boolean(yaml, "any_errors_fatal")?,
-            ignore_unreachable: boolean(yaml, "ignore_unreachable")?,
-            delegate_facts,
-            delegate_to,
-            ..PlayTask::empty()
-        },
+    let mut deferred = Deferred::default();
+    let (r#become, become_user) = escalation(yaml, &context, &mut deferred)?;
+    let (delegate_facts, delegate_to) = delegation(yaml, &context, &mut deferred)?;
+    let timeout = timeout(yaml, &context, &mut deferred)?;
+    let no_log = boolean_or_template(yaml, "no_log", &mut deferred.no_log)?;
+    let run_once = boolean_or_template(yaml, "run_once", &mut deferred.run_once)?;
+    let any_errors_fatal =
+        boolean_or_template(yaml, "any_errors_fatal", &mut deferred.any_errors_fatal)?;
+    let ignore_unreachable =
+        boolean_or_template(yaml, "ignore_unreachable", &mut deferred.ignore_unreachable)?;
+    Ok(PlayTask {
+        name: name.to_string(),
+        tags: tags(yaml, &context)?,
+        ignore_errors: flag(yaml, "ignore_errors")?,
+        timeout,
+        throttle: throttle(yaml)?,
+        debugger: debugger(yaml, &context)?,
+        vars: mapping(yaml, "vars", &context)?,
+        when: conditions(yaml, "when", &context)?,
+        r#become,
+        become_user,
+        connect: connect_keywords(yaml, &context)?,
+        notify: names(yaml, "notify", &context)?,
+        no_log,
+        environment: environment(yaml, &context)?,
+        module_defaults: module_defaults(yaml, &context)?,
+        collections: collections(yaml, &context)?,
+        check_mode: flag(yaml, "check_mode")?,
+        diff: flag(yaml, "diff")?,
+        run_once,
+        any_errors_fatal,
+        ignore_unreachable,
+        delegate_facts,
+        delegate_to,
+        deferred,
+        ..PlayTask::empty()
     })
+}
+
+/// The `apply:` of an `include_tasks` or `include_role` statement.
+///
+/// Measured on ansible-core 2.19.12: the reference loads it as a block, so it takes every block
+/// keyword and nothing else, and an empty mapping is the same as none. A value that is not a
+/// mapping stops the load at exit 4. A key that is not a block keyword stops the run at exit 4
+/// when the statement runs, which is why it is kept as a sentence in [`Apply::Refused`].
+fn apply_of(module: &str, value: &Yaml, yaml: &Yaml) -> anyhow::Result<Option<Apply>> {
+    if !matches!(short_name(module), "include_tasks" | "include_role") {
+        return Ok(None);
+    }
+    let node =
+        field(value, "apply").or_else(|| field(yaml, "args").and_then(|a| field(a, "apply")));
+    let Some(node) = node else {
+        return Ok(None);
+    };
+    let Yaml::Mapping(map) = node else {
+        let kind = match node {
+            Yaml::Sequence(_) => "a list",
+            Yaml::Value(Scalar::String(_)) => "a string",
+            Yaml::Value(Scalar::Null) => "null",
+            Yaml::Value(Scalar::Boolean(_)) => "a boolean",
+            _ => "a number",
+        };
+        bail!("Expected a dict for apply but got {kind} instead");
+    };
+    if map.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(match block_keywords(node, "apply") {
+        Ok(keywords) => Apply::Keywords(Arc::new(keywords)),
+        Err(err) => Apply::Refused(format!("{err:#}").into()),
+    }))
 }
 
 /// One task. `handler` says whether the mapping is a handler, which is the one shape that may
@@ -109,6 +163,9 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
                 statement = Some((k.name, value));
             }
             Some(_) => {}
+            // A `with_` key is a loop or an invalid attribute, never an action: the reference
+            // reads it below and the pre-flight settles which.
+            None if key.starts_with("with_") => {}
             // Whatever is left is the module, which is how the reference reads a task too: a
             // key it does not know is an action, and a second one is the conflict below rather
             // than an unknown-keyword error.
@@ -186,7 +243,7 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
         None => module,
     };
     let Some((module, value)) = module else {
-        bail!("task '{label}': no module given");
+        bail!("no module/action detected in task.");
     };
     // Arguments are read only for a module this release can run. The reference resolves the
     // action before it looks at what was handed to it, so a name it cannot resolve is refused
@@ -221,14 +278,20 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
             let k = k
                 .as_str()
                 .ok_or_else(|| anyhow!("task '{label}': 'args' keys must be strings"))?;
-            args.insert(k.to_string(), to_json(v)?);
+            // The reference lets the module's own string or mapping override `args`, so a key
+            // the action line already gave stays as it is.
+            if !args.contains_key(k) {
+                args.insert(k.to_string(), to_json(v)?);
+            }
         }
     }
     let context = format!("task '{label}': ");
+    let mut deferred = Deferred::default();
     let ignore_errors = flag(yaml, "ignore_errors")?;
-    let timeout = timeout(yaml, &context)?;
-    let async_val = seconds(yaml, "async", &context)?.unwrap_or(0);
-    let poll = seconds(yaml, "poll", &context)?;
+    let timeout = timeout(yaml, &context, &mut deferred)?;
+    let async_val =
+        seconds_or_template(yaml, "async", &context, &mut deferred.async_val)?.unwrap_or(0);
+    let poll = seconds_or_template(yaml, "poll", &context, &mut deferred.poll)?;
     let throttle = throttle(yaml)?;
     let debugger = debugger(yaml, &context)?;
     let vars = mapping(yaml, "vars", &context)?;
@@ -240,28 +303,52 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
         Some(Yaml::Value(Scalar::String(s))) => Some(s.to_string()),
         Some(_) => bail!("task '{label}': 'register' must be a variable name"),
     };
-    // Every loop keyword this release runs: `loop`, `with_items`, and each `with_<lookup>` whose
-    // row says it runs.
-    let mut loops = map.iter().filter_map(|(key, value)| {
-        let key = key.as_str()?;
-        let runs = key == "loop" || (key.starts_with("with_") && task_keyword(key).is_some());
-        runs.then_some((key, value))
-    });
-    let (loop_items, with_items, loop_with) = match (loops.next(), loops.next()) {
-        (Some((first, _)), Some((second, _))) => {
-            bail!("task '{label}': '{first}' and '{second}' cannot both be given")
+    // `loop` and every `with_<lookup>`, read in the order the reference's `preprocess_data` reads
+    // them. A `with_` key is a loop whatever follows the prefix: whether that is a lookup plugin
+    // is asked of the controller's ansible-core before the first connection, because collections
+    // and a `lookup_plugins/` directory add names no table here can hold.
+    let mut loop_items = None;
+    let mut loop_node = None;
+    let mut loop_with: Option<String> = None;
+    for (key, value) in map {
+        let Some(key) = key.as_str() else { continue };
+        if key == "loop" {
+            loop_items = Some(to_json(value).with_context(|| format!("task '{label}': {key}"))?);
+            loop_node = Some(value);
+        } else if let Some(lookup) = key.strip_prefix("with_") {
+            if loop_items.is_some() || loop_with.is_some() {
+                return Err(crate::stats::Refusal::at(
+                    1,
+                    format!("duplicate loop in task: {lookup}"),
+                ));
+            }
+            if matches!(value, Yaml::Value(Scalar::Null)) {
+                return Err(crate::stats::Refusal::at(
+                    1,
+                    format!("you must specify a value when using {key}"),
+                ));
+            }
+            loop_items = Some(to_json(value).with_context(|| format!("task '{label}': {key}"))?);
+            loop_node = Some(value);
+            loop_with = Some(lookup.to_string());
         }
-        (Some((key, v)), None) => (
-            Some(to_json(v).with_context(|| format!("task '{label}': {key}"))?),
-            key == "with_items",
-            key.strip_prefix("with_")
-                .filter(|lookup| *lookup != "items")
-                .map(str::to_string),
-        ),
-        (None, _) => (None, false, None),
-    };
-    let (r#become, become_user) = escalation(yaml, &context)?;
-    let (delegate_facts, mut delegate_to) = delegation(yaml, &context)?;
+    }
+    // `with_items` flattens one level, and so does the `items` lookup under any of its names.
+    let with_items = loop_with
+        .as_deref()
+        .is_some_and(|lookup| crate::collection::canonical(lookup) == "items");
+    if with_items {
+        loop_with = None;
+    }
+    let (r#become, become_user) = escalation(yaml, &context, &mut deferred)?;
+    let apply = apply_of(&module, value, yaml)?;
+    let (delegate_facts, mut delegate_to) = delegation(yaml, &context, &mut deferred)?;
+    let no_log = boolean_or_template(yaml, "no_log", &mut deferred.no_log)?;
+    let run_once = boolean_or_template(yaml, "run_once", &mut deferred.run_once)?;
+    let any_errors_fatal =
+        boolean_or_template(yaml, "any_errors_fatal", &mut deferred.any_errors_fatal)?;
+    let ignore_unreachable =
+        boolean_or_template(yaml, "ignore_unreachable", &mut deferred.ignore_unreachable)?;
     // `local_action` runs on the controller whatever `delegate_to` says: measured, the line reads
     // `h1 -> localhost` with both written.
     if local {
@@ -274,6 +361,7 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
         ("retries", field(yaml, "retries")),
         ("delay", field(yaml, "delay")),
         ("notify", field(yaml, "notify")),
+        ("loop", loop_node),
         ("var", var),
     ] {
         if let Some(origin) = node.and_then(value_origin) {
@@ -329,18 +417,20 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
         until: conditions(yaml, "until", &context)?,
         retries: field(yaml, "retries").map(to_json).transpose()?,
         delay: field(yaml, "delay").map(to_json).transpose()?,
-        no_log: boolean(yaml, "no_log")?,
+        no_log,
         environment: environment(yaml, &context)?,
         module_defaults: module_defaults(yaml, &context)?,
         collections: collections(yaml, &context)?,
         check_mode: flag(yaml, "check_mode")?,
         diff: flag(yaml, "diff")?,
-        run_once: boolean(yaml, "run_once")?,
-        any_errors_fatal: boolean(yaml, "any_errors_fatal")?,
-        ignore_unreachable: boolean(yaml, "ignore_unreachable")?,
+        run_once,
+        any_errors_fatal,
+        ignore_unreachable,
         delegate_facts,
         delegate_to,
+        deferred,
         origin: task_origin(map),
+        apply,
         value_origins,
     })
 }

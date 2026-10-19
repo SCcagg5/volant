@@ -52,14 +52,26 @@ impl Stats {
     /// `changed` is the result's own flag: an ignored failure still counts as changed when the
     /// module reported one, on top of counting as ignored. A hard failure never counts as
     /// changed, whatever the result says: the host stopped there.
+    ///
+    /// A failure counts for the exit code at once. A result whose line is shown later than it
+    /// was read uses [`Stats::tally`] and [`Stats::fail`] apart, see there.
     pub fn record(&mut self, host: &str, outcome: Outcome, changed: bool) {
+        self.tally(host, outcome, changed);
+        if outcome == Outcome::Failed {
+            self.fail(host);
+        }
+    }
+
+    /// Adds one result to the recap's columns and to nothing else.
+    ///
+    /// The coordinator shows the line of a result when its host's turn comes, which can be after
+    /// a `meta: clear_host_errors` it read first. Counting the exit code here would put the
+    /// forgiven host back among the failing ones, so [`Stats::fail`] does it, on arrival.
+    pub fn tally(&mut self, host: &str, outcome: Outcome, changed: bool) {
         let h = self.hosts.entry(host.to_string()).or_default();
         match outcome {
             Outcome::Skipped => h.skipped += 1,
-            Outcome::Failed => {
-                h.failed += 1;
-                self.failing.insert(host.to_string());
-            }
+            Outcome::Failed => h.failed += 1,
             // Counted in its own column and nowhere else. Measured on ansible-core 2.19.12: a
             // failure a rescue takes reads `failed=0 rescued=1`, and it does not count as `ok`
             // either, however the play ends for that host.
@@ -74,6 +86,11 @@ impl Stats {
                 }
             }
         }
+    }
+
+    /// The host failed a task: the exit code says 2 until a clear forgives it.
+    pub fn fail(&mut self, host: &str) {
+        self.failing.insert(host.to_string());
     }
 
     /// A host that failed with nothing to show for it. See [`Stats::unreported`].

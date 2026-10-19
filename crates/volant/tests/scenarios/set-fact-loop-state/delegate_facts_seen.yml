@@ -1,0 +1,14 @@
+- hosts: all
+  gather_facts: false
+  strategy: linear
+  vars:
+    x: []
+  tasks:
+    - set_fact:
+        x: "{{ x + [item] }}"
+        seen: "{{ (seen | default([])) + [x | length] }}"
+      loop: [1, 2, 3]
+      delegate_to: h2
+      delegate_facts: true
+      run_once: true
+    - debug: {msg: "{{ inventory_hostname }} {{ x }} {{ seen | default('-') }}"}

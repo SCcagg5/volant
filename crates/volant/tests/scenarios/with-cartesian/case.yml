@@ -1,0 +1,3 @@
+# with_cartesian walks the product of lists, as ordered pairs.
+args: [play.yml]
+needs: ["ansible-core"]

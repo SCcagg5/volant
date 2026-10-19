@@ -10,7 +10,7 @@
 //! measured on ansible-core 2.19.12; so is the file-before-directory rule each of a role's
 //! sub-directories is read with.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, bail};
 use serde_json::{Map, Value};
@@ -54,6 +54,31 @@ pub struct RoleEntry {
     pub params: Map<String, Value>,
     /// The task keywords written on the entry, which every task of the role inherits.
     pub keywords: PlayTask,
+    /// Whether the role lends its `defaults` and `vars` to the rest of the play. A role of a
+    /// `roles:` list and an `import_role` do unless the statement says `public: false`; an
+    /// `include_role` does only when it says `public: true`.
+    pub public: bool,
+    /// Whether the argument-spec check runs in front of the role: `rolespec_validate`.
+    pub validate: bool,
+    /// `allow_duplicates: false` on an `include_role` or an `import_role`: the statement does
+    /// nothing for a host that has already run an identical one.
+    pub unique: bool,
+}
+
+impl RoleEntry {
+    /// An entry that names a role and nothing else: no keywords, no parameters, the defaults of
+    /// a `roles:` list.
+    pub fn named(name: &str, from: RoleFrom) -> Self {
+        Self {
+            name: name.to_string(),
+            from,
+            params: Map::new(),
+            keywords: PlayTask::empty(),
+            public: true,
+            validate: true,
+            unique: false,
+        }
+    }
 }
 
 /// What one role directory holds.
@@ -88,6 +113,22 @@ pub struct RoleVars {
     pub defaults: Map<String, Value>,
     pub vars: Map<String, Value>,
     pub params: Map<String, Value>,
+    /// Whether this instance lends `defaults` and `vars` to the rest of the play.
+    pub public: bool,
+    /// What the role itself says, set aside when the rest of the play's values were first laid
+    /// under it, so that a variable another role publishes later can be laid under it again.
+    pub own: Option<Box<OwnVars>>,
+}
+
+/// The `defaults` and `vars` a role directory holds, before anything was laid under them.
+#[derive(Debug, Clone, Default)]
+pub struct OwnVars {
+    pub defaults: Map<String, Value>,
+    pub vars: Map<String, Value>,
+    /// What the other roles of the same statement lend: its dependencies, which see each other
+    /// and the role that asked for them whether or not the statement is public.
+    pub group_defaults: Map<String, Value>,
+    pub group_vars: Map<String, Value>,
 }
 
 /// Where a role is looked for.
@@ -158,11 +199,12 @@ impl RoleSearch {
     }
 }
 
-/// Reads one role directory.
-pub fn load(path: &Path, from: &RoleFrom) -> anyhow::Result<LoadedRole> {
-    let defaults = variables(path, "defaults", &from.defaults)?;
-    let vars = variables(path, "vars", &from.vars)?;
-    let tasks = match files(path, "tasks", &from.tasks, from.tasks != "main")? {
+/// Reads one role directory. `name` is the role as the entry wrote it, for error messages.
+pub fn load(path: &Path, name: &str, from: &RoleFrom) -> anyhow::Result<LoadedRole> {
+    let defaults = variables(path, name, "defaults", &from.defaults)?;
+    let vars = variables(path, name, "vars", &from.vars)?;
+    let lookup = |sub, from| Lookup::named(path, name, sub, from, false);
+    let tasks = match files(&lookup("tasks", &from.tasks))? {
         None => Vec::new(),
         Some(list) => {
             let mut tasks = Vec::new();
@@ -175,9 +217,7 @@ pub fn load(path: &Path, from: &RoleFrom) -> anyhow::Result<LoadedRole> {
     // A handlers file the entry asked for by name is required the way a tasks file is; `main` is
     // not, because a role with no `handlers/` at all is ordinary.
     let mut handlers = Vec::new();
-    for file in
-        files(path, "handlers", &from.handlers, from.handlers != "main")?.unwrap_or_default()
-    {
+    for file in files(&lookup("handlers", &from.handlers))?.unwrap_or_default() {
         handlers.extend(crate::playbook::parse_handlers_file(&file)?);
     }
     let (dependencies, allow_duplicates, collections) = meta(path)?;
@@ -195,58 +235,159 @@ pub fn load(path: &Path, from: &RoleFrom) -> anyhow::Result<LoadedRole> {
     })
 }
 
-/// The files one of a role's sub-directories contributes, or `None` when it has nothing to say.
-///
-/// Measured on ansible-core 2.19.12: `defaults/main.yml` and a `defaults/main/` directory next to
-/// each other are not merged - the file wins and the directory is not read at all - and a
-/// directory's own files are merged in name order, so `b.yml` beats `a.yml` and a name only
-/// `a.yml` sets survives. The corpus this plan benchmarks against ships `defaults/main/` as a
-/// directory, which is why the directory form is read at all.
-///
-/// `required` is set when the entry asked for a file by name: measured, `tasks_from: nosuch`
-/// refuses the run with `Could not find specified file in role: tasks/nosuch`, while a role with
-/// no `tasks/main.yml` at all runs its variables and nothing else.
-fn files(
-    role: &Path,
-    sub: &str,
-    from: &str,
+/// One look into a role's sub-directory: which file the entry asked for, and how to read it.
+struct Lookup<'a> {
+    role: &'a Path,
+    /// The role as the entry wrote it, for the refusal.
+    name: &'a str,
+    sub: &'a str,
+    from: &'a str,
+    /// Set when the entry asked for a file by name: measured, `tasks_from: nosuch` refuses the
+    /// run with `Could not find specified file in role: tasks/nosuch`, while a role with no
+    /// `tasks/main.yml` at all runs its variables and nothing else.
     required: bool,
-) -> anyhow::Result<Option<Vec<PathBuf>>> {
-    let base = role.join(sub);
-    for extension in ["yml", "yaml", "json"] {
-        let file = base.join(format!("{from}.{extension}"));
-        if file.is_file() {
-            return Ok(Some(vec![file]));
+    /// Only `defaults` and `vars` read a directory; `tasks`, `handlers` and `meta` skip one.
+    allow_dir: bool,
+}
+
+impl<'a> Lookup<'a> {
+    /// A file is required when the entry named one other than `main`.
+    fn named(role: &'a Path, name: &'a str, sub: &'a str, from: &'a str, allow_dir: bool) -> Self {
+        Self {
+            role,
+            name,
+            sub,
+            from,
+            required: from != "main",
+            allow_dir,
         }
     }
-    let dir = base.join(from);
-    if dir.is_dir() {
-        let mut entries: Vec<PathBuf> = std::fs::read_dir(&dir)
-            .with_context(|| format!("reading {}", dir.display()))?
-            .filter_map(Result::ok)
-            .map(|e| e.path())
-            .filter(|p| {
-                p.is_file()
-                    && p.extension()
-                        .and_then(|e| e.to_str())
-                        .is_some_and(|e| matches!(e, "yml" | "yaml" | "json"))
-            })
-            .collect();
-        entries.sort();
-        return Ok(Some(entries));
+}
+
+/// The files one of a role's sub-directories contributes, or `None` when it has nothing to say.
+///
+/// This is `_load_role_yaml` of ansible-core 2.19.12, measured. The name is tried with the
+/// extensions `.yml`, `.yaml`, `.json` and none; none comes first when the entry named a file and
+/// last when it did not. The first candidate that exists wins. A directory is read only where
+/// `allow_dir` is set, its files merged in name order, its own sub-directories read the same way.
+/// So `defaults/main.yml` beside `defaults/main/` wins and the directory is not read at all.
+///
+/// Every file found must lie under `<role>/<sub>` once `.` and `..` are folded out of its path.
+/// The check is on the text of the path: a symlink inside the sub-directory that points elsewhere
+/// is followed, as the reference does. A name such as `../../../x` or `/etc/x` is refused with the
+/// reference's own sentence. The path is folded before it is looked up and read, so a `..` after a
+/// link to a directory never climbs out through the link.
+fn files(look: &Lookup) -> anyhow::Result<Option<Vec<PathBuf>>> {
+    let base = look.role.join(look.sub);
+    if !base.is_dir() {
+        return Ok(None);
     }
-    if required {
-        // Exit 4 comes from the blanket the compiler wraps its failures in, which is the code
-        // the reference gives this, measured.
-        bail!("Could not find specified file in role: {sub}/{from}");
+    let mut extensions = vec![".yml", ".yaml", ".json"];
+    if look.required {
+        extensions.insert(0, "");
+    } else {
+        extensions.push("");
     }
-    Ok(None)
+    // Each file is kept twice: as the entry spells it, for the refusal, and with `.` and `..`
+    // folded out, which is the path that is looked up and read. The reference folds first, so a `..`
+    // after a link to a directory does not climb out through the link.
+    let mut found: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for extension in &extensions {
+        let mut full = base.join(look.from).into_os_string();
+        full.push(extension);
+        let shown = PathBuf::from(full);
+        let real = folded(&shown);
+        if !real.exists() {
+            continue;
+        }
+        if real.is_dir() {
+            if !look.allow_dir {
+                continue;
+            }
+            directory_files(&shown, &real, &extensions, &mut found)?;
+        } else {
+            found.push((shown, real));
+        }
+        break;
+    }
+    if found.is_empty() {
+        if look.required {
+            // Exit 4 comes from the blanket the compiler wraps its failures in, which is the
+            // code the reference gives this, measured.
+            bail!(
+                "Could not find specified file in role: {}/{}",
+                look.sub,
+                look.from
+            );
+        }
+        return Ok(None);
+    }
+    let inside = folded(&base);
+    for (shown, real) in &found {
+        if !real.starts_with(&inside) {
+            bail!(
+                "Failed loading '{}' for role ({}) as it is not inside the expected role path: '{}'",
+                absolute(shown).display(),
+                look.name,
+                absolute(&base).display()
+            );
+        }
+    }
+    Ok(Some(found.into_iter().map(|(_, real)| real).collect()))
+}
+
+/// The files of a directory read as a vars directory: in name order, hidden files and backups
+/// (`~`) skipped, a sub-directory without a dot in its name read in place.
+fn directory_files(
+    shown: &Path,
+    real: &Path,
+    extensions: &[&str],
+    out: &mut Vec<(PathBuf, PathBuf)>,
+) -> anyhow::Result<()> {
+    let mut names: Vec<String> = std::fs::read_dir(real)
+        .with_context(|| format!("reading {}", real.display()))?
+        .filter_map(Result::ok)
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| !n.starts_with('.') && !n.ends_with('~'))
+        .collect();
+    names.sort();
+    for name in names {
+        let (shown, path) = (shown.join(&name), real.join(&name));
+        let extension = name.rfind('.').map_or("", |at| &name[at..]);
+        if extension.is_empty() && path.is_dir() {
+            directory_files(&shown, &path, extensions, out)?;
+        } else if path.is_file() && (extension.is_empty() || extensions.contains(&extension)) {
+            out.push((shown, path));
+        }
+    }
+    Ok(())
+}
+
+/// A path made absolute without touching the file system: no symlink is followed and `..` stays.
+fn absolute(path: &Path) -> PathBuf {
+    std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// An absolute path with every `.` and `..` folded out of its text, as `os.path.normpath` does.
+fn folded(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for part in absolute(path).components() {
+        match part {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// A role's `defaults` or `vars`, with the files of a directory merged in name order.
-fn variables(role: &Path, sub: &str, from: &str) -> anyhow::Result<Map<String, Value>> {
+fn variables(role: &Path, name: &str, sub: &str, from: &str) -> anyhow::Result<Map<String, Value>> {
+    let look = Lookup::named(role, name, sub, from, true);
     let mut out = Map::new();
-    for file in files(role, sub, from, from != "main")?.unwrap_or_default() {
+    for file in files(&look)?.unwrap_or_default() {
         for (key, value) in crate::vars::load_vars_file(&file)? {
             out.insert(key, value);
         }
@@ -254,10 +395,22 @@ fn variables(role: &Path, sub: &str, from: &str) -> anyhow::Result<Map<String, V
     Ok(out)
 }
 
+/// The files of `meta/<from>`, which no entry names and so no entry can steer. `required` puts
+/// the name with no extension first, as the reference does when it passes `main`.
+fn meta_files(role: &Path, from: &str, required: bool) -> anyhow::Result<Option<Vec<PathBuf>>> {
+    let name = role
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    files(&Lookup {
+        required,
+        ..Lookup::named(role, &name, "meta", from, false)
+    })
+}
+
 /// `meta/main.yml`: the roles this one depends on, whether two identical entries run twice, and
 /// the collections its tasks search.
 pub(crate) fn meta(role: &Path) -> anyhow::Result<(Vec<RoleEntry>, bool, Vec<String>)> {
-    let Some(files) = files(role, "meta", "main", false)? else {
+    let Some(files) = meta_files(role, "main", false)? else {
         return Ok((Vec::new(), false, Vec::new()));
     };
     let mut dependencies = Vec::new();
@@ -304,7 +457,17 @@ pub(crate) fn meta(role: &Path) -> anyhow::Result<(Vec<RoleEntry>, bool, Vec<Str
 type ArgumentSpec = (Option<Map<String, Value>>, Option<String>);
 
 fn argument_spec(role: &Path, entry: &str) -> anyhow::Result<ArgumentSpec> {
-    let Some(files) = files(role, "meta", "argument_specs", false)? else {
+    // `_load_argument_specs` of ansible-core 2.19.12 reads the file only when one of
+    // `argument_specs.yml`, `.yaml` or `.json` exists, then looks it up by name, so a bare
+    // `argument_specs` wins beside one of them and is never read alone.
+    let base = role.join("meta");
+    if ![".yml", ".yaml", ".json"]
+        .iter()
+        .any(|ext| base.join(format!("argument_specs{ext}")).exists())
+    {
+        return Ok((None, None));
+    }
+    let Some(files) = meta_files(role, "argument_specs", true)? else {
         return Ok((None, None));
     };
     for file in files {
