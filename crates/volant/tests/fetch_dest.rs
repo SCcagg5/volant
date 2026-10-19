@@ -52,6 +52,8 @@ impl Fixture {
         for path in [&fx.allowed, &fx.outside, &fx.home, &fx.play] {
             std::fs::create_dir_all(path).unwrap();
         }
+        // Private whatever the umask: a group-writable directory of the list holds nothing.
+        std::fs::set_permissions(&fx.allowed, std::fs::Permissions::from_mode(0o755)).unwrap();
         symlink(&fx.outside, fx.allowed.join("link")).unwrap();
         std::fs::write(fx.root.join("host.txt"), "fetched\n").unwrap();
         std::fs::write(fx.play.join("inv.ini"), "h1 ansible_connection=local\n").unwrap();

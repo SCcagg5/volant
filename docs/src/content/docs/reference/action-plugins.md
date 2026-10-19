@@ -98,6 +98,7 @@ A `dest` is named by a managed host when its render read something a host contri
 
 - The `dest` must be absolute and hold no `..`. A relative path and a path that starts with `~` are refused, never expanded.
 - The deepest part of the path that exists is resolved through every link, and the rest is appended. A link that leaves the directory, a link that points nowhere, the directory itself and a sibling that shares its name as a prefix (`/srv/fetch-evil` for `/srv/fetch`) are refused. The check runs again just before the write.
+- The write walks down from the directory of the list and refuses any link below it, even one that stays inside, and any existing directory below it that another user owns or that every user can write without the sticky bit. Another user could otherwise swap either for a link between the check and the write. The directories `fetch` creates on the way are its own.
 - A directory of the list that the group or other users can write to holds nothing, unless its sticky bit is set, as it is on `/tmp`. This is checked when a task uses the directory.
 - An entry that is relative, empty, written with `~` or `..`, or `/`, stops the run at start with exit code 5.
 - A `dest` the playbook wrote is not held to the list, and the setting changes nothing for `src`, which names a file on the host.

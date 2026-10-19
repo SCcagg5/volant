@@ -145,6 +145,7 @@ fn a_dest_a_host_named_is_never_written() {
 }
 
 /// A fetch of `/etc/one.txt` whose `dest` a host named, under `host_named_dest_dirs = dirs`.
+#[cfg(unix)]
 fn fetch_named(dest: &str, dirs: &[PathBuf]) -> (Vec<Sub>, Value) {
     let untrusted: BTreeSet<String> = ["dest".to_string()].into();
     let mut item_vars = HostVars::default();
@@ -161,12 +162,16 @@ fn fetch_named(dest: &str, dirs: &[PathBuf]) -> (Vec<Sub>, Value) {
 
 /// A `dest` a host named is written when it lies strictly inside a directory of the setting,
 /// and the directory may not exist yet below it.
+#[cfg(unix)]
 #[test]
 fn a_dest_a_host_named_is_written_inside_the_directories() {
+    use std::os::unix::fs::PermissionsExt as _;
     let dir_guard = scratch();
     let dir = dir_guard.path().canonicalize().unwrap();
     let (other, allowed) = (dir.join("other"), dir.join("allowed"));
     std::fs::create_dir_all(&allowed).unwrap();
+    // Private whatever the umask: a group-writable directory of the list holds nothing.
+    std::fs::set_permissions(&allowed, std::fs::Permissions::from_mode(0o755)).unwrap();
     let dirs = [other, allowed.clone()];
     let dest = format!("{}/new/dir/", allowed.display());
     let (subs, result) = fetch_named(&dest, &dirs);
@@ -245,16 +250,46 @@ fn a_directory_other_users_write_holds_a_dest_only_when_it_is_sticky(
     }
 }
 
+/// Below a directory of the setting, a link that stays inside it and a directory every user can
+/// write are refused, since another user could turn either elsewhere; nothing is written.
+#[cfg(unix)]
+#[rstest::rstest]
+#[case::inner_link("{allowed}/inner/got/", "goes through the symbolic link")]
+#[case::open_dir("{allowed}/open/got/", "with mode 777")]
+fn a_dest_a_host_named_goes_through_no_path_another_user_controls(
+    #[case] dest: &str,
+    #[case] says: &str,
+) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir_guard = scratch();
+    let allowed = dir_guard.path().canonicalize().unwrap().join("allowed");
+    let (real, open) = (allowed.join("real"), allowed.join("open"));
+    std::fs::create_dir_all(&real).unwrap();
+    std::fs::create_dir_all(&open).unwrap();
+    std::fs::set_permissions(&allowed, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
+    std::os::unix::fs::symlink(&real, allowed.join("inner")).unwrap();
+    let dest = dest.replace("{allowed}", &allowed.display().to_string());
+    let (_, result) = fetch_named(&dest, std::slice::from_ref(&allowed));
+    assert_eq!(result["failed"], json!(true), "{result}");
+    assert!(result["msg"].as_str().unwrap().contains(says), "{result}");
+    for path in [&real, &open] {
+        assert_eq!(std::fs::read_dir(path).unwrap().count(), 0);
+    }
+}
+
 /// A link put where `dest` stands after the plugin was built, before it writes, is seen: the
 /// containment is decided again on the path the write will use.
 #[cfg(unix)]
 #[test]
 fn a_link_planted_after_the_first_check_is_seen_before_the_write() {
+    use std::os::unix::fs::PermissionsExt as _;
     let dir_guard = scratch();
     let dir = dir_guard.path().canonicalize().unwrap();
     let (allowed, outside) = (dir.join("allowed"), dir.join("outside"));
     std::fs::create_dir_all(allowed.join("slot")).unwrap();
     std::fs::create_dir_all(&outside).unwrap();
+    std::fs::set_permissions(&allowed, std::fs::Permissions::from_mode(0o755)).unwrap();
     let untrusted: BTreeSet<String> = ["dest".to_string()].into();
     let mut item_vars = HostVars::default();
     item_vars.insert("inventory_hostname".into(), json!("probe-hostname"));

@@ -152,11 +152,12 @@ impl Fetch {
         Ok(fetch)
     }
 
-    /// The refusal of a `dest` a host named that resolves outside `host_named_dest_dirs`.
-    fn contained(&self) -> Result<(), String> {
+    /// The refusal of a `dest` a host named that resolves outside `host_named_dest_dirs`, or the
+    /// directory of the list the walk for links then starts from.
+    fn contained(&self) -> Result<Option<PathBuf>, String> {
         match &self.within {
-            Some(dirs) => dest::check_resolved(&self.root, &self.dest, dirs),
-            None => Ok(()),
+            Some(dirs) => dest::check_resolved(&self.root, &self.dest, dirs).map(Some),
+            None => Ok(None),
         }
     }
 
@@ -188,9 +189,14 @@ impl Fetch {
     /// [`Self::place`], then what the file system says about it: a `flat` destination that is a
     /// directory, and a symbolic link anywhere below `dest`.
     fn target(&self, source: &str) -> Result<PathBuf, String> {
-        self.contained()?;
+        let anchor = self.contained()?;
         let path = self.place(source)?;
-        walk(self.walk_root(), &path, false)?;
+        walk(
+            anchor.as_deref().unwrap_or(self.walk_root()),
+            &path,
+            false,
+            anchor.is_some(),
+        )?;
         if self.flat && path.is_dir() {
             return Err(if self.dest.ends_with('/') {
                 format!(
@@ -355,7 +361,17 @@ impl Fetch {
             WRITES.fetch_add(1, Ordering::Relaxed)
         ));
         let tmp = PathBuf::from(tmp);
-        let written = walk(self.walk_root(), &path, true).and_then(|()| {
+        // A `dest` a host named is walked from the directory of the list, so no link and no
+        // directory another user controls stands between it and the file.
+        let written = self.contained().and_then(|anchor| {
+            walk(
+                anchor.as_deref().unwrap_or(self.walk_root()),
+                &path,
+                true,
+                anchor.is_some(),
+            )
+        });
+        let written = written.and_then(|()| {
             let fail = |err: std::io::Error| format!("Failed to fetch the file: {err}");
             // The file being replaced keeps its mode, as the reference's write in place does: a
             // `0600` kubeconfig fetched again stays `0600`. `walk` refused a link at `path`.
@@ -453,8 +469,9 @@ fn normalise(path: &Path) -> PathBuf {
 }
 
 /// Every component of `path` below `root`, refused when it is a symbolic link; with `create`, the
-/// directories that are missing made one by one on the way down.
-fn walk(root: &Path, path: &Path, create: bool) -> Result<(), String> {
+/// directories that are missing made one by one on the way down. With `guarded`, a directory that
+/// already exists is refused when another user could change it (see [`dest::guard`]).
+fn walk(root: &Path, path: &Path, create: bool, guarded: bool) -> Result<(), String> {
     let fail = |err: std::io::Error| format!("Failed to fetch the file: {err}");
     if create {
         std::fs::create_dir_all(root).map_err(fail)?;
@@ -481,6 +498,7 @@ fn walk(root: &Path, path: &Path, create: bool) -> Result<(), String> {
                     at.display()
                 ));
             }
+            Ok(meta) if guarded && meta.is_dir() => dest::guard(&at, &meta)?,
             Ok(_) => {}
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 if create && i + 1 < below.len() {

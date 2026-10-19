@@ -4,7 +4,9 @@
 //!
 //! A `dest` of this kind is refused unless the setting names a directory above it. The decision
 //! is made on the path the file system resolves, not on the text: the deepest part that exists
-//! is resolved through every link, and the rest is appended.
+//! is resolved through every link, and the rest is appended. The write then walks down from the
+//! directory of the list and refuses any link and any directory another user controls below it,
+//! so nothing can be swapped between the check and the write.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -41,7 +43,11 @@ pub(super) fn check_text(dest: &str, dirs: &[PathBuf]) -> Result<(), String> {
 /// must lie strictly inside one of `dirs`, which are themselves resolved, and that directory must
 /// not be writable by other users unless its sticky bit is set, as it is on `/tmp`. Run again
 /// just before the write, so a link planted after the first check is seen.
-pub(super) fn check_resolved(root: &Path, dest: &str, dirs: &[PathBuf]) -> Result<(), String> {
+///
+/// Returns the anchor: the shortest ancestor of `root` that resolves to that directory. The write
+/// walks down from it, refusing every link below it, so a path that reaches the directory only
+/// through a link elsewhere is refused here.
+pub(super) fn check_resolved(root: &Path, dest: &str, dirs: &[PathBuf]) -> Result<PathBuf, String> {
     let real =
         resolve(root).map_err(|err| refusal(dest, &format!("cannot be resolved: {err}"), dirs))?;
     let mut shared = None;
@@ -56,7 +62,17 @@ pub(super) fn check_resolved(root: &Path, dest: &str, dirs: &[PathBuf]) -> Resul
             shared = Some(base);
             continue;
         }
-        return Ok(());
+        let anchor = root
+            .ancestors()
+            .filter(|at| at.canonicalize().is_ok_and(|at| at == base))
+            .last();
+        return anchor.map(Path::to_path_buf).ok_or_else(|| {
+            refusal(
+                dest,
+                &format!("reaches '{}' only through a link", base.display()),
+                dirs,
+            )
+        });
     }
     let why = match (shared, real == root) {
         (Some(base), _) => format!(
@@ -104,4 +120,29 @@ fn open_to_others(dir: &Path) -> bool {
 #[cfg(not(unix))]
 fn open_to_others(_dir: &Path) -> bool {
     false
+}
+
+/// The refusal of a directory that already exists below the anchor and that another user could
+/// change between the check and the write: one owned by another account than this one or root,
+/// or one every user can write without the sticky bit. The directories `fetch` creates itself
+/// pass, so a run that fetches again into them is not refused.
+#[cfg(unix)]
+pub(super) fn guard(dir: &Path, meta: &std::fs::Metadata) -> Result<(), String> {
+    use std::os::unix::fs::MetadataExt as _;
+    let (uid, mode) = (meta.uid(), meta.mode());
+    let euid = crate::askpass::effective_uid();
+    if (uid == euid || uid == 0) && (mode & 0o002 == 0 || mode & 0o1000 != 0) {
+        return Ok(());
+    }
+    Err(format!(
+        "the 'dest' of this task was named by a managed host, and '{}' is owned by uid {uid} with mode {:o}; below host_named_dest_dirs, fetch writes only through directories this user or root owns and other users cannot write",
+        dir.display(),
+        mode & 0o7777
+    ))
+}
+
+/// A platform without Unix owners has nothing to test.
+#[cfg(not(unix))]
+pub(super) fn guard(_dir: &Path, _meta: &std::fs::Metadata) -> Result<(), String> {
+    Ok(())
 }
