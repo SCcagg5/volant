@@ -350,26 +350,36 @@ fn nesting_deeper_than_the_reference_loads_is_refused_not_a_stack_overflow() {
                 continue;
             }
             let loads = depth <= 489 && !(shape.starts_with("flow") && depth > 255);
-            let text = nested(shape, depth);
-            let loaded = load(&text, "deep.yml");
-            if loads {
-                let docs = loaded.unwrap_or_else(|e| panic!("{shape} {depth}: {e:#}"));
-                assert_eq!(
-                    json_depth(&to_json(&docs[0]).unwrap()),
-                    depth,
-                    "{shape} {depth}"
-                );
-            } else {
-                let err = loaded
-                    .err()
-                    .unwrap_or_else(|| panic!("{shape} {depth} loaded"));
-                let err = format!("{err:#}");
-                assert!(
-                    err.contains("deep.yml") && err.contains("recursion"),
-                    "{shape} {depth}: {err}"
-                );
+            // A text holding `<<`, even in a comment, goes through the merge-key reader, which
+            // must stop at the same limit.
+            for text in [
+                nested(shape, depth),
+                format!("# <<\n{}", nested(shape, depth)),
+            ] {
+                check_depth(shape, depth, loads, &text);
             }
         }
+    }
+}
+
+fn check_depth(shape: &str, depth: usize, loads: bool, text: &str) {
+    let loaded = load(text, "deep.yml");
+    if loads {
+        let docs = loaded.unwrap_or_else(|e| panic!("{shape} {depth}: {e:#}"));
+        assert_eq!(
+            json_depth(&to_json(&docs[0]).unwrap()),
+            depth,
+            "{shape} {depth}"
+        );
+    } else {
+        let err = loaded
+            .err()
+            .unwrap_or_else(|| panic!("{shape} {depth} loaded"));
+        let err = format!("{err:#}");
+        assert!(
+            err.contains("deep.yml") && err.contains("recursion"),
+            "{shape} {depth}: {err}"
+        );
     }
 }
 
@@ -597,6 +607,8 @@ fn a_document_at_the_limit_converts_on_a_small_stack() {
             "mixed",
             "- ".repeat(244) + &"[".repeat(245) + "x" + &"]".repeat(245) + "\n",
         ),
+        // Read through the merge-key reader, which builds and plays back a tree of its own.
+        ("merge", "# <<\n".to_string() + &"- ".repeat(489) + "x\n"),
     ];
     for (what, text) in shapes {
         let worker = std::thread::Builder::new()

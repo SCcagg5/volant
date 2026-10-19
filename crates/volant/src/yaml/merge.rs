@@ -14,8 +14,9 @@ use std::collections::hash_map::Entry;
 use saphyr::{MarkedYaml, Scalar, YamlLoader};
 use saphyr_parser::{Event, ScalarStyle, Span, SpannedEventReceiver, Tag};
 
-/// Feeds `loader` the events of `text`. A text that cannot hold a merge key (it needs the two
-/// characters `<<`) goes straight to the parser and skips this module's cost.
+/// Feeds `loader` the events of `text`, within the limits of `limits`. A text that cannot hold a
+/// merge key (it needs the two characters `<<`) goes straight to the loader and skips this
+/// module's cost.
 pub(super) fn parse<'a>(
     text: &'a str,
     source: &str,
