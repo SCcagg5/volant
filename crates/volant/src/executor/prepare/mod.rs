@@ -27,6 +27,7 @@ pub(in crate::executor) use item::{
     FINALIZING, Item, NOTIFY_FAILED, Prepared, failure_text, pause_of, undefined_name,
 };
 pub(in crate::executor) use plan::{Gate, PlayPlan, Strategy};
+use vars::delegate_host_vars;
 pub(in crate::executor) use vars::host_vars;
 
 use connect::{connect_for, delegate_for};
@@ -330,7 +331,7 @@ pub(super) fn prepare(
     }
     let delegate = delegate_for(task, &base, templar)?;
     if is_local(&task.module) || crate::action_plugins::controller_side(&task.module) {
-        return Ok(Prepared::Local(items, delegate));
+        return Ok(Prepared::Local(items, delegate.map(|(name, _)| name)));
     }
     let connect = Box::new(connect_for(task, &base, templar)?);
     // A delegate's variables come back merged under the full precedence, like any host's: its
@@ -342,9 +343,10 @@ pub(super) fn prepare(
     // load-time error. The implicit spellings get their local connection from
     // `VarStore::for_host`, which is where every host's view is built and where the delegating
     // host's own implicit `localhost` gets it too.
-    let delegate = delegate.map(|name| {
-        let vars = host_vars(
+    let delegate = delegate.map(|(name, data)| {
+        let vars = delegate_host_vars(
             &name,
+            data,
             plan,
             &task.vars,
             step.role,

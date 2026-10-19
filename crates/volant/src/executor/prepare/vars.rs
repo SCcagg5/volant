@@ -39,6 +39,44 @@ pub(in crate::executor) fn host_vars(
     origin: &Origin,
     playbook_dir: &Path,
 ) -> HostVars {
+    delegate_host_vars(
+        host,
+        false,
+        plan,
+        task_vars,
+        role,
+        include_params,
+        live,
+        templar,
+        store,
+        origin,
+        playbook_dir,
+    )
+}
+
+/// `host_vars` for the host a `delegate_to` named. `name_is_data` says the name came out of a
+/// render that read a managed host's value: the name is then data whatever it holds, so the
+/// names derived from it (`inventory_hostname`, `inventory_hostname_short`) and the `hostvars`
+/// entry that carries it are never rendered. A name that holds a template is data too, wherever
+/// it came from: no inventory names a host that way, and the reference reads it as a host name,
+/// prints it and fails to connect to it.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the driver's whole context, read for one host's variables"
+)]
+pub(in crate::executor) fn delegate_host_vars(
+    host: &str,
+    name_is_data: bool,
+    plan: &PlayPlan,
+    task_vars: &Map<String, Value>,
+    role: Option<usize>,
+    include_params: Option<&IncludeParams>,
+    live: &Progress,
+    templar: &Templar,
+    store: &Mutex<VarStore>,
+    origin: &Origin,
+    playbook_dir: &Path,
+) -> HostVars {
     let compiled = plan.steps();
     let role = role
         .and_then(|i| compiled.roles.get(i))
@@ -74,11 +112,7 @@ pub(in crate::executor) fn host_vars(
                 .flat_map(|p| p.untrusted.iter().cloned()),
         );
         let mut untrusted_hosts = store.untrusted_hosts();
-        // A name that holds a template is text a managed host handed to a `delegate_to`: no
-        // inventory names a host that way, and the reference reads it as a host name, prints it
-        // and fails to connect to it. The view of such a host is data end to end: its own
-        // identity, and the `hostvars` entry that carries the same name, are never rendered.
-        if Templar::is_template(host) {
+        if name_is_data || Templar::is_template(host) {
             untrusted.extend(["inventory_hostname", "inventory_hostname_short"].map(String::from));
             let mut hosts = (*untrusted_hosts).clone();
             hosts.insert(host.to_string());
