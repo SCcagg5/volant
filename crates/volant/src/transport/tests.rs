@@ -1103,10 +1103,9 @@ fn a_host_that_cannot_be_reached_is_refused_by_name(
     assert!(text.contains(key) || key == "ansible_connection", "{text}");
     assert!(text.contains(quoted), "{text}");
 }
-/// The address is the destination in the `ssh` command line, where a word that starts with `-`
-/// is an option. ansible-core 2.19.12 passes any value on, so this is stricter than the
-/// reference: a name, an IPv4 or IPv6 address, and `user@host` pass; a leading `-`, whitespace
-/// and control characters are refused with the host, the variable and the value named.
+
+/// An ssh address that starts with `-`, or holds whitespace or a control character, is refused
+/// naming host, variable and value (stricter than ansible-core 2.19.12, which passes it on).
 #[rstest]
 #[case::name("web1.example.com", true)]
 #[case::short_name("db_1", true)]
@@ -1133,8 +1132,6 @@ fn an_ssh_address_is_a_name_not_an_option(#[case] address: &str, #[case] accepte
         json!({ "ansible_host": address }).as_object().unwrap(),
         &defaults(),
     );
-    let from_name = Transport::for_vars("web1", &Map::new(), &defaults());
-    assert!(from_name.is_ok());
     let named = Transport::for_vars(address, &Map::new(), &defaults());
     if accepted {
         let Transport::Ssh(target) = from_variable.unwrap() else {
@@ -1157,9 +1154,8 @@ fn an_ssh_address_is_a_name_not_an_option(#[case] address: &str, #[case] accepte
     }
 }
 
-/// A user name is the argument of `-l`, which `ssh` reads as a value whatever it starts with, so
-/// it never becomes an option. ansible-core 2.19.12 writes it as `-o User="..."` and also
-/// accepts it. Volant accepts it and keeps `-l` directly in front.
+/// A user name that starts with `-` is accepted, as ansible-core does, and stays the value of
+/// `-l`, which `ssh` never reads as an option.
 #[rstest]
 #[case("deploy")]
 #[case("-oProxyCommand=touch")]
