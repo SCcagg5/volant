@@ -410,6 +410,46 @@ fn extract_reads_hostvars_by_host_name_and_taints_like_a_bare_read() {
     }
 }
 
+/// A host name from a managed host taints a listing of `hostvars`, and a nested template of
+/// another host still renders.
+#[test]
+fn a_host_name_from_data_taints_the_hostvars_listing_only() {
+    let t = templar();
+    let view = Arc::new(vars(json!({
+        "{{ 1 + 1 }}": {},
+        "h2": {"x": "{{ 40 + 2 }}"},
+    })));
+    let empty = Map::new();
+    let hosts = BTreeSet::from(["{{ 1 + 1 }}".to_string()]);
+    let mut wrong = Vec::new();
+    for (keys_data, text, want) in [
+        (true, "{{ hostvars | list | first }}", json!("{{ 1 + 1 }}")),
+        (
+            true,
+            "{{ hostvars.keys() | list | first }}",
+            json!("{{ 1 + 1 }}"),
+        ),
+        (true, "{{ hostvars.h2.x }}", json!(42)),
+        (false, "{{ hostvars | list | first }}", json!(2)),
+    ] {
+        let untrusted = BTreeSet::from([HOSTVARS_KEYS.to_string()]);
+        let v = Vars {
+            map: &empty,
+            hostvars: Some(&view),
+            shared: None,
+            facts: None,
+            untrusted: keys_data.then_some(&untrusted),
+            untrusted_hosts: Some(&hosts),
+            base: None,
+        };
+        let got = t.render(text, v);
+        if got.as_ref() != Ok(&want) {
+            wrong.push(format!("{keys_data} {text} -> {got:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// Conditions need a boolean and accept stray braces; a delimited one reads an author string
 /// again and never a host one.
 #[test]

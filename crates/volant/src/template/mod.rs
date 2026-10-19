@@ -68,6 +68,12 @@ pub(crate) type Tainted = Arc<AtomicBool>;
 /// reaches it, and hands back an object whose only method marks the render as data.
 pub(crate) const TAINT_KEY: &str = "volant::tainted";
 
+/// Among a render's untrusted names when a host name came from a managed host: listing the
+/// hosts of `hostvars` then taints the render, while reading one host is `untrusted_hosts`' case,
+/// so a nested template of a trusted host still renders. Unwritable for the same reason as
+/// `TAINT_KEY`.
+pub(crate) const HOSTVARS_KEYS: &str = "volant::hostvars_keys";
+
 /// The name `Context` answers with itself, for `lookup('template')`, which renders a file
 /// against the same variables and the same trust as the render that called it. Unreachable from
 /// a playbook for the same reason as `TAINT_KEY`; through `lookup('vars', ...)` it hands back

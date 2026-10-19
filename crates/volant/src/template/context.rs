@@ -10,7 +10,9 @@ use minijinja::value::{Enumerator, Object};
 use serde_json::{Map, Value};
 
 use super::env::chained_attr;
-use super::{ATTR_KEY, CONCAT_KEY, CONTEXT_KEY, ITEM_KEY, QUERY_KEY, TAINT_KEY, Tainted};
+use super::{
+    ATTR_KEY, CONCAT_KEY, CONTEXT_KEY, HOSTVARS_KEYS, ITEM_KEY, QUERY_KEY, TAINT_KEY, Tainted,
+};
 
 /// The name, in the variables an extended loop shares between its items, under which the list of
 /// all the items is kept once. It is no variable: a render never finds it by name, it reads it
@@ -237,7 +239,13 @@ impl Object for Context {
         self.reads.fetch_add(1, Ordering::Relaxed);
         // Before the memo, never after: a second read of the same name is answered from the
         // cache and would otherwise leave the render looking clean.
-        if self.untrusted.contains(key) {
+        // A `hostvars` the map carries as a plain value lists its hosts on any read, so a host
+        // name that came from a managed host taints every read of it.
+        if self.untrusted.contains(key)
+            || (key == "hostvars"
+                && self.hostvars.is_none()
+                && self.untrusted.contains(HOSTVARS_KEYS))
+        {
             self.tainted.store(true, Ordering::Relaxed);
         }
         self.memo.get(key, || {
@@ -250,6 +258,7 @@ impl Object for Context {
                 return Some(minijinja::Value::from_object(Hostvars {
                     hosts: Arc::clone(hostvars),
                     untrusted_hosts: self.untrusted_hosts.clone(),
+                    keys_untrusted: self.untrusted.contains(HOSTVARS_KEYS),
                     tainted: Arc::clone(&self.tainted),
                     memo: Memo::default(),
                 }));
@@ -327,6 +336,8 @@ pub(super) struct Hostvars {
     /// Hosts holding at least one name that came from a managed host. Reading any name of such
     /// a host taints the render, which is coarser than the reference's per-string tag.
     untrusted_hosts: BTreeSet<String>,
+    /// Whether one of the host names came from a managed host: listing them taints the render.
+    keys_untrusted: bool,
     tainted: Tainted,
     memo: Memo,
 }
@@ -344,6 +355,9 @@ impl Object for Hostvars {
     }
 
     fn enumerate(self: &Arc<Self>) -> Enumerator {
+        if self.keys_untrusted {
+            self.tainted.store(true, Ordering::Relaxed);
+        }
         Enumerator::Values(
             self.hosts
                 .keys()

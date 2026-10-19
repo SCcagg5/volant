@@ -5085,27 +5085,30 @@ h1
     let mut store = VarStore::new(&inv, None, tmp.path(), Map::new()).unwrap();
     let ok = |value: Value| vec![(None, TaskResult(value.as_object().unwrap().clone()))];
     let added = json!({"add_host": {"host_name": "n1", "groups": ["g1"], "host_vars": {"x": 1}}});
-    record_inventory_results(&mut store, &task("command"), "h1", &ok(added.clone()));
+    record_inventory_results(&mut store, &task("command"), &[], "h1", &ok(added.clone()));
     assert!(store.take_inventory_changes().is_none());
     let mut failed = added.clone();
     failed["failed"] = json!(true);
-    record_inventory_results(&mut store, &task("add_host"), "h1", &ok(failed));
+    record_inventory_results(&mut store, &task("add_host"), &[], "h1", &ok(failed));
     assert!(store.take_inventory_changes().is_none());
     record_inventory_results(
         &mut store,
         &task("ansible.builtin.add_host"),
+        &[],
         "h1",
         &ok(added),
     );
     record_inventory_results(
         &mut store,
         &task("group_by"),
+        &[],
         "h1",
         &ok(json!({"add_group": "role_web", "parent_groups": ["all_roles"]})),
     );
     record_inventory_results(
         &mut store,
         &task("set_stats"),
+        &[],
         "h1",
         &ok(json!({"ansible_stats": {"data": {"n": 1}, "per_host": true, "aggregate": true}})),
     );
@@ -5118,10 +5121,11 @@ h1
         .into_iter()
         .map(|v| (None, TaskResult(v.as_object().unwrap().clone())))
         .collect();
-    record_inventory_results(&mut store, &task("add_host"), "h1", &looped);
+    record_inventory_results(&mut store, &task("add_host"), &[], "h1", &looped);
     record_inventory_results(
         &mut store,
         &task("group_by"),
+        &[],
         "h1",
         &ok(json!({"add_group": "delegated"})),
     );
@@ -5132,4 +5136,159 @@ h1
     assert_eq!(groups["g1"], ["n1"]);
     assert_eq!(groups["all_roles"], ["h1"]);
     assert_eq!(store.custom_stats().hosts()["h1"]["n"], json!(1));
+}
+
+/// One `add_host` or `group_by` task as `record_inventory_results` sees it.
+struct OriginCase {
+    module: &'static str,
+    /// The arguments of each item whose render read a managed host's text.
+    untrusted: Vec<&'static [&'static str]>,
+    results: Vec<(Option<Value>, TaskResult)>,
+    /// The host and the group that must be data afterwards.
+    host: Option<&'static str>,
+    group: Option<&'static str>,
+}
+
+fn origin_cases() -> Vec<OriginCase> {
+    let added = |name: &str, groups: &[&str]| {
+        (
+            None,
+            result(json!({"add_host": {"host_name": name, "groups": groups, "host_vars": {}}})),
+        )
+    };
+    let grouped = |value: Value| (None, result(value));
+    let case = |module, untrusted, results, host, group| OriginCase {
+        module,
+        untrusted,
+        results,
+        host,
+        group,
+    };
+    vec![
+        case(
+            "add_host",
+            vec![&["name"]],
+            vec![added("A{", &[])],
+            Some("A{"),
+            None,
+        ),
+        case(
+            "add_host",
+            vec![&["hostname"]],
+            vec![added("B", &[])],
+            Some("B"),
+            None,
+        ),
+        case(
+            "add_host",
+            vec![&["host"]],
+            vec![added("C", &[])],
+            Some("C"),
+            None,
+        ),
+        case(
+            "add_host",
+            vec![&["groups"]],
+            vec![added("D", &["G1"])],
+            None,
+            Some("G1"),
+        ),
+        case(
+            "add_host",
+            vec![&["groupname"]],
+            vec![added("E", &["G2"])],
+            None,
+            Some("G2"),
+        ),
+        case(
+            "add_host",
+            vec![&["group"]],
+            vec![added("F", &["G3"])],
+            None,
+            Some("G3"),
+        ),
+        case(
+            "add_host",
+            vec![&[]],
+            vec![added("plain", &["fine"])],
+            None,
+            None,
+        ),
+        case(
+            "add_host",
+            vec![&[], &["name"]],
+            vec![added("first", &[]), added("second", &[])],
+            Some("second"),
+            None,
+        ),
+        case(
+            "group_by",
+            vec![&["key"]],
+            vec![grouped(json!({"add_group": "K1"}))],
+            None,
+            Some("K1"),
+        ),
+        case(
+            "group_by",
+            vec![&["parents"]],
+            vec![grouped(json!({"add_group": "K2", "parent_groups": ["P2"]}))],
+            None,
+            Some("P2"),
+        ),
+        case(
+            "group_by",
+            vec![&[]],
+            vec![grouped(json!({"add_group": "K3"}))],
+            None,
+            None,
+        ),
+    ]
+}
+
+/// A name whose argument read a managed host's text is data whatever it holds, through every
+/// alias, and in a loop only the item that read the text marks its own name.
+#[test]
+fn a_name_from_a_hosts_text_is_data_whatever_it_holds() {
+    let tmp = scratch();
+    let inv = crate::inventory::Inventory::parse_ini("[g]\nh1\n").unwrap();
+    let scope = crate::vars::Scope {
+        play_hosts: vec!["h1".into()],
+        batch_hosts: vec!["h1".into()],
+        all_play_hosts: vec!["h1".into()],
+        ..Default::default()
+    };
+    for case in origin_cases() {
+        let items: Vec<Item> = case
+            .untrusted
+            .iter()
+            .map(|names| {
+                let mut item = local_item(json!({}));
+                item.args_untrusted = names.iter().map(ToString::to_string).collect();
+                item
+            })
+            .collect();
+        let mut store = VarStore::new(&inv, None, tmp.path(), Map::new()).unwrap();
+        record_inventory_results(&mut store, &task(case.module), &items, "h1", &case.results);
+        let hosts = store.untrusted_hosts();
+        for (_, r) in &case.results {
+            let Some(name) = r.0.get("add_host").and_then(|a| a["host_name"].as_str()) else {
+                continue;
+            };
+            assert_eq!(
+                hosts.contains(name),
+                case.host == Some(name),
+                "{} host {name}",
+                case.module
+            );
+        }
+        let data = store.untrusted_of("h1", &scope);
+        assert_eq!(
+            data.contains("groups"),
+            case.host.is_some() || case.group.is_some(),
+            "{} {:?} {:?}",
+            case.module,
+            case.host,
+            case.group
+        );
+    }
 }
