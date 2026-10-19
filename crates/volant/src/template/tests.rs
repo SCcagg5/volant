@@ -1340,3 +1340,45 @@ fn unsafe_text_and_facts_are_data_through_a_nested_variable() {
         assert_eq!(t.render(text, vars), Ok(want), "{text}");
     }
 }
+
+/// A name the engine binds for itself is read as it is bound, and a value built from the
+/// inventory's own names is data when it holds a template of its own.
+#[test]
+fn engine_names_and_inventory_derived_values_are_not_rendered_by_a_nested_read() {
+    let t = templar();
+    let map = vars(json!({
+        "__volant_with_terms": ["{{ 1 + 1 }}"],
+        "gn": "{{ groups }}",
+        "gk": "{{ gn | list }}",
+        "dir": "/srv/{{ inventory_hostname }}",
+        "inventory_hostname": "h1",
+    }));
+    let shared = Arc::new(vars(
+        json!({"groups": {"all": ["h1"], "{{ 1 + 1 }}": ["h2"]}}),
+    ));
+    let untrusted = BTreeSet::new();
+    let vars = || Vars {
+        map: &map,
+        hostvars: None,
+        shared: Some(&shared),
+        facts: None,
+        untrusted: Some(&untrusted),
+        untrusted_hosts: None,
+        base: None,
+    };
+    assert_eq!(
+        t.render("{{ __volant_with_terms[0] | length }}", vars()),
+        Ok(json!(11))
+    );
+    assert_eq!(
+        t.render("{{ gk | length }}|{{ gk | join(',') }}", vars()),
+        Ok(json!("2|all,{{ 1 + 1 }}"))
+    );
+    let (resolved, soiled) = t.resolve_vars_tainted(vars());
+    assert_eq!(resolved["gk"], json!(["all", "{{ 1 + 1 }}"]));
+    assert!(soiled.contains("gk"));
+    // A name of the inventory that holds no template stays trusted: a path built from it is
+    // the playbook's own.
+    assert_eq!(resolved["dir"], json!("/srv/h1"));
+    assert!(!soiled.contains("dir"));
+}

@@ -7033,3 +7033,100 @@ fn the_system_runtime_keeps_the_refusal_and_installs_nothing() {
     );
     assert!(!data.exists(), "a runtime was installed");
 }
+
+/// The terms of a `with_` loop reach the lookup as values. Host-provided text among them stays
+/// data, and nothing it holds runs on the controller.
+#[rstest::rstest]
+#[case::dict("with_dict", r#"{a: "{{ r.stdout }}"}"#, true)]
+#[case::together("with_together", r#"[["{{ r.stdout }}"], ["x"]]"#, true)]
+#[case::subelements(
+    "with_subelements",
+    r#"[[{name: x, k: ["{{ r.stdout }}"]}], "k"]"#,
+    true
+)]
+#[case::sequence("with_sequence", r#""{{ r.stdout }}""#, false)]
+#[case::template("with_template", r#"["{{ r.stdout }}"]"#, false)]
+#[case::url("with_url", r#"["{{ r.stdout }}"]"#, false)]
+#[case::varnames("with_varnames", r#"["{{ r.stdout }}"]"#, false)]
+#[case::vars("with_vars", r#"["{{ r.stdout }}"]"#, false)]
+fn host_text_in_the_terms_of_a_with_loop_stays_data(
+    #[case] keyword: &str,
+    #[case] terms: &str,
+    #[case] prints_the_text: bool,
+) {
+    let (dir, marker) = trust_dir(keyword, "h1 ansible_connection=local\n");
+    let playbook = dir.join("pb.yml");
+    std::fs::write(
+        &playbook,
+        format!(
+            "- hosts: h1\n  gather_facts: false\n  tasks:\n    - command: cat {}\n      register: r\n    - debug:\n        msg: \"{{{{ item }}}}\"\n      {keyword}: {terms}\n      ignore_errors: true\n",
+            dir.join("payload.txt").display()
+        ),
+    )
+    .expect("the playbook");
+    // The lookups that only ansible-core implements need its Python; the others run without it.
+    let python = std::env::var("VOLANT_PYTHON").ok();
+    let envs: Vec<(&str, &str)> = python
+        .iter()
+        .map(|p| ("VOLANT_PYTHON", p.as_str()))
+        .collect();
+    let out = volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            playbook.to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(60),
+        &envs,
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !marker.exists(),
+        "{keyword}: host text in a term ran on the controller:\n{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    if prints_the_text && python.is_some() {
+        assert!(stdout.contains("lookup("), "{keyword}: {stdout}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A variable that reads the group names, and a second that reads the first, keep host-provided
+/// group names as data.
+#[test]
+fn group_names_read_through_two_variables_stay_data() {
+    // `add_host` is a Python module.
+    let Ok(python) = std::env::var("VOLANT_PYTHON") else {
+        eprintln!("skipped: VOLANT_PYTHON not set. Set it to a real ansible-core python.");
+        return;
+    };
+    let (dir, marker) = trust_dir("nested-groups", "h1 ansible_connection=local\n");
+    let playbook = dir.join("pb.yml");
+    std::fs::write(
+        &playbook,
+        format!(
+            "- hosts: h1\n  gather_facts: false\n  vars:\n    gn: \"{{{{ groups }}}}\"\n    gk: \"{{{{ gn | list }}}}\"\n  tasks:\n    - command: cat {}\n      register: r\n    - add_host:\n        name: extra\n        groups: [\"{{{{ r.stdout }}}}\"]\n        ansible_connection: local\n    - debug:\n        msg: after\n",
+            dir.join("payload.txt").display()
+        ),
+    )
+    .expect("the playbook");
+    let out = volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            playbook.to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(60),
+        &[("VOLANT_PYTHON", &python)],
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !marker.exists(),
+        "a group name from a host ran on the controller:\n{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains("\"msg\": \"after\""), "{stdout}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
