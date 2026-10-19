@@ -335,10 +335,8 @@ fn json_depth(value: &Value) -> usize {
     deepest
 }
 
-/// A document may nest 489 levels: ansible-core 2.19.12 loads a file down to that level
-/// (`-e @file`, `vars_files` and the playbook itself, every shape below) and stops it at 490 with
-/// `maximum recursion depth exceeded`. The scanner stops a flow collection at 255 levels, a limit
-/// of its own that the reference does not have, so a deeper flow collection is refused here.
+/// A document may nest 489 levels, as ansible-core 2.19.12 loads a file; 490 is refused. The
+/// scanner stops a flow collection at 255 levels, a limit the reference does not have.
 #[test]
 fn nesting_deeper_than_the_reference_loads_is_refused_not_a_stack_overflow() {
     for shape in SHAPES {
@@ -445,9 +443,8 @@ fn nested_anchors(levels: usize, width: usize) -> String {
     text
 }
 
-/// Aliases and anchors copy nodes, and the copies are bounded: a document of a few hundred bytes
-/// must not stand for gigabytes. The limit is 1000000 copied nodes. A document that copies less
-/// loads whole.
+/// Aliases and anchors copy at most 1000000 nodes, so a few hundred bytes cannot stand for
+/// gigabytes. A document that copies less loads whole.
 #[test]
 fn aliases_and_anchors_copy_a_bounded_number_of_nodes() {
     // The 341-byte document that used up 3.6 GB at six levels and was killed at seven.
@@ -495,9 +492,8 @@ fn a_file_that_reuses_a_few_anchors_loads_whole() {
     assert_eq!(json["h7"]["tags"], json!(["t1", "t2"]));
 }
 
-/// A stream holds one document, as in ansible-core 2.19.12, whose loaders all stop at the second
-/// one with `expected a single document in the stream`. The limits on nesting and on copies are
-/// for the whole text, so a stream of documents cannot add up to more than one document may.
+/// A stream holds one document, as every loader of ansible-core 2.19.12 requires, and the limits
+/// count the whole text, so a stream cannot add up to more than one document may.
 #[test]
 fn a_stream_holds_one_document() {
     for (what, text) in [
@@ -589,9 +585,8 @@ fn nested_unsafe_wraps_a_string_once() {
     }
 }
 
-/// The deepest document converts on three quarters of the 2 MiB stack of a worker thread, in a
-/// debug build, where a frame is largest. Each shape is one that costs more than a plain level:
-/// a tag on every level, and block and flow mixed.
+/// The deepest document converts on three quarters of a worker's 2 MiB stack in a debug build,
+/// for the shapes that cost more than a plain level.
 #[test]
 fn a_document_at_the_limit_converts_on_a_small_stack() {
     let mut tagged = String::new();

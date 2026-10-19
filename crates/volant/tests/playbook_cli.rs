@@ -7069,8 +7069,7 @@ fn the_system_runtime_keeps_the_refusal_and_installs_nothing() {
 }
 
 /// A host that answers with a YAML document nested far past any real one fails its own task, and
-/// the run goes on for the other host. A stack overflow in the parser ended the process with
-/// SIGABRT, and no host finished.
+/// the run goes on for the other host instead of the process aborting on a stack overflow.
 #[test]
 fn a_deeply_nested_yaml_text_from_a_host_fails_only_that_hosts_task() {
     let dir = probe_dir("deep-yaml-text");
@@ -7164,9 +7163,8 @@ fn a_deeply_nested_yaml_file_is_a_load_error() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A cacheable fact built from nested host text is read back by the next run. The cache file was
-/// read with a recursion limit lower than what the loader accepts, so one such fact ended every
-/// later run before any host ran, until the file was removed.
+/// A cacheable fact built from nested host text is read back by the next run, though its file
+/// nests deeper than the default recursion limit of `serde_json`.
 #[test]
 fn a_nested_cacheable_fact_does_not_break_the_next_run() {
     let dir = probe_dir("deep-cached-fact");

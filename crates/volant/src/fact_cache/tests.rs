@@ -166,10 +166,8 @@ fn the_reference_s_file_is_written_back_byte_for_byte() {
     );
 }
 
-/// A `set_fact` value that the YAML loader accepts must come back from the file. The writer
-/// wraps each level in a second object, so 254 levels of a list are about 510 levels of JSON,
-/// four times the recursion limit of `serde_json`: such a value made every later run fail until
-/// the file was removed.
+/// A `set_fact` value the YAML loader accepts comes back from the file, though the writer doubles
+/// its depth past the recursion limit of `serde_json`.
 #[test]
 fn a_deeply_nested_fact_comes_back_from_the_file() {
     let mut value = json!("x");
