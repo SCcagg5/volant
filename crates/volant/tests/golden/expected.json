@@ -4277,5 +4277,289 @@
       }
     },
     "result": "{% raw %}{{ x }}{% endraw %}{{ x }}|{{ r }}"
+  },
+  {
+    "case": {
+      "template": "{% for i in [1, 2] %}{{ i }},{% endfor %}"
+    },
+    "result": "1,2,"
+  },
+  {
+    "case": {
+      "template": "[{% for i in [1, 2] %}{{ i }}{% if not loop.last %}, {% endif %}{% endfor %}]"
+    },
+    "result": "[1, 2]"
+  },
+  {
+    "case": {
+      "template": "{% set a = [1, 2] %}{{ a }}"
+    },
+    "result": [
+      1,
+      2
+    ]
+  },
+  {
+    "case": {
+      "template": "{% set ns = namespace(r=[]) %}{% for i in [1, 2, 3] %}{% set ns.r = ns.r + [i] %}{% endfor %}{{ ns.r }}"
+    },
+    "result": [
+      1,
+      2,
+      3
+    ]
+  },
+  {
+    "case": {
+      "template": "{% set d = {'k': 1} %}{{ d }}"
+    },
+    "result": {
+      "k": 1
+    }
+  },
+  {
+    "case": {
+      "template": "{% if true %}[1, 2]{% endif %}"
+    },
+    "result": "[1, 2]"
+  },
+  {
+    "case": {
+      "template": "{% if true %}42{% endif %}"
+    },
+    "result": "42"
+  },
+  {
+    "case": {
+      "template": "{% if false %}x{% endif %}"
+    },
+    "result": null
+  },
+  {
+    "case": {
+      "template": "{% set a = 1 %}"
+    },
+    "result": null
+  },
+  {
+    "case": {
+      "template": "{% set a = 1 %}{{ a }}"
+    },
+    "result": 1
+  },
+  {
+    "case": {
+      "template": "{% set a = 1 %}\n{{ a }}"
+    },
+    "result": 1
+  },
+  {
+    "case": {
+      "template": "{% if true %}{{ [1] }}{% endif %}"
+    },
+    "result": [
+      1
+    ]
+  },
+  {
+    "case": {
+      "template": "{% for i in [1, 2] %}{{ [i] }}{% endfor %}"
+    },
+    "result": "[1][2]"
+  },
+  {
+    "case": {
+      "template": "{% if true %}{{ none }}{% endif %}"
+    },
+    "result": null
+  },
+  {
+    "case": {
+      "template": "{% macro m(x) %}<{{ x }}>{% endmacro %}{{ m(5) }}"
+    },
+    "result": "<5>"
+  },
+  {
+    "case": {
+      "template": "{% macro w() %}[{{ caller() }}]{% endmacro %}{% call w() %}in{% endcall %}"
+    },
+    "result": "[in]"
+  },
+  {
+    "case": {
+      "template": "{# only a comment #}"
+    },
+    "result": null
+  },
+  {
+    "case": {
+      "template": "a{# c #}b"
+    },
+    "result": "ab"
+  },
+  {
+    "case": {
+      "template": "a{# c #}\nb"
+    },
+    "result": "ab"
+  },
+  {
+    "case": {
+      "template": "{{ [1, 2] }}{# c #}"
+    },
+    "result": [
+      1,
+      2
+    ]
+  },
+  {
+    "case": {
+      "template": "{# c #}{{ [1, 2] }}"
+    },
+    "result": [
+      1,
+      2
+    ]
+  },
+  {
+    "case": {
+      "template": "x {# unterminated"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Syntax error in template: Missing end of comment tag"
+  },
+  {
+    "case": {
+      "template": "echo ${#x[@]}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Syntax error in template: Missing end of comment tag"
+  },
+  {
+    "case": {
+      "template": "a  {%- if true -%}  b  {%- endif -%}  c"
+    },
+    "result": "abc"
+  },
+  {
+    "case": {
+      "template": "x\n  {%- if true %}\ny\n{%- endif %}\nz"
+    },
+    "result": "xyz"
+  },
+  {
+    "case": {
+      "template": "a\n{% if true %}\nb\n{% endif %}\nc\n"
+    },
+    "result": "a\nb\nc\n"
+  },
+  {
+    "case": {
+      "template": "{% for i in [1, 2] %}\nl{{ i }}\n{% endfor %}\n"
+    },
+    "result": "l1\nl2\n"
+  },
+  {
+    "case": {
+      "template": "a\n  {% if true %}\nb\n  {% endif %}\nc\n"
+    },
+    "result": "a\n  b\n  c\n"
+  },
+  {
+    "case": {
+      "template": "{% if true %}x{% endif %}\n"
+    },
+    "result": "x\n"
+  },
+  {
+    "case": {
+      "template": "127.0.0.1 localhost\n{% for h in hosts %}\n10.0.0.{{ loop.index }} {{ h }}\n{% endfor %}\n# end\n",
+      "vars": {
+        "hosts": [
+          "a",
+          "b"
+        ]
+      }
+    },
+    "result": "127.0.0.1 localhost\n10.0.0.1 a\n10.0.0.2 b\n# end\n"
+  },
+  {
+    "case": {
+      "template": "{{ [1, 2] }}\n"
+    },
+    "result": [
+      1,
+      2
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ [1, 2] }}\n\n"
+    },
+    "result": "[1, 2]\n\n"
+  },
+  {
+    "case": {
+      "template": "\n{{ [1, 2] }}"
+    },
+    "result": "\n[1, 2]"
+  },
+  {
+    "case": {
+      "template": "{{ [1, 2] }} "
+    },
+    "result": "[1, 2] "
+  },
+  {
+    "case": {
+      "template": "{% set a = [1, 2] %}\n{{ a }}\n"
+    },
+    "result": [
+      1,
+      2
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ v }}",
+      "vars": {
+        "v": "{% for i in [1, 2] %}{{ i }},{% endfor %}"
+      }
+    },
+    "result": "1,2,"
+  },
+  {
+    "case": {
+      "template": "{{ v }}",
+      "vars": {
+        "v": "{% set a = [1, 2] %}{{ a }}"
+      }
+    },
+    "result": [
+      1,
+      2
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ v }}",
+      "vars": {
+        "v": "{# only a comment #}"
+      }
+    },
+    "result": null
+  },
+  {
+    "case": {
+      "template": "{{ v }}",
+      "vars": {
+        "v": "{% if false %}x{% endif %}"
+      }
+    },
+    "result": null
+  },
+  {
+    "case": {
+      "when": "{% if true %}true{% endif %}"
+    },
+    "error": "Task failed: Encountered untrusted template or expression."
   }
 ]
