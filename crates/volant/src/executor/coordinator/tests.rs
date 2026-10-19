@@ -4,9 +4,12 @@ use std::sync::Arc;
 
 use tokio::sync::watch;
 
-use super::{Coordinator, Progress};
+use super::{Coordinator, Event, Progress};
 use crate::compile::{Step, StepKind};
 use crate::playbook::PlayTask;
+use crate::render::{Dump, Renderer};
+use crate::stats::{Outcome, Stats, exit_code};
+use volant_protocol::TaskResult;
 
 /// A coordinator over one list of hosts, which the batch and the play share.
 ///
@@ -189,4 +192,33 @@ fn a_finished_host_is_not_filed_again_after_its_failure_was() {
     assert!(round.files_failure("h2", true));
     assert!(round.files_failure("h3", true));
     assert!(!round.files_failure("h4", false));
+}
+
+/// The line of a failed result is shown when its host's turn comes, which can be after a
+/// `clear_host_errors` that the coordinator read first. Showing it adds to the recap's `failed`
+/// column and must not put the forgiven host back among the failing ones.
+#[test]
+fn showing_a_failed_line_after_a_clear_does_not_fail_the_host_again() {
+    let mut stats = Stats::default();
+    let mut out = Renderer::with_writer(Box::new(std::io::sink()), false, 79, 0);
+    stats.clear_errors("h2", false);
+    super::display::report_result(failed("h2"), &mut stats, &mut out);
+    assert_eq!(stats.host("h2").failed, 1, "the recap still counts it");
+    assert_eq!(exit_code(&stats), 0, "the clear forgave it");
+}
+
+fn failed(host: &str) -> Event {
+    Event::Result {
+        host: host.to_string(),
+        index: 0,
+        label: None,
+        outcome: Outcome::Failed,
+        result: TaskResult::default(),
+        dump: Dump::No,
+        show: true,
+        counts: true,
+        censored: false,
+        delegate: None,
+        error: None,
+    }
 }
