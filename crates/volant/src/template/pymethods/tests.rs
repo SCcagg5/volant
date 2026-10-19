@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use minijinja::{Environment, Value};
-use serde_json::json;
+use serde_json::{Map, Value as Json, json};
 
 use super::mutable::{identity, is_literal, mutable, plain_list, plain_map, snapshot};
 
@@ -66,7 +66,7 @@ fn within<T: Send + 'static>(secs: u64, f: impl FnOnce() -> T + Send + 'static) 
 fn render(template: &'static str) -> Result<serde_json::Value, String> {
     within(20, move || {
         crate::testing::templar()
-            .render(template, &serde_json::Map::new())
+            .render(template, &Map::new())
             .map_err(|e| e.0)
     })
 }
@@ -131,4 +131,113 @@ fn a_list_stops_growing_at_the_limit() {
     let out =
         render("{% set l = [1] %}{% for i in range(60) %}{% set _ = l.extend(l) %}{% endfor %}");
     assert!(out.is_err(), "{out:?}");
+}
+
+/// A width, a precision or a `*` of `%` that a host supplies is bounded like the other methods:
+/// a task error before any text is built, with Python's own words for a count past an index.
+#[test]
+fn a_percent_width_or_precision_past_the_limit_is_a_task_error() {
+    let v = vars(json!({"w": 10_000_000_000_i64, "p": 2_000_000_000, "f": "%.70000f"}));
+    for template in [
+        "{{ '%10000000000d' % 1 }}",
+        "{{ '%0100000000000d' % 1 }}",
+        "{{ '%*d' % (w, 1) }}",
+        "{{ '%.*f' % (p, 1.5) }}",
+        "{{ '%.10000000000d' % 1 }}",
+        "{{ '%-10000000000s' | format('a') }}",
+        "{{ f.replace('7', '99999999999') % 1.5 }}",
+    ] {
+        let err = crate::testing::templar().render(template, &v).unwrap_err();
+        assert!(err.0.contains("256 MiB"), "{template}: {err}");
+    }
+    for (template, want) in [
+        ("{{ '%18446744073709551615d' % 1 }}", "width too big"),
+        ("{{ '%.18446744073709551615f' % 1.5 }}", "precision too big"),
+        ("{{ '%*d' % (100000000000000000000, 1) }}", "C ssize_t"),
+    ] {
+        let err = crate::testing::templar()
+            .render(template, &Map::new())
+            .unwrap_err();
+        assert!(err.0.contains(want), "{template}: {err}");
+    }
+    assert_eq!(
+        crate::testing::templar()
+            .render("{{ (f % 1.5) | length }}", &v)
+            .unwrap(),
+        json!(70002)
+    );
+}
+
+/// An integer past 64 bits is an integer to `%` and to the `format` filter.
+#[test]
+fn percent_reads_integers_past_64_bits() {
+    let t = crate::testing::templar();
+    let none = Map::new();
+    for (template, want) in [
+        ("{{ '%d' % 18446744073709551615 }}", "18446744073709551615"),
+        (
+            "{{ '%x' | format(18446744073709551615) }}",
+            "ffffffffffffffff",
+        ),
+        (
+            "{{ '%d' % (0 - 18446744073709551615) }}",
+            "-18446744073709551615",
+        ),
+        (
+            "{{ '%f' % 18446744073709551615 }}",
+            "18446744073709551616.000000",
+        ),
+        (
+            "{{ '%d' % (1099511627776 * 1099511627776) }}",
+            "1208925819614629174706176",
+        ),
+    ] {
+        assert_eq!(
+            t.render(template, &none).unwrap(),
+            json!(want),
+            "{template}"
+        );
+    }
+}
+
+fn vars(v: Json) -> Map<String, Json> {
+    v.as_object().unwrap().clone()
+}
+
+/// A large integer is ordered against a float by value, as Python does, and not after it was
+/// rounded to a float: `2**53 + 1` is larger than `2.0**53`.
+#[test]
+fn sorting_a_large_integer_against_a_float_is_exact() {
+    for (template, want) in [
+        (
+            "{% set l = [9007199254740993, 9007199254740992.0] %}{% set _ = l.sort() %}{{ l | map('string') | join(',') }}",
+            "9007199254740992.0,9007199254740993",
+        ),
+        (
+            "{% set l = [9007199254740992.0, 9007199254740993] %}{% set _ = l.sort(reverse=True) %}{{ l | map('string') | join(',') }}",
+            "9007199254740993,9007199254740992.0",
+        ),
+    ] {
+        assert_eq!(render(template), Ok(json!(want)), "{template}");
+    }
+}
+
+/// `inf` is padded with blanks, and the fields of one format string together stay within the limit.
+#[test]
+fn percent_pads_infinity_with_blanks_and_bounds_the_whole_text() {
+    let v = vars(json!({"big": 1e308}));
+    let t = crate::testing::templar();
+    assert_eq!(
+        t.render("{{ '%08f|%+08.1f' % (big * 10, big * 10) }}", &v)
+            .unwrap(),
+        json!("     inf|    +inf")
+    );
+    let err = t
+        .render("{{ '%200000000s%200000000s' % ('a', 'b') }}", &v)
+        .unwrap_err();
+    assert!(err.0.contains("256 MiB"), "{err}");
+    let err = t
+        .render("{{ '%.*f' % (2147483648, 1.5) }}", &v)
+        .unwrap_err();
+    assert!(err.0.contains("C int"), "{err}");
 }

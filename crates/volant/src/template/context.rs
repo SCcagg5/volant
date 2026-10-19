@@ -16,7 +16,8 @@ use super::pymethods::mutable::{identity, mutable};
 use super::templar::Templar;
 use super::{
     ATTR_KEY, CONCAT_KEY, CONST_KEY, CONTEXT_KEY, HOSTVARS_KEYS, ITEM_KEY, MATTR_KEY, MITEM_KEY,
-    MKLIST_KEY, MKMAP_KEY, QUERY_KEY, TAINT_KEY, Tainted, TemplateError, VAR_KEY,
+    MKLIST_KEY, MKMAP_KEY, QUERY_KEY, REM_KEY, REMT_KEY, TAINT_KEY, Tainted, TemplateError,
+    VAR_KEY,
 };
 use crate::inventory::is_localhost;
 
@@ -303,6 +304,8 @@ impl Object for Context {
             MITEM_KEY,
             MKLIST_KEY,
             MKMAP_KEY,
+            REM_KEY,
+            REMT_KEY,
             ALLITEMS_KEY,
         ]
         .contains(&key)

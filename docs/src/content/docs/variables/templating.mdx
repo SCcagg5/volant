@@ -137,6 +137,18 @@ What differs from ansible-core:
 - `items()` and `popitem()` give lists where Python gives tuples, so they print as `['a', 1]` and not `('a', 1)`.
 - `sort(key=...)` with a function is not available.
 
+### The `%` operator
+
+On a text, `%` formats it the way Python does: `'%s-%d' % (name, 3)`, `'%(host)s:%(port)d' % item`, `'%5.2f%%' % pct`. The flags `-`, `+`, space, `0` and `#`, a width and a precision (each of them `*` to read it from the arguments), the length modifiers `h`, `l` and `L`, and the conversions `s`, `r`, `a`, `c`, `d`, `i`, `u`, `o`, `x`, `X`, `e`, `E`, `f`, `F`, `g`, `G` and `%` are read. A wrong call fails with Python's words: `not enough arguments for format string`, `not all arguments converted during string formatting`, `%d format: a real number is required, not str`.
+
+Integers up to 128 bits that a template writes or computes are read exactly (`'%d' % 18446744073709551615`). An integer above 63 bits in a variable file reaches the template as text, which the YAML reader decides, not `%`. A width or a precision past 256 MiB of text is a task error that names the limit, as for the `str` methods, and one past what an index holds is Python's `width too big`.
+
+On two numbers, `%` takes the sign of the divisor, as in Python: `7 % -3` is `-2`. A zero divisor is an error. The `format` filter is `%` with the arguments written out, and reads the same formats.
+
+Volant has no tuple type, so the right side of `%` is read as a tuple when it is written out in the template, as `(a, b)`, `(a,)` or `['a', 'b']`. A list that a variable holds or a call answers is one argument, as it is in Python: `'%s' % items` prints the list. `'%s %s' % pair` with a two item list in `pair` is an error in ansible-core, and here. A tuple prints as a list: `'%s' % ((1, 2),)` is `[1, 2]` here and `(1, 2)` in ansible-core.
+
+Two numbers written out in the template (`7 % -3`) are folded when the template is compiled, and a fold does not follow Python's sign rule or raise on a zero divisor. A number that comes from a variable does.
+
 `.get()`, `.keys()`, `.values()` and `.items()` on other mapping-like values, such as `hostvars` and the loop variable, come from `minijinja-contrib`'s Python compatibility layer.
 
 `difference`, `intersect` and `union` build a Python `set` in ansible-core, whose order is its own: small integers happen to come out sorted, and strings come out in an order that changes with `PYTHONHASHSEED` from one run to the next. Volant sorts the result when every element is an integer, which matches every integer case measured, and otherwise keeps the order in which the elements first appeared. On strings, that order is not guaranteed to match a given run of ansible-core.

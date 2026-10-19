@@ -20,10 +20,11 @@ use super::globals;
 use super::pymethods::mutable::{
     MutDict, MutList, is_literal, is_mutable, key, mutable, snapshot_answer,
 };
+use super::pymethods::percent;
 use super::vm::{concat, note_emit};
 use super::{
     ATTR_KEY, CONCAT_KEY, CONST_KEY, CONTEXT_KEY, ITEM_KEY, MATTR_KEY, MITEM_KEY, MKLIST_KEY,
-    MKMAP_KEY, VAR_KEY,
+    MKMAP_KEY, REM_KEY, REMT_KEY, VAR_KEY,
 };
 
 /// The engine's environment: minijinja's, strict about undefined values, with every filter,
@@ -76,6 +77,12 @@ pub(super) fn environment(base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) -> En
             Ok(MutDict::from_entries(entries))
         },
     );
+    env.add_function(REM_KEY, |l: minijinja::Value, r: minijinja::Value| {
+        percent(&l, &r, false)
+    });
+    env.add_function(REMT_KEY, |l: minijinja::Value, r: minijinja::Value| {
+        percent(&l, &r, true)
+    });
     env
 }
 
