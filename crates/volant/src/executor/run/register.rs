@@ -9,7 +9,7 @@ use crate::executor::prepare::{Item, display};
 use crate::playbook::PlayTask;
 use crate::template::Templar;
 
-use super::judge::{empty_loop_result, loops};
+use super::judge::{empty_loop_result, loops, task_fails};
 
 /// What `register` stores: the single result, or Ansible's loop aggregate.
 pub(in crate::executor) fn registered_value(
@@ -157,10 +157,7 @@ pub(in crate::executor) fn notified_handlers(
     let Some(vars) = items.first().map(|i| &i.vars) else {
         return Ok(none);
     };
-    if task.notify.is_empty()
-        || results.iter().any(|(_, r)| r.failed())
-        || !results.iter().any(|(_, r)| r.changed())
-    {
+    if task.notify.is_empty() || task_fails(results) || !results.iter().any(|(_, r)| r.changed()) {
         return Ok(none);
     }
     let mut warnings = Vec::new();

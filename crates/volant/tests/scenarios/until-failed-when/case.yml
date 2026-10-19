@@ -1,0 +1,5 @@
+# `failed_when` decides a task whose `until` ran out of retries: `false` makes it pass, as the
+# registered `failed` and `attempts` still say, and `ignore_errors` and a loop behave the same.
+runs:
+  - args: [-i, inv.ini, p.yml]
+  - args: [-i, inv.ini, -v, p.yml]
