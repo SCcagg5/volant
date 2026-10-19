@@ -1309,3 +1309,16 @@
 - template: "{{ e | length }}|{{ e }}"
   vars: {c: 7, d: "{{ reg }}", e: "{{ d | upper }}"}
   untrusted: {reg: "{{ c }}"}
+- template: "{{ '½'.isdecimal() }}"
+- template: "{{ '½'.isdigit() }}"
+- template: "{{ '½'.isnumeric() }}"
+- template: "{{ '²'.isdecimal() }}"
+- template: "{{ '²'.isdigit() }}"
+- template: "{{ '²'.isnumeric() }}"
+- template: "{{ '٣'.isdecimal() }}"
+- template: "{{ '٣'.isdigit() }}"
+- template: "{{ '٣'.isnumeric() }}"
+- template: "{{ '5'.isdecimal() }}"
+- template: "{{ '5'.isdigit() }}"
+- template: "{{ '5'.isnumeric() }}"
+- template: "{{ '一'.isnumeric() }}"

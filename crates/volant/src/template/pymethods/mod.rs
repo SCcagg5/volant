@@ -7,7 +7,8 @@ use minijinja::value::ValueKind;
 use minijinja::{Environment, Error, ErrorKind, State, Value};
 
 mod args;
-mod format;
+mod digits;
+pub(crate) mod format;
 pub(crate) mod limits;
 mod search;
 mod text;
