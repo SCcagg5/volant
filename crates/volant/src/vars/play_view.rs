@@ -26,12 +26,21 @@ pub(crate) struct PlayView {
 
 impl PlayView {
     pub fn vars(&self) -> Vars<'_> {
+        self.vars_over(&self.vars, &self.untrusted)
+    }
+
+    /// This view's `groups`, `hostvars` and host lists, over `map` and the data names `untrusted`.
+    pub fn vars_over<'a>(
+        &'a self,
+        map: &'a Map<String, Value>,
+        untrusted: &'a BTreeSet<String>,
+    ) -> Vars<'a> {
         Vars {
-            map: &self.vars,
+            map,
             hostvars: self.hostvars.as_ref(),
             shared: Some(&self.shared),
             facts: None,
-            untrusted: Some(&self.untrusted),
+            untrusted: Some(untrusted),
             untrusted_hosts: Some(&self.untrusted_hosts),
             base: None,
         }

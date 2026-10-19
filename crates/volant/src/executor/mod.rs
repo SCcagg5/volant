@@ -10,6 +10,7 @@ mod coordinator;
 mod debugger;
 mod driver;
 mod free;
+mod hosts_vars;
 mod include;
 mod play_checks;
 mod play_hosts;

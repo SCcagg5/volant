@@ -15,6 +15,7 @@ pub(crate) use host_vars::PENDING_PYTHON;
 pub use host_vars::{HostSettings, HostVars, host_setting, omit_token, settled, settled_all};
 pub use load::{VaultFile, include_vars_paths, load_vars_file, parse_extra_vars};
 pub use magic::ansible_version;
+pub(crate) use play_view::PlayView;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;

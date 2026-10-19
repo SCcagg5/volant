@@ -18,13 +18,14 @@ use std::sync::Mutex;
 
 use serde_json::Value;
 
+use super::hosts_vars::settle;
 use super::play_checks::read_vars_files;
 use super::python_type;
 use crate::compile::Compiled;
 use crate::playbook::Play;
 use crate::stats::Refusal;
 use crate::template::Templar;
-use crate::vars::{Scope, VarStore, holds_template};
+use crate::vars::{Scope, VarStore};
 
 /// What the render reads besides the play.
 pub(crate) struct Context<'a> {
@@ -100,20 +101,18 @@ pub(crate) fn render_hosts<'a>(
             .expect("vars lock")
             .play_view(&scope, context.with_hostvars);
     }
+    let (settled, data) =
+        settle(&play.host_patterns, context.templar, &view).map_err(|why| undefined(&why))?;
     let mut patterns: Vec<String> = Vec::new();
     let mut shown = None;
     let mut nameless = false;
     for written in &play.host_patterns {
-        let (rendered, data) = context
+        // One pass over the settled variables: what it makes is the pattern, and nothing renders
+        // it again.
+        let (rendered, _) = context
             .templar
-            .render_value_tainted(&Value::String(written.clone()), view.vars())
+            .render_one_pass_tainted(written, view.vars_over(&settled, &data))
             .map_err(|err| undefined(&err.0))?;
-        // Text that is still a template after the passes the templar makes is variables that name
-        // each other in a ring, or too deep a chain: the reference refuses it. A result that came
-        // from a host is data and stays as it is.
-        if !data && holds_template(&rendered) {
-            return Err(undefined("Recursive loop detected in template."));
-        }
         match rendered {
             Value::String(text) => {
                 if text.is_empty() {
