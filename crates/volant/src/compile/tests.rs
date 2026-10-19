@@ -1155,10 +1155,8 @@ fn public_is_refused_by_value_and_not_by_presence() {
     assert!(asked(json!("{{ maybe }}")).is_err());
 }
 
-/// A keyword that may be a template comes down a block as the layer nearest the task wrote it,
-/// whichever form that layer used: an inner literal hides an outer template, an inner template
-/// hides an outer literal, and a layer that wrote nothing is looked through. Every layer of the
-/// play, the block and the task in each of the three states.
+/// A templatable keyword comes down as the layer nearest the task wrote it, in either form, and
+/// a layer that wrote nothing is looked through: play, block and task in each of three states.
 #[rstest]
 #[case::escalation("become", "true")]
 #[case::no_log("no_log", "true")]

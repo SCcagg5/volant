@@ -819,9 +819,8 @@ fn kept_by_play(play: &Play, key: &str) -> (serde_json::Value, Option<String>) {
     }
 }
 
-/// A keyword that may be a template waits in `deferred` for the task that runs, with its typed
-/// field unset, wherever it is written; a literal fills the typed field and leaves `deferred`
-/// empty. A play has no `delegate_facts`, `async` or `poll`, and a block has no `async` or `poll`.
+/// A template waits in `deferred` with its typed field unset, wherever it is written; a literal
+/// fills the typed field. A play has no `delegate_facts`, `async` or `poll`; a block no `async`.
 #[rstest]
 #[case::escalation("become", "true", serde_json::json!(true))]
 #[case::no_log("no_log", "true", serde_json::json!(true))]
@@ -911,9 +910,8 @@ fn a_play_keeps_a_templated_gather_facts_and_force_handlers_for_when_it_starts()
     assert!(play.gather_written && play.force_handlers.is_none());
 }
 
-/// A template that waits to be rendered still shows to the code that decides before any host does:
-/// a `run_once` meets the hosts in front of it, and an `any_errors_fatal` is fatal, whatever it
-/// renders to (measured on ansible-core 2.19.12: the strategy reads it as written).
+/// A waiting `run_once` still meets the hosts in front of it, and an `any_errors_fatal` is fatal
+/// whatever it renders to: the strategy reads both as written.
 #[test]
 fn a_templated_run_once_and_any_errors_fatal_show_before_they_are_rendered() {
     let pb = parse(

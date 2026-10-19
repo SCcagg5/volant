@@ -49,9 +49,8 @@ fn max_fail_percentage_reads_a_number(
     }
 }
 
-/// `gather_facts` and `force_handlers` written as templates are rendered once, when the play starts,
-/// against the play's variables; a value that is no boolean stops the run in the reference's words,
-/// at exit 4 (measured on ansible-core 2.19.12).
+/// `gather_facts` and `force_handlers` templates are rendered once, when the play starts; a value
+/// that is no boolean stops the run in the reference's words, at exit 4.
 #[rstest]
 #[case::gather_true("gather_facts", "{{ on }}", Ok(Some(true)))]
 #[case::gather_false("gather_facts", "{{ off }}", Ok(Some(false)))]

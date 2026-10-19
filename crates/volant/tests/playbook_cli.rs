@@ -7068,10 +7068,8 @@ fn the_system_runtime_keeps_the_refusal_and_installs_nothing() {
     assert!(!data.exists(), "a runtime was installed");
 }
 
-/// A templated `no_log` hides a failed task's result as a literal one does, whatever step of
-/// preparing the task failed: an argument, a `when`, a `loop`, its label, `delegate_to`, `vars`,
-/// `environment`, `notify`, a `set_fact` or a handler. It is read from the variables the host has
-/// at that point; when it cannot be read, or is no boolean, the result stays hidden.
+/// A templated `no_log` hides a failed task's result as a literal one does, at whatever step of
+/// preparing it failed; unreadable or not a boolean, the result stays hidden.
 #[rstest]
 fn a_templated_no_log_hides_a_task_that_failed_before_it_ran(
     #[values(

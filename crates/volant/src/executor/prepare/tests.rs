@@ -1259,9 +1259,8 @@ fn resolved(key: &str, template: &str) -> Result<Value, String> {
     })
 }
 
-/// Every keyword the reference renders when the task runs, with a template that renders to true,
-/// to false and to something that is no boolean. Each was run through ansible-core 2.19.12: the
-/// task fails for the host, with this sentence, and `async` is named `async_val` in it.
+/// Every keyword rendered when the task runs, with a template giving true, false or no boolean,
+/// as ansible-core 2.19.12 reads it; `async` is named `async_val` in the sentence.
 #[rstest::rstest]
 #[case::no_log_true("no_log", "{{ on }}", Ok(json!(true)))]
 #[case::no_log_false("no_log", "{{ off }}", Ok(json!(false)))]
