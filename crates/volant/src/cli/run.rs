@@ -137,6 +137,14 @@ async fn run_all(
         return Ok(fatal.code);
     }
     let mut inventory = loaded.inventory;
+    // The reference checks the whole inventory, before any `--limit` and any playbook, and the
+    // implicit `localhost` is not in `all`.
+    if config.localhost_warning && inventory.resolve("all").hosts.is_empty() {
+        out.warning(
+            "provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'",
+            false,
+        );
+    }
     announce_callbacks(out);
     let dump = if out.verbose_at(4) {
         options_dump(args, &config, forks)

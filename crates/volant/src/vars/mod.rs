@@ -7,9 +7,11 @@ mod host_vars;
 mod layers;
 mod load;
 mod magic;
+mod shared;
 mod store;
 
-pub use host_vars::{HostSettings, HostVars, host_setting, omit_token};
+pub(crate) use host_vars::PENDING_PYTHON;
+pub use host_vars::{HostSettings, HostVars, host_setting, omit_token, settled, settled_all};
 pub use load::{VaultFile, include_vars_paths, load_vars_file, parse_extra_vars};
 pub use magic::ansible_version;
 
@@ -126,6 +128,10 @@ pub struct VarStore {
     /// The same view completed with a host the inventory does not carry - an implicit
     /// `localhost` - one map per such host. There is normally at most one of them in a run.
     hostvars_with: BTreeMap<String, Arc<Map<String, Value>>>,
+    /// The spelling the implicit controller host answers to in `hostvars`: the first one a host
+    /// ran under, `localhost` until one has. The reference makes one such host and names it after
+    /// the first spelling asked for.
+    implicit_controller: Option<String>,
     /// The hosts that hold at least one untrusted name, built on demand and dropped by the same
     /// rule as `hostvars`: every write that can change it already goes through `set_fact`.
     untrusted_hosts: Option<Arc<BTreeSet<String>>>,

@@ -1,0 +1,12 @@
+# A play and a delegation that name the controller reach the inventory's own host when it lists one
+# of the three names, and an implicit host when it lists none; `all` never matches the implicit one.
+# No modes: who runs a task is decided before --check and --diff apply.
+runs:
+  - args: [-i, none.ini, implicit.yml]
+  - args: [-i, none.ini, --list-hosts, implicit.yml]
+  - args: [-i, none.ini, loopback_v6.yml]
+  - args: [-i, none.ini, --list-hosts, loopback_v6.yml]
+  - args: [-i, localhost.ini, listed.yml]
+  - args: [-i, localhost.ini, --list-hosts, listed.yml]
+  - args: [-i, loopback.ini, listed.yml]
+  - args: [-i, loopback.ini, --list-hosts, listed.yml]

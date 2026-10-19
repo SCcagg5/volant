@@ -10,6 +10,7 @@ use serde_json::{Map, Value};
 use crate::keywords::BLOCK_SECTIONS;
 
 use super::fields::parse_handlers;
+use super::import::Import;
 use super::model::{HandlerTask, Playbook, TaskOrBlock};
 use super::origin::OriginScope;
 use super::play::parse_play;
@@ -88,11 +89,15 @@ fn parse_at(text: &str, source: &str, dir: &Path, depth: usize) -> anyhow::Resul
                 } else {
                     dir.join(path)
                 };
-                plays.extend(
-                    read(&path, depth + 1)
-                        .with_context(|| format!("{source}: import_playbook {name}"))?
-                        .plays,
-                );
+                let import =
+                    Import::read(entry).with_context(|| format!("{source}: play {}", i + 1))?;
+                let mut imported = read(&path, depth + 1)
+                    .with_context(|| format!("{source}: import_playbook {name}"))?
+                    .plays;
+                for play in &mut imported {
+                    import.apply(play);
+                }
+                plays.extend(imported);
             }
             None => plays
                 .push(parse_play(entry, dir).with_context(|| format!("{source}: play {}", i + 1))?),

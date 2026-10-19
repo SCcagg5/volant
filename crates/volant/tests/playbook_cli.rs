@@ -1378,7 +1378,7 @@ fn fake_password_host(name: &str, expected: &str) -> std::path::PathBuf {
     let dir = fake_su_host(name);
     std::fs::write(dir.join("expected"), expected).unwrap();
     let script = "#!/bin/sh\n\
-        echo \"$0 $*\" >> \"$FAKE_SSH_DIR/ssh.log\"\n\
+        printf '%s\n' \"$0 $*\" >> \"$FAKE_SSH_DIR/ssh.log\"\n\
         env | sort >> \"$FAKE_SSH_DIR/ssh.log.env\"\n\
         ask=\n\
         case \" $* \" in *' BatchMode=no '*) ask=1;; esac\n\
@@ -5074,6 +5074,39 @@ fn import_playbook_written_as_a_task_is_refused_by_its_own_name() {
     std::fs::remove_dir_all(&dir).expect("the probe directory is removed");
 }
 
+/// A templated `tags` on an `import_playbook` is refused, so that `--skip-tags` cannot run what the
+/// reference would skip: it would otherwise be a literal tag named `{{ pkgtag }}`.
+#[test]
+fn templated_import_tags_are_refused_whatever_the_tag_selection() {
+    let dir = probe_dir("import-templated-tags");
+    std::fs::write(
+        dir.join("sub.yml"),
+        "- hosts: localhost\n  gather_facts: false\n  tasks:\n    - debug: {msg: ran}\n",
+    )
+    .expect("the imported playbook is written");
+    std::fs::write(
+        dir.join("site.yml"),
+        "- import_playbook: sub.yml\n  tags: ['{{ pkgtag }}']\n",
+    )
+    .expect("the probe playbook is written");
+    let path = dir.join("site.yml").display().to_string();
+    for selection in [
+        &["--skip-tags", "packages"][..],
+        &["--tags", "packages"][..],
+    ] {
+        let mut args = vec!["playbook", "-e", "pkgtag=packages"];
+        args.extend_from_slice(selection);
+        args.push(&path);
+        let out = volant(&args);
+        let text = String::from_utf8_lossy(&out.stdout).to_string();
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        assert_eq!(out.status.code(), Some(4), "{text}{err}");
+        assert!(err.contains("holds a template"), "{err}");
+        assert!(!text.contains("TASK"), "{text}");
+    }
+    std::fs::remove_dir_all(&dir).expect("the probe directory is removed");
+}
+
 /// A `run_once` runner nothing can reach ends the play for the hosts waiting on it, and the exit
 /// code stays the unreachable one.
 #[test]
@@ -5885,6 +5918,163 @@ fn the_implicit_localhost_runs_under_the_controller_python() {
         !stdout.contains("discovered Python interpreter") && !stderr.contains("discovered Python"),
         "the interpreter was discovered:
 {stdout}{stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An inventory with no host warns once, as ansible-core 2.19.12 does, unless `localhost_warning`
+/// is off.
+#[rstest::rstest]
+#[case::no_host("", &[], true)]
+#[case::a_host("h1 ansible_connection=local\n", &[], false)]
+#[case::silenced_by_the_environment("", &[("ANSIBLE_LOCALHOST_WARNING", "false")], false)]
+#[case::the_environment_can_ask_for_it("", &[("ANSIBLE_LOCALHOST_WARNING", "true")], true)]
+fn an_inventory_with_no_host_warns_that_only_localhost_is_left(
+    #[case] inventory: &str,
+    #[case] envs: &[(&str, &str)],
+    #[case] warns: bool,
+) {
+    let dir = probe_dir(&format!(
+        "empty-inventory-{}-{}",
+        inventory.len(),
+        envs.len()
+    ));
+    std::fs::write(dir.join("inv.ini"), inventory).expect("an inventory");
+    std::fs::write(
+        dir.join("play.yml"),
+        "- hosts: localhost\n  gather_facts: false\n  tasks:\n    - debug: msg=ok\n",
+    )
+    .expect("the play");
+    let out = volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            dir.join("play.yml").to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(60),
+        envs,
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "the run failed: {stderr}");
+    assert_eq!(
+        stderr.matches(
+            "[WARNING]: provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'"
+        )
+        .count(),
+        usize::from(warns),
+        "{stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A `localhost_warning` that is not a boolean stops the run before it starts, as the other
+/// boolean settings do, and names the setting and where it was set.
+#[rstest::rstest]
+#[case::env("env", "ANSIBLE_LOCALHOST_WARNING", "maybe")]
+#[case::ini("ini", "ANSIBLE_CONFIG", "maybe")]
+fn a_localhost_warning_that_is_not_a_boolean_is_refused(
+    #[case] source: &str,
+    #[case] var: &str,
+    #[case] value: &str,
+) {
+    let dir = probe_dir(&format!("bad-localhost-warning-{source}"));
+    std::fs::write(dir.join("inv.ini"), "h1 ansible_connection=local\n").expect("an inventory");
+    std::fs::write(
+        dir.join("play.yml"),
+        "- hosts: h1\n  gather_facts: false\n  tasks:\n    - debug: msg=ok\n",
+    )
+    .expect("the play");
+    let cfg = dir.join("ansible.cfg");
+    std::fs::write(&cfg, format!("[defaults]\nlocalhost_warning = {value}\n")).expect("a config");
+    let setting = if source == "env" {
+        value.to_string()
+    } else {
+        cfg.display().to_string()
+    };
+    let out = volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            dir.join("play.yml").to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(60),
+        &[(var, &setting)],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(5), "{stderr}");
+    assert!(
+        stderr.contains("Config 'LOCALHOST_WARNING' from") && stderr.contains("'maybe'"),
+        "{stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The register of the controller host is data when it is read through any of the three
+/// spellings, from any inventory shape: the text comes back as it was, never rendered.
+#[rstest::rstest]
+fn the_controller_s_register_stays_data_through_every_spelling(
+    #[values("localhost", "127.0.0.1", "::1")] ran_as: &str,
+    #[values("localhost", "127.0.0.1", "::1")] read_as: &str,
+    #[values(
+        "",
+        "localhost ansible_connection=local\n",
+        "localhost ansible_host=192.0.2.9 ansible_connection=local\n"
+    )]
+    listed: &str,
+) {
+    let dir = probe_dir(&format!(
+        "controller-data-{}-{}-{}",
+        ran_as.len(),
+        read_as.len(),
+        listed.len()
+    ));
+    std::fs::write(
+        dir.join("inv.ini"),
+        format!("[web]\nw1 ansible_connection=local\n{listed}"),
+    )
+    .expect("an inventory");
+    std::fs::write(dir.join("text.txt"), "{{ 'MARK' ~ 'ED' }}").expect("the text");
+    let play = format!(
+        "- hosts: \"{ran_as}\"
+  gather_facts: false
+  tasks:
+    - command: cat {dir}/text.txt
+      register: r
+- hosts: w1
+  gather_facts: false
+  vars:
+    from_vars: \"{{{{ hostvars['{read_as}'].r.stdout }}}}\"
+  tasks:
+    - set_fact:
+        copied: \"{{{{ hostvars['{read_as}'].r.stdout }}}}\"
+        whole: \"{{{{ hostvars['{read_as}'].r }}}}\"
+    - debug:
+        msg: \"read={{{{ hostvars['{read_as}'].r.stdout }}}} copied={{{{ copied }}}} vars={{{{ from_vars }}}} whole={{{{ whole.stdout }}}}\"
+",
+        dir = dir.display()
+    );
+    std::fs::write(dir.join("play.yml"), play).expect("the play");
+    let out = volant_within(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            dir.join("play.yml").to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(60),
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stdout}{stderr}");
+    assert!(
+        !stdout.contains("MARKED"),
+        "the text was rendered: {stdout}"
+    );
+    assert!(
+        stdout.contains("read={{ 'MARK' ~ 'ED' }} copied={{ 'MARK' ~ 'ED' }} vars={{ 'MARK' ~ 'ED' }} whole={{ 'MARK' ~ 'ED' }}"),
+        "{stdout}{stderr}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

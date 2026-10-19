@@ -648,3 +648,135 @@ fn what_the_loader_keeps_for_the_preflight() {
         assert_eq!(t.args["_raw_params"], serde_json::json!(action));
     }
 }
+
+/// A playbook of `files` on disk, loaded by its first entry.
+fn load_files(files: &[(&str, &str)]) -> anyhow::Result<Playbook> {
+    let dir = tempfile::tempdir().unwrap();
+    for (name, text) in files {
+        std::fs::write(dir.path().join(name), text).unwrap();
+    }
+    load(&dir.path().join(files[0].0))
+}
+
+const SUB: &str =
+    "- hosts: all\n  tags: [own]\n  vars: {v: own, w: 1}\n  tasks:\n    - debug: {msg: x}\n";
+
+/// An `import_playbook` entry hands its tags, variables and conditions to every imported play;
+/// a `tags` among the variables is taken out, and the fact gathering keeps its own conditions.
+#[test]
+fn an_import_playbook_entry_hands_when_tags_and_vars_to_the_imported_plays() {
+    let pb = load_files(&[
+        (
+            "main.yml",
+            "- import_playbook: sub.yml\n  when: [a, b]\n  tags: x,y\n  vars: {v: imp, tags: z}\n",
+        ),
+        ("sub.yml", SUB),
+    ])
+    .unwrap();
+    let play = &pb.plays[0];
+    assert_eq!(play.tags, ["own", "x", "y", "z"]);
+    assert_eq!(play.vars["v"], "imp");
+    assert_eq!(play.vars["w"], 1);
+    assert!(!play.vars.contains_key("tags"));
+    assert_eq!(play.import_when, ["a", "b"]);
+    assert_eq!(play.gather_when, ["a", "b"]);
+}
+
+/// The names of a `tags` among the vars join only the tags a play wrote, as the reference does.
+#[test]
+fn tags_among_the_vars_of_an_import_need_a_tagged_play() {
+    let sub = "- hosts: all\n  tasks:\n    - debug: {msg: x}\n";
+    let pb = load_files(&[
+        (
+            "main.yml",
+            "- import_playbook: sub.yml\n  vars: {tags: z}\n",
+        ),
+        ("sub.yml", sub),
+    ])
+    .unwrap();
+    assert!(pb.plays[0].tags.is_empty());
+    assert!(!pb.plays[0].vars.contains_key("tags"));
+}
+
+/// Nested imports: every condition reaches the tasks, outermost first, and the gathering takes
+/// the outermost one only.
+#[test]
+fn nested_imports_put_the_outer_condition_first_and_gather_on_the_outermost() {
+    let pb = load_files(&[
+        ("main.yml", "- import_playbook: mid.yml\n  when: outer\n"),
+        ("mid.yml", "- import_playbook: sub.yml\n  when: inner\n"),
+        ("sub.yml", SUB),
+    ])
+    .unwrap();
+    assert_eq!(pb.plays[0].import_when, ["outer", "inner"]);
+    assert_eq!(pb.plays[0].gather_when, ["outer"]);
+    let pb = load_files(&[
+        ("main.yml", "- import_playbook: mid.yml\n"),
+        ("mid.yml", "- import_playbook: sub.yml\n  when: inner\n"),
+        ("sub.yml", SUB),
+    ])
+    .unwrap();
+    assert_eq!(pb.plays[0].gather_when, ["inner"]);
+}
+
+/// What an import entry is refused for, in the reference's words and with its exit code.
+#[rstest]
+#[case::unknown(
+    "  hosts: h1\n",
+    4,
+    "'hosts' is not a valid attribute for a PlaybookInclude"
+)]
+#[case::unknown_gather(
+    "  gather_facts: false\n",
+    4,
+    "'gather_facts' is not a valid attribute for a PlaybookInclude"
+)]
+#[case::vars_list(
+    "  vars: [1]\n",
+    4,
+    "Vars in a PlaybookInclude must be specified as a dictionary."
+)]
+#[case::tags_mapping("  tags: {a: 1}\n", 1, "tags must be specified as a list")]
+#[case::templated_tags(
+    "  tags: ['{{ t }}']\n",
+    4,
+    "'tags' of an 'import_playbook' holds a template"
+)]
+#[case::templated_tags_string("  tags: '{{ t }}'\n", 4, "holds a template")]
+#[case::statement_in_tags("  tags: ['{% if t %}a{% endif %}']\n", 4, "holds a template")]
+#[case::comment_in_tags("  tags: ['a{# b #}']\n", 4, "holds a template")]
+#[case::templated_tags_in_vars("  vars: {tags: '{{ t }}'}\n", 4, "holds a template")]
+#[case::tags_null("  tags:\n", 1, "tags must be specified as a list")]
+#[case::nested_tags(
+    "  tags: [a, [b]]\n",
+    4,
+    "Keyword 'tags' items must be of type 'str' or 'int', not 'list'"
+)]
+#[case::templated_when("  when: '{{ x }}'\n", 4, "holds a template")]
+fn an_import_entry_with_a_bad_keyword_is_refused(
+    #[case] keywords: &str,
+    #[case] code: i32,
+    #[case] message: &str,
+) {
+    let main = format!("- import_playbook: sub.yml\n{keywords}");
+    let err = load_files(&[("main.yml", &main), ("sub.yml", SUB)]).unwrap_err();
+    let refusal = err
+        .chain()
+        .find_map(|e| e.downcast_ref::<crate::stats::Refusal>())
+        .expect("a refusal with an exit code");
+    assert_eq!(refusal.code, code, "{err:#}");
+    assert!(format!("{err:#}").contains(message), "{err:#}");
+}
+
+/// The attributes `PlaybookInclude` has and does nothing with are accepted.
+#[test]
+fn an_import_entry_accepts_the_keywords_it_does_not_pass_on() {
+    load_files(&[
+        (
+            "main.yml",
+            "- name: n\n  import_playbook: sub.yml\n  ignore_errors: true\n  become: true\n  environment: {A: b}\n  no_log: true\n  run_once: true\n",
+        ),
+        ("sub.yml", SUB),
+    ])
+    .unwrap();
+}

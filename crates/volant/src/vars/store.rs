@@ -125,6 +125,7 @@ impl VarStore {
             #[cfg(test)]
             views_built: BTreeMap::new(),
             hostvars_with: BTreeMap::new(),
+            implicit_controller: None,
             untrusted_hosts: None,
             shared: None,
             templated_facts: false,

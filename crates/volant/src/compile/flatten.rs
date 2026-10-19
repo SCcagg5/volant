@@ -208,6 +208,7 @@ pub(crate) fn compile(
     // path to keep in step with this one.
     let empty = PlayTask {
         tags: play.tags.clone(),
+        when: play.import_when.clone(),
         no_log: play.no_log,
         environment: play.environment.clone(),
         module_defaults: play.module_defaults.clone(),
@@ -230,10 +231,10 @@ pub(crate) fn compile(
     // the pre-flight then reads it, the run builds it a payload with every other module the play
     // names, and its result comes back through the one road a result becomes a variable by.
     //
-    // `always` is what the reference tags it, so `--tags deploy` still gathers and
-    // `--skip-tags always` still does not. The play's own keywords come down through `empty` like
-    // any other task's, except `run_once`: facts are the host's own, and gathering them once for
-    // the batch would write one host's hostname onto every host of it.
+    // `always` is what the reference tags it when the play has no tags of its own, so `--tags
+    // deploy` still gathers and `--skip-tags always` still does not. The play's own keywords come
+    // down through `empty` like any other task's, except `run_once`: facts are the host's own, and
+    // gathering them once for the batch would write one host's hostname onto every host of it.
     //
     // Named `ansible.legacy.setup`, as the reference's `gather_facts` plugin runs it: a
     // `library/setup.py` beside the playbook answers the gathering there, measured on
@@ -242,14 +243,16 @@ pub(crate) fn compile(
         name: "Gathering Facts".to_string(),
         named: true,
         module: "ansible.legacy.setup".to_string(),
-        tags: {
-            let mut tags = empty.tags.clone();
-            tags.push("always".to_string());
-            tags.sort();
-            tags.dedup();
-            tags
+        // Measured on ansible-core 2.19.12: `always` only when the play has no tags. A tagged
+        // play gathers when its own tags are selected, and `--tags always` or `--tags other`
+        // leaves it alone.
+        tags: if empty.tags.is_empty() {
+            vec!["always".to_string()]
+        } else {
+            empty.tags.clone()
         },
         run_once: None,
+        when: play.gather_when.clone(),
         args: gather_args(play),
         origin: play.origin.clone(),
         ..empty.clone()
