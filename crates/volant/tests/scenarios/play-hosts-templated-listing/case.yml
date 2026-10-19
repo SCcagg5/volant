@@ -1,0 +1,14 @@
+# The listing commands render `hosts` too, against the groups, the extra variables and the play's own
+# variables. A play with no name is named by the rendered pattern, a list result is a list of
+# patterns, and an undefined variable stops the listing with exit 4.
+runs:
+  - args: [-i, inventory.ini, --list-hosts, listed.yml]
+  - args: [-i, inventory.ini, --list-tasks, listed.yml]
+  - args: [-i, inventory.ini, --list-hosts, listed.yml, -e, pick=s1]
+  - args: [-i, inventory.ini, --list-hosts, listed.yml, --limit, nosuch]
+  - args: [-i, inventory.ini, --list-hosts, empty.yml]
+  - args: [-i, inventory.ini, --list-hosts, undefined.yml]
+  - args: [-i, inventory.ini, --list-tasks, undefined.yml]
+  - args: [-i, inventory.ini, --syntax-check, undefined.yml]
+  - args: [-i, inventory.ini, --syntax-check, listed.yml]
+  - args: [-i, inventory.ini, --list-hosts, imported.yml]

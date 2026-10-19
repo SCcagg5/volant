@@ -1,0 +1,9 @@
+- hosts: "{{ groups['nosuchgroup'] | default([]) }}"
+  gather_facts: false
+  tasks: []
+
+- hosts: "{{ hostvars['s1']['team'] }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }}"

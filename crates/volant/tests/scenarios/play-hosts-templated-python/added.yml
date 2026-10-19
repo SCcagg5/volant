@@ -1,0 +1,23 @@
+- hosts: s1
+  gather_facts: false
+  tasks:
+    - add_host:
+        name: dyn1
+        groups: dyn
+        ansible_connection: local
+        pick: dyn1
+      changed_when: false
+
+- name: A group add_host made
+  hosts: "{{ groups['dyn'] }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ ansible_play_hosts_all }}"
+
+- name: A variable of the added host
+  hosts: "{{ hostvars['dyn1']['pick'] }}"
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }}"

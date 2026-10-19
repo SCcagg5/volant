@@ -1,0 +1,9 @@
+# The `hosts` of a play is rendered when that play starts, so it sees what the plays before it did:
+# a `set_fact`, a registered result and a `meta: refresh_inventory`. Text a host sent back is
+# data: a pattern built from it matches by its words and is never evaluated.
+runs:
+  - args: [-i, inventory.ini, facts.yml]
+  - args: [-i, inventory.ini, -i, extra.ini, refresh.yml]
+  - args: [-i, inventory.ini, -i, extra.ini, no_refresh.yml]
+  - args: [-i, inventory.ini, registered.yml]
+  - args: [-i, inventory.ini, listed_text.yml]
