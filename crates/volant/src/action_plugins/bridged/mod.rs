@@ -19,7 +19,7 @@ use serde_json::{Map, Value, json};
 use tokio::sync::Notify;
 use volant_protocol::TaskResult;
 
-use super::files::refuse_host_named;
+use super::files::check_host_named;
 use super::{Context, Plugin, Step, Sub, lost};
 use crate::bridge::{Ask, BridgeError, Reply};
 
@@ -124,9 +124,29 @@ pub(super) fn start(
     ctx: Context<'_>,
 ) -> Box<dyn Plugin> {
     // `find_needle` lets ansible-core's plugins read any controller file a `src` or a script's
-    // line names, and put it on the host: a name a managed host chose is never followed.
+    // line names, and put it on the host: a name a managed host chose is followed as far as
+    // `host_named_paths` allows. A script's file is the first word of its line.
     for arg in ["src", "_raw_params"] {
-        if let Err(msg) = refuse_host_named(ctx.args_untrusted, arg) {
+        let text = ctx
+            .args
+            .get(arg)
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let named = if arg == "src" {
+            text.to_string()
+        } else {
+            shlex::split(text)
+                .and_then(|words| words.into_iter().next())
+                .unwrap_or_default()
+        };
+        if let Err(msg) = check_host_named(
+            ctx.host_named_paths,
+            ctx.args_untrusted,
+            arg,
+            &named,
+            ctx.origin,
+            ctx.playbook_dir,
+        ) {
             return super::copy::failing(msg);
         }
     }

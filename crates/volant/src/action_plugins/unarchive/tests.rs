@@ -6,6 +6,7 @@ use serde_json::json;
 
 use super::*;
 use crate::action_plugins::files::MAX_FILE_LEN;
+use crate::config::HostNamedPaths;
 use crate::testing::scratch;
 
 /// A scratch directory holding `files/` and an existing `dest/`.
@@ -17,6 +18,16 @@ fn layout() -> tempfile::TempDir {
 }
 
 fn start_in(
+    args: &Map<String, Value>,
+    untrusted: &BTreeSet<String>,
+    dir: &Path,
+) -> Box<dyn Plugin> {
+    start_mode(HostNamedPaths::Refuse, args, untrusted, dir)
+}
+
+/// [`start_in`] under the `host_named_paths` mode `mode`.
+fn start_mode(
+    mode: HostNamedPaths,
     args: &Map<String, Value>,
     untrusted: &BTreeSet<String>,
     dir: &Path,
@@ -41,6 +52,7 @@ fn start_in(
         templar: &templar,
         origin: &origin,
         playbook_dir: dir,
+        host_named_paths: mode,
         warnings: &mut warnings,
 
         environment: None,
@@ -140,6 +152,51 @@ fn a_source_a_host_named_is_never_read() {
             "{}",
             named.display()
         );
+    }
+}
+
+/// A `src` a managed host named is read as the mode says: only `refuse`, and `contained` for a
+/// name that leaves the directories, stop before the file is looked up. An archive that is read
+/// is staged for the module.
+#[rstest::rstest]
+#[case::allow_inside(HostNamedPaths::Allow, "bundle.tar.gz", true)]
+#[case::allow_climbing(HostNamedPaths::Allow, "../bundle.tar.gz", true)]
+#[case::contained_inside(HostNamedPaths::Contained, "bundle.tar.gz", true)]
+#[case::contained_climbing(HostNamedPaths::Contained, "../bundle.tar.gz", false)]
+#[case::refuse_inside(HostNamedPaths::Refuse, "bundle.tar.gz", false)]
+fn a_source_a_host_named_is_read_as_the_mode_says(
+    #[case] mode: HostNamedPaths,
+    #[case] name: &str,
+    #[case] read: bool,
+) {
+    let dir_guard = layout();
+    let play = dir_guard.path().join("play");
+    std::fs::create_dir_all(play.join("files")).unwrap();
+    std::fs::create_dir_all(play.join("dest")).unwrap();
+    std::fs::write(play.join("files/bundle.tar.gz"), b"in").unwrap();
+    std::fs::write(dir_guard.path().join("bundle.tar.gz"), b"out").unwrap();
+    let mut task_args = Map::new();
+    task_args.insert("src".into(), json!(name));
+    task_args.insert(
+        "dest".into(),
+        json!(play.join("dest").display().to_string()),
+    );
+    let untrusted: BTreeSet<String> = ["src".to_string()].into();
+    let mut plugin = start_mode(mode, &task_args, &untrusted, &play);
+    run(plugin.as_mut(), None);
+    let step = plugin.next(Some(TaskResult(
+        json!({"stat": {"exists": true, "isdir": true}})
+            .as_object()
+            .unwrap()
+            .clone(),
+    )));
+    match (step, read) {
+        (Step::Run(sub), true) => assert_eq!(sub.module, "unarchive"),
+        (Step::Done(result), false) => {
+            let msg = result.0["msg"].as_str().unwrap();
+            assert!(msg.contains("named by a managed host"), "{msg}");
+        }
+        (other, _) => panic!("{name}: read={read}, step {other:?}"),
     }
 }
 

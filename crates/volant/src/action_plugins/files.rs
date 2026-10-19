@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Where a task's controller file is found, and how its bytes travel to the host.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use volant_protocol::encoding::b64_encode;
 use volant_protocol::frame::MAX_FRAME_LEN;
@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 
 use super::FileBlob;
 use crate::compile::Origin;
+use crate::config::HostNamedPaths;
 
 /// The largest file one blob carries: one frame, which holds the blob's bytes alone, raw or
 /// deflated to fewer.
@@ -54,20 +55,57 @@ pub(crate) fn not_found(name: &str, searched: &[PathBuf]) -> String {
     )
 }
 
-/// This engine's own refusal of a controller path a managed host chose, made before the path is
-/// so much as looked up: a lookup that answers "not found" already tells a host whether a
-/// controller path exists.
+/// What `host_named_paths` says about a controller source `name` that `untrusted` lists `arg`
+/// as named by a managed host, made before the path is so much as looked up: a lookup that
+/// answers "not found" already tells a host whether a controller path exists.
 ///
-/// Stricter than the reference, on purpose. Measured on ansible-core 2.19.12, the reference
-/// sends whatever controller file a registered value names, `~/.ssh` included, so a host that
-/// controls a command's output can have any file the operator can read sent to it.
-pub(crate) fn refuse_host_named(untrusted: &BTreeSet<String>, arg: &str) -> Result<(), String> {
-    if untrusted.contains(arg) {
-        return Err(format!(
-            "the '{arg}' of this task was named by a managed host, and a controller file a host chose is never sent"
-        ));
+/// Measured on ansible-core 2.19.12, the reference sends whatever controller file a registered
+/// value or a gathered fact names, `~/.ssh` included, so a host that controls a command's output
+/// can have any file the operator can read sent to it. `Allow` does the same. `Refuse` refuses
+/// every such name. `Contained` accepts a name that stays inside the directories where the
+/// author keeps the files of the task, which are the ones [`search_paths`] looks in: it has no
+/// `..` component, and an absolute one lies under one of them. The check reads the text of the
+/// path. A link the author put inside those directories is the author's own file and is followed.
+pub(crate) fn check_host_named(
+    mode: HostNamedPaths,
+    untrusted: &BTreeSet<String>,
+    arg: &str,
+    name: &str,
+    origin: &Origin,
+    playbook_dir: &Path,
+) -> Result<(), String> {
+    if !untrusted.contains(arg) {
+        return Ok(());
     }
-    Ok(())
+    match mode {
+        HostNamedPaths::Allow => Ok(()),
+        HostNamedPaths::Refuse => Err(format!(
+            "the '{arg}' of this task was named by a managed host, and a controller file a host chose is never sent"
+        )),
+        HostNamedPaths::Contained => {
+            if inside_task_directories(origin, playbook_dir, name) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "the '{arg}' of this task was named by a managed host, and '{name}' is not inside the directories of the playbook or the role (host_named_paths = contained)"
+                ))
+            }
+        }
+    }
+}
+
+/// Whether `name` stays under the directories [`search_paths`] looks in: a relative name is
+/// joined to one of them, so it is inside unless it climbs out with `..`.
+fn inside_task_directories(origin: &Origin, playbook_dir: &Path, name: &str) -> bool {
+    let named = Path::new(name);
+    if named.components().any(|c| c == Component::ParentDir) {
+        return false;
+    }
+    !named.is_absolute()
+        || origin
+            .search_dirs()
+            .chain([playbook_dir])
+            .any(|base| named.starts_with(base))
 }
 
 #[cfg(test)]

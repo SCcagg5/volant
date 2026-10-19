@@ -6,7 +6,7 @@
 //! `copy:` is translated to `remote_src` (the two together refused); `src` and `dest` are
 //! required; a `creates` that already exists on the host skips the task before anything else is
 //! touched; the destination must exist and be a directory; the source is searched, refused if a
-//! host named it, and read, unless `remote_src`; the module then runs with the task's arguments,
+//! host named it and `host_named_paths` says so, and read, unless `remote_src`; the module then runs with the task's arguments,
 //! `decrypt` removed, and the transferred source in `src`.
 //!
 //! `creates` and `dest` are host paths the reference expands with a leading `~` before it asks
@@ -22,9 +22,10 @@ use serde_json::{Map, Value};
 use volant_protocol::TaskResult;
 
 use super::copy::{failing, stat, stat_of};
-use super::files::{blob_of, fits, not_found, refuse_host_named, search_paths};
+use super::files::{blob_of, check_host_named, fits, not_found, search_paths};
 use super::{Context, Plugin, Step, Sub, lost};
 use crate::compile::Origin;
+use crate::config::HostNamedPaths;
 use crate::executor::as_bool_value;
 
 fn flag(args: &Map<String, Value>, name: &str, default: bool) -> bool {
@@ -70,6 +71,7 @@ struct Unarchive {
     creates: Option<String>,
     remote_src: bool,
     untrusted: BTreeSet<String>,
+    host_named_paths: HostNamedPaths,
     origin: Origin,
     playbook_dir: std::path::PathBuf,
     state: State,
@@ -109,6 +111,7 @@ impl Unarchive {
             creates,
             remote_src,
             untrusted: ctx.args_untrusted.clone(),
+            host_named_paths: ctx.host_named_paths,
             origin: ctx.origin.clone(),
             playbook_dir: ctx.playbook_dir.to_path_buf(),
             state: State::Start,
@@ -124,10 +127,17 @@ impl Unarchive {
             self.state = State::Module;
             return Sub::run("unarchive", args);
         }
-        if let Err(msg) = refuse_host_named(&self.untrusted, "src") {
+        let src = self.args.get("src").and_then(Value::as_str).unwrap_or("");
+        if let Err(msg) = check_host_named(
+            self.host_named_paths,
+            &self.untrusted,
+            "src",
+            src,
+            &self.origin,
+            &self.playbook_dir,
+        ) {
             return Step::Done(TaskResult::failed_with(msg));
         }
-        let src = self.args.get("src").and_then(Value::as_str).unwrap_or("");
         let searched = search_paths(&self.origin, &self.playbook_dir, "files", src);
         let Some(found) = searched.iter().find(|p| p.exists()) else {
             return Step::Done(TaskResult::failed_with(format!(

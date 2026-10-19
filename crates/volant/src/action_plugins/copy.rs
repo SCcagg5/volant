@@ -7,16 +7,16 @@
 //! right, or stages the bytes on the host and runs `copy` on them. Only that last branch sends
 //! anything: a destination that is already right receives nothing.
 //!
-//! One refusal is this engine's own, and stricter than the reference: a `src` whose render read
-//! a managed host is never looked up. Measured, the reference copies whatever controller file a
-//! registered value names, so a host that controls a command's output can have any file the
-//! operator can read sent to it.
+//! A `src` whose render read a managed host is looked up as the reference looks it up, unless
+//! `[volant] host_named_paths` says otherwise. Measured, the reference copies whatever controller
+//! file a registered value names, so a host that controls a command's output can have any file
+//! the operator can read sent to it: see `files::check_host_named` for the two stricter modes.
 
 use serde_json::{Map, Value};
 use volant_protocol::TaskResult;
 use volant_protocol::encoding::sha1_hex;
 
-use super::files::{blob_of, fits, not_found, refuse_host_named, search_paths};
+use super::files::{blob_of, check_host_named, fits, not_found, search_paths};
 use super::{Context, Plugin, Step, Sub, lost};
 use crate::executor::as_bool_value;
 
@@ -125,7 +125,14 @@ fn source(ctx: &Context<'_>) -> Result<Option<CopyOf>, String> {
     if flag(args, "remote_src", false) {
         return Ok(None);
     }
-    refuse_host_named(ctx.args_untrusted, "src")?;
+    check_host_named(
+        ctx.host_named_paths,
+        ctx.args_untrusted,
+        "src",
+        src,
+        ctx.origin,
+        ctx.playbook_dir,
+    )?;
     let searched = search_paths(ctx.origin, ctx.playbook_dir, "files", src);
     let Some(found) = searched.iter().find(|p| p.exists()) else {
         return Err(format!(

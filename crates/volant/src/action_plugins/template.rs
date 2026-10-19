@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 use serde_json::{Map, Value};
 
 use super::copy::{CopyOf, copy_bytes, failing, local_mode};
-use super::files::{not_found, refuse_host_named, search_paths};
+use super::files::{check_host_named, not_found, search_paths};
 use super::{Context, Plugin};
 use crate::executor::as_bool_value;
 use crate::template::{FileRender, Vars};
@@ -68,10 +68,9 @@ fn flag(args: &Map<String, Value>, name: &str, default: bool) -> bool {
 
 /// A copy of the item's variables, its provenance kept, with the four the plugin adds.
 ///
-/// `ansible_managed`, `template_path` and `template_fullpath` are the controller's own words: a
-/// `src` whose render read a host is refused before this is reached, so the path found cannot be
-/// one a host chose. `template_destpath` is the `dest` as rendered, and stays a host's value when
-/// its render read one.
+/// `ansible_managed` is the controller's own word. `template_path` and `template_fullpath` are a
+/// host's value when the `src` render read one, and so is `template_destpath` when the `dest`
+/// render did: a template that prints one gets the text, and the text is never rendered again.
 fn template_vars(
     item_vars: &HostVars,
     args_untrusted: &BTreeSet<String>,
@@ -83,8 +82,13 @@ fn template_vars(
     if vars.get("ansible_managed").is_none() {
         vars.insert("ansible_managed".into(), Value::from("Ansible managed"));
     }
-    vars.insert("template_path".into(), Value::from(src));
-    vars.insert("template_fullpath".into(), Value::from(fullpath));
+    if args_untrusted.contains("src") {
+        vars.insert_untrusted("template_path".into(), Value::from(src));
+        vars.insert_untrusted("template_fullpath".into(), Value::from(fullpath));
+    } else {
+        vars.insert("template_path".into(), Value::from(src));
+        vars.insert("template_fullpath".into(), Value::from(fullpath));
+    }
     if args_untrusted.contains("dest") {
         vars.insert_untrusted("template_destpath".into(), Value::from(dest));
     } else {
@@ -128,7 +132,14 @@ fn rendered(ctx: &Context<'_>) -> Result<CopyOf, String> {
             "output_encoding '{encoding}' is not supported yet on 'template': only utf-8 is"
         ));
     }
-    refuse_host_named(ctx.args_untrusted, "src")?;
+    check_host_named(
+        ctx.host_named_paths,
+        ctx.args_untrusted,
+        "src",
+        &src,
+        ctx.origin,
+        ctx.playbook_dir,
+    )?;
     let searched = search_paths(ctx.origin, ctx.playbook_dir, "templates", &src);
     let Some(found) = searched.iter().find(|p| p.exists()) else {
         return Err(not_found(&src, &searched));

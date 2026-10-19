@@ -2,6 +2,7 @@
 use super::helpers::{command_reply, plain_path};
 use super::*;
 use crate::action_plugins::LinkFacts;
+use crate::config::HostNamedPaths;
 
 /// A command's reply carries its return code and both streams, and one with none is an error.
 #[test]
@@ -33,20 +34,21 @@ fn a_temporary_directory_is_one_plain_absolute_path(#[case] path: &str, #[case] 
     assert_eq!(plain_path(path), ok);
 }
 
-/// The arguments of a free-form `script` and an `assemble` source are never a controller file
-/// a managed host named: the item fails before the helper is asked for anything.
-#[rstest::rstest]
-#[case::script("script", "_raw_params")]
-#[case::assemble("assemble", "src")]
-fn a_host_named_controller_file_is_refused(#[case] name: &'static str, #[case] arg: &str) {
+/// Starts the plugin `name` with `arg` set to `text`, the whole of it named by a managed host.
+fn start_naming(
+    mode: HostNamedPaths,
+    name: &'static str,
+    arg: &str,
+    text: &str,
+) -> Box<dyn Plugin> {
     let mut args = Map::new();
-    args.insert(arg.into(), json!("/etc/passwd"));
+    args.insert(arg.into(), json!(text));
     let untrusted = std::iter::once(arg.to_string()).collect();
     let running = crate::vars::HostVars::default();
     let templar = crate::template::Templar::new(std::path::PathBuf::from("."));
     let origin = crate::compile::Origin::default();
     let mut warnings = Vec::new();
-    let mut plugin = start(
+    start(
         name,
         &[],
         Context {
@@ -60,7 +62,8 @@ fn a_host_named_controller_file_is_refused(#[case] name: &'static str, #[case] a
             item_vars: &running,
             templar: &templar,
             origin: &origin,
-            playbook_dir: std::path::Path::new("."),
+            playbook_dir: std::path::Path::new("/pb"),
+            host_named_paths: mode,
             warnings: &mut warnings,
             environment: None,
             timeout: None,
@@ -68,16 +71,94 @@ fn a_host_named_controller_file_is_refused(#[case] name: &'static str, #[case] a
             diff: false,
             async_val: 0,
         },
-    );
+    )
+}
+
+/// The message of an item that fails at once.
+fn failure(mut plugin: Box<dyn Plugin>) -> String {
     let Step::Done(result) = plugin.next(None) else {
         panic!("the item should fail at once");
     };
     assert!(result.failed());
-    assert!(
-        result.0["msg"].as_str().unwrap().contains(arg),
-        "{:?}",
-        result.0
-    );
+    result.0["msg"].as_str().unwrap().to_string()
+}
+
+/// The arguments of a free-form `script` and an `assemble` source are never a controller file
+/// a managed host named under `refuse`: the item fails before the helper is asked for anything.
+#[rstest::rstest]
+#[case::script("script", "_raw_params")]
+#[case::assemble("assemble", "src")]
+fn a_host_named_controller_file_is_refused(#[case] name: &'static str, #[case] arg: &str) {
+    let msg = failure(start_naming(
+        HostNamedPaths::Refuse,
+        name,
+        arg,
+        "/etc/passwd",
+    ));
+    assert!(msg.contains(&format!(
+        "the '{arg}' of this task was named by a managed host"
+    )));
+}
+
+/// Under `allow` and `contained` the name goes on to the plugin, which here fails for want of
+/// the helper; `contained` stops a name that leaves the task's directories, and for a script
+/// reads the first word of the line.
+#[rstest::rstest]
+#[case::script_allowed(
+    HostNamedPaths::Allow,
+    "script",
+    "_raw_params",
+    "/etc/passwd --flag",
+    None
+)]
+#[case::script_inside(
+    HostNamedPaths::Contained,
+    "script",
+    "_raw_params",
+    "tool.sh --flag ../x",
+    None
+)]
+#[case::script_outside(
+    HostNamedPaths::Contained,
+    "script",
+    "_raw_params",
+    "/etc/passwd --flag",
+    Some("'/etc/passwd' is not inside")
+)]
+#[case::script_quoted(
+    HostNamedPaths::Contained,
+    "script",
+    "_raw_params",
+    "'../up.sh' arg",
+    Some("'../up.sh' is not inside")
+)]
+#[case::assemble_allowed(HostNamedPaths::Allow, "assemble", "src", "../parts", None)]
+#[case::assemble_inside(HostNamedPaths::Contained, "assemble", "src", "parts", None)]
+#[case::assemble_outside(
+    HostNamedPaths::Contained,
+    "assemble",
+    "src",
+    "../parts",
+    Some("'../parts' is not inside")
+)]
+fn a_host_named_controller_file_is_read_as_the_mode_says(
+    #[case] mode: HostNamedPaths,
+    #[case] name: &'static str,
+    #[case] arg: &str,
+    #[case] text: &str,
+    #[case] refused: Option<&str>,
+) {
+    let msg = failure(start_naming(mode, name, arg, text));
+    match refused {
+        Some(says) => assert!(
+            msg.contains("named by a managed host") && msg.contains(says),
+            "{msg}"
+        ),
+        None => assert!(
+            msg.contains("needs the controller's Python helper"),
+            "{msg}"
+        ),
+    }
 }
 
 /// A ping whose link went reaches the plugin as an error, and the next ping is asked over a
@@ -226,6 +307,7 @@ fn the_play_context_describes_the_link_the_module_runs_over(
         origin: &origin,
         playbook_dir: std::path::Path::new("."),
         warnings: &mut warnings,
+        host_named_paths: HostNamedPaths::Allow,
         environment: None,
         timeout: None,
         check_mode: false,

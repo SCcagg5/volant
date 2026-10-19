@@ -61,6 +61,9 @@ pub struct RunOptions {
     /// between two synchronisation points. Off by default, so the hosts of a batch meet in front
     /// of every task, which is what `linear` means.
     pub batching: bool,
+    /// `[volant] host_named_paths`, or `VOLANT_HOST_NAMED_PATHS`: what a task that reads a
+    /// controller file does when a managed host named the file.
+    pub host_named_paths: crate::config::HostNamedPaths,
     /// Where the sockets of the shared `ssh` connections live, from
     /// [`crate::transport::control_dir`]; `None` when `[volant] ssh_control_master` is off or no
     /// safe directory exists, and every `ssh` then opens its own connection.
