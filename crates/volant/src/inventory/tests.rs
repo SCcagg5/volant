@@ -85,6 +85,11 @@ fn a_host_variable_comes_from_the_layer_that_wins(
 #[case::negative_index("web[-1]", &["web2"])]
 #[case::slice("web[0:1]", &["web1", "web2"])]
 #[case::out_of_range_selects_nothing("web[12]", &[])]
+#[case::end_is_the_largest_integer("web[0:9223372036854775807]", &["web1", "web2"])]
+#[case::deprecated_end_is_the_largest_integer("web[1-9223372036854775807]", &["web2"])]
+#[case::end_beyond_sixty_four_bits("web[0:99999999999999999999]", &["web1", "web2"])]
+#[case::start_beyond_sixty_four_bits("web[99999999999999999999:]", &[])]
+#[case::a_zero_end_is_one_index("web[1:0]", &["web2"])]
 fn a_pattern_selects_in_inventory_order(#[case] pattern: &str, #[case] want: &[&str]) {
     let inv = Inventory::parse_ini(SAMPLE).unwrap();
     assert_eq!(names(&inv.resolve(pattern).hosts), want, "{pattern}");

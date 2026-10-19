@@ -11,6 +11,9 @@ use rstest::rstest;
 #[path = "common/process.rs"]
 mod process;
 
+#[path = "common/python.rs"]
+mod python;
+
 const INVENTORY: &str = "[servers]\ns1\ns2\n\n[web]\nw1\n\n[all:vars]\nansible_connection=local\nansible_python_interpreter=/usr/bin/python3\n";
 
 /// One play over `hosts` that prints the host it runs on.
@@ -22,25 +25,43 @@ fn play(hosts: &str) -> String {
 
 /// Runs volant over `playbook` and `INVENTORY` in a fresh directory: exit code, stdout, stderr.
 fn run(name: &str, playbook: &str, args: &[&str]) -> (i32, String, String) {
+    let dir = fresh(name, playbook);
+    let out = run_in(&dir, args, None);
+    let _ = std::fs::remove_dir_all(&dir);
+    out
+}
+
+fn fresh(name: &str, playbook: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("volant-play-hosts-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("the directory is made");
     std::fs::write(dir.join("inventory.ini"), INVENTORY).expect("the inventory is written");
     std::fs::write(dir.join("site.yml"), playbook).expect("the playbook is written");
+    dir
+}
+
+/// Runs volant in `dir`, with `python` as the controller's interpreter when there is one.
+fn run_in(
+    dir: &std::path::Path,
+    args: &[&str],
+    python: Option<&std::path::Path>,
+) -> (i32, String, String) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_volant"));
     command
         .arg("playbook")
         .args(["-i", "inventory.ini"])
         .args(args)
         .arg("site.yml")
-        .current_dir(&dir)
+        .current_dir(dir)
         .stdin(std::process::Stdio::null())
         .env("NO_COLOR", "1")
         .env_remove("VIRTUAL_ENV")
         .env_remove("VOLANT_PYTHON")
         .env("VOLANT_RUNTIME", "system");
+    if let Some(python) = python {
+        command.env("VOLANT_PYTHON", python);
+    }
     let out = process::run_within(&mut command, std::time::Duration::from_secs(120), None);
-    let _ = std::fs::remove_dir_all(&dir);
     (
         out.status.code().expect("the run ends with a code"),
         String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -189,5 +210,118 @@ fn a_registered_result_that_holds_a_template_is_not_evaluated() {
     assert!(
         stderr.contains("Could not match supplied host pattern, ignoring: {{\"w1\"}}"),
         "{stderr}"
+    );
+}
+
+/// A play 2 that reads the inventory's names, after a play 1 whose `add_host` took its host name
+/// from a command's output. The output holds a template that touches `marker` when it is
+/// evaluated. A host name from host text is data, whichever way the pattern reads it.
+fn add_host_playbook(marker: &std::path::Path, hosts: &str) -> String {
+    format!(
+        "- hosts: s1\n  gather_facts: false\n  tasks:\n    - shell: printf '%s%s' '{{' '{{lookup(\"pipe\",\"touch${{IFS}}{}\")}}}}'\n      register: r\n    - add_host:\n        name: \"{{{{ r.stdout }}}}\"\n        groups: made\n        ansible_connection: local\n\n- hosts: \"{hosts}\"\n  gather_facts: false\n  tasks:\n    - debug:\n        msg: second\n",
+        marker.display()
+    )
+}
+
+#[rstest]
+#[case::groups("{{ groups['all'] | join(',') }}")]
+#[case::group_made("{{ groups['made'] | join(',') }}")]
+#[case::play_hosts_all("{{ ansible_play_hosts_all | join(',') }}")]
+#[case::play_hosts("{{ ansible_play_hosts | join(',') }}")]
+#[case::hostvars("{{ hostvars | list | join(',') }}")]
+#[case::lookup("{{ lookup('inventory_hostnames', 'all') | join(',') }}")]
+fn a_host_name_made_from_host_text_is_not_evaluated(#[case] hosts: &str) {
+    let Some(python) = python::reference_python() else {
+        return;
+    };
+    let dir = fresh("added", "");
+    let marker = dir.join("PWN");
+    std::fs::write(dir.join("site.yml"), add_host_playbook(&marker, hosts)).expect("written");
+    let (code, stdout, stderr) = run_in(&dir, &[], Some(&python));
+    let evaluated = marker.exists();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        !evaluated,
+        "the name was evaluated ({code}):\n{stdout}\n{stderr}"
+    );
+}
+
+/// The same play 2, written by the author with a template that runs a command: it runs, which
+/// shows the test above would see a marker.
+#[test]
+fn a_template_the_author_wrote_in_hosts_is_evaluated() {
+    let dir = fresh("author", "");
+    let marker = dir.join("PWN");
+    let playbook = format!(
+        "- hosts: \"{{{{ lookup('pipe', 'touch {}') }}}}\"\n  gather_facts: false\n  tasks: []\n",
+        marker.display()
+    );
+    std::fs::write(dir.join("site.yml"), playbook).expect("written");
+    let (code, stdout, stderr) = run_in(&dir, &[], None);
+    let made = marker.exists();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        made,
+        "the author's template did not run ({code}):\n{stdout}\n{stderr}"
+    );
+}
+
+/// A pattern made of host text is a pattern, whatever its subscript says: a range that ends at the
+/// largest integer used to overflow in a debug build.
+#[rstest]
+#[case::end_is_the_largest_integer("servers[0:9223372036854775807]", "ran s1")]
+#[case::deprecated_form("servers[1-9223372036854775807]", "ran s2")]
+fn a_huge_subscript_selects_what_it_covers(#[case] hosts: &str, #[case] ran: &str) {
+    let (code, stdout, stderr) = run("subscript", &play(hosts), &[]);
+    assert_eq!(code, 0, "{stdout}\n{stderr}");
+    assert!(stdout.contains(ran), "{stdout}");
+}
+
+/// A play named with an empty string prints the banner the engine always printed for it.
+#[test]
+fn an_empty_name_keeps_its_banner() {
+    let playbook = "- name: \"\"\n  hosts: s1\n  gather_facts: false\n  tasks: []\n";
+    let (code, stdout, stderr) = run("empty-name", playbook, &[]);
+    assert_eq!(code, 0, "{stdout}\n{stderr}");
+    assert!(stdout.contains("PLAY [] ***"), "{stdout}");
+}
+
+/// Variables that name each other in a ring never settle: the reference refuses the play.
+#[test]
+fn variables_that_name_each_other_are_refused() {
+    let playbook = "- hosts: \"{{ a }}\"\n  gather_facts: false\n  vars:\n    a: \"{{ b }}\"\n    b: \"{{ a }}\"\n  tasks: []\n";
+    let (code, stdout, stderr) = run("ring", playbook, &[]);
+    assert_eq!(code, 4, "{stdout}\n{stderr}");
+    assert!(!stdout.contains("PLAY ["), "{stdout}");
+}
+
+/// Under a terminal, a pause that waits for a prompt and a time is refused before the first
+/// connection, whether the hosts are written out or come from a template.
+#[cfg(target_os = "linux")]
+#[rstest]
+#[case::literal("s1")]
+#[case::templated("{{ groups['servers'] | first }}")]
+fn a_pause_that_cannot_wait_is_refused_before_the_run(#[case] hosts: &str) {
+    let playbook = format!(
+        "- hosts: \"{hosts}\"\n  gather_facts: false\n  tasks:\n    - pause:\n        prompt: go\n        seconds: 1\n"
+    );
+    let dir = fresh("pause", &playbook);
+    let command = format!(
+        "'{}' playbook -i inventory.ini site.yml",
+        env!("CARGO_BIN_EXE_volant")
+    );
+    let mut script = Command::new("script");
+    script
+        .args(["-qec", &command, "/dev/null"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .env("VOLANT_RUNTIME", "system");
+    let out = process::run_within(&mut script, std::time::Duration::from_secs(60), None);
+    let _ = std::fs::remove_dir_all(&dir);
+    let text = String::from_utf8_lossy(&out.stdout).replace('\r', "");
+    assert!(text.contains("cannot wait for a prompt"), "{text}");
+    assert!(
+        !text.contains("PLAY ["),
+        "refused before the first banner: {text}"
     );
 }
