@@ -55,6 +55,7 @@ pub(in crate::executor) async fn announce_retry(
     left: u32,
     result: TaskResult,
 ) {
+    let censored = task.censors() || super::output::asks_to_be_hidden(&result);
     let _ = tx
         .send(crate::executor::coordinator::Event::Retrying {
             host: host.to_string(),
@@ -62,7 +63,7 @@ pub(in crate::executor) async fn announce_retry(
             name,
             left,
             result,
-            censored: task.censors(),
+            censored,
         })
         .await;
 }

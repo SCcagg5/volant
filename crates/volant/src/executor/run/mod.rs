@@ -32,6 +32,7 @@ pub(super) use interpreter::{
 pub(super) use judge::{break_after, broke_before, empty_loop_result, finish, loops};
 pub(super) use links::reuse_or_connect;
 pub(super) use local::{run_local, set_fact_names};
+pub(super) use output::asks_to_be_hidden;
 pub(super) use output::classify;
 pub(crate) use output::{RAISED_SKIP, drop_internal_keys};
 #[cfg(test)]
