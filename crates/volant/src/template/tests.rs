@@ -241,6 +241,41 @@ fn hostvars_answers_alike_from_a_map_a_view_or_a_bare_map() {
     }
 }
 
+/// `hostvars` answers for a controller spelling the inventory does not list, and an iteration,
+/// a length and `in` over the listed hosts leave it out, as in ansible-core 2.19.12.
+#[rstest::rstest]
+#[case::implicit_is_read_by_name("{{ hostvars['localhost'].inventory_hostname }}", json!("localhost"))]
+#[case::implicit_is_a_member("{{ 'localhost' in hostvars }}", json!(true))]
+#[case::another_spelling_is_a_member("{{ '::1' in hostvars }}", json!(true))]
+#[case::an_unknown_name_is_not("{{ 'nosuch' in hostvars }}", json!(false))]
+#[case::iteration_lists_the_inventory("{{ hostvars | list }}", json!(["h1"]))]
+#[case::length_counts_the_inventory("{{ hostvars | length }}", json!(1))]
+#[case::keys_list_the_inventory("{{ hostvars.keys() | list }}", json!(["h1"]))]
+fn hostvars_hides_the_unlisted_controller_from_iteration(
+    #[case] source: &str,
+    #[case] want: Value,
+) {
+    let t = templar();
+    let hosts = Arc::new(vars(json!({
+        "h1": {"inventory_hostname": "h1"},
+        "localhost": {"inventory_hostname": "localhost"},
+        "127.0.0.1": {"inventory_hostname": "localhost"},
+        "::1": {"inventory_hostname": "localhost"}
+    })));
+    let shared = Arc::new(vars(json!({"groups": {"all": ["h1"]}})));
+    let own = Map::new();
+    let vars = Vars {
+        map: &own,
+        hostvars: Some(&hosts),
+        shared: Some(&shared),
+        facts: None,
+        untrusted: None,
+        untrusted_hosts: None,
+        base: None,
+    };
+    assert_eq!(t.render(source, vars).unwrap(), want, "{source}");
+}
+
 /// The context hands out the shared view itself, builds it once, ranks inventory-wide names over
 /// a fact and lists a shared name once.
 #[test]

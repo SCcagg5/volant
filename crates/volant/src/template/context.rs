@@ -13,6 +13,7 @@ use super::env::chained_attr;
 use super::{
     ATTR_KEY, CONCAT_KEY, CONTEXT_KEY, HOSTVARS_KEYS, ITEM_KEY, QUERY_KEY, TAINT_KEY, Tainted,
 };
+use crate::inventory::is_localhost;
 
 /// The name, in the variables an extended loop shares between its items, under which the list of
 /// all the items is kept once. It is no variable: a render never finds it by name, it reads it
@@ -257,6 +258,7 @@ impl Object for Context {
             {
                 return Some(minijinja::Value::from_object(Hostvars {
                     hosts: Arc::clone(hostvars),
+                    listed: self.shared.clone(),
                     untrusted_hosts: self.untrusted_hosts.clone(),
                     keys_untrusted: self.untrusted.contains(HOSTVARS_KEYS),
                     tainted: Arc::clone(&self.tainted),
@@ -333,6 +335,10 @@ impl Object for Context {
 #[derive(Debug)]
 pub(super) struct Hostvars {
     pub(super) hosts: Arc<Map<String, Value>>,
+    /// The inventory-wide values, whose `groups` say which hosts the inventory lists. The map
+    /// answers for the three spellings of the controller whether they are listed or not, and an
+    /// iteration shows only the listed ones, as the reference's does.
+    listed: Option<Arc<Map<String, Value>>>,
     /// Hosts holding at least one name that came from a managed host. Reading any name of such
     /// a host taints the render, which is coarser than the reference's per-string tag.
     untrusted_hosts: BTreeSet<String>,
@@ -350,7 +356,9 @@ impl Object for Hostvars {
             self.tainted.store(true, Ordering::Relaxed);
         }
         self.memo.get(key, || {
-            self.hosts.get(key).map(minijinja::Value::from_serialize)
+            self.hosts
+                .get(key)
+                .map(|entry| minijinja::Value::from_serialize(&*crate::vars::settled(entry)))
         })
     }
 
@@ -358,9 +366,25 @@ impl Object for Hostvars {
         if self.keys_untrusted {
             self.tainted.store(true, Ordering::Relaxed);
         }
+        let unlisted: BTreeSet<&str> = match &self.listed {
+            Some(shared) if self.hosts.keys().any(|k| is_localhost(k)) => {
+                let all = shared
+                    .get("groups")
+                    .and_then(|groups| groups.get("all"))
+                    .and_then(Value::as_array);
+                let in_all = |name: &str| all.is_some_and(|a| a.iter().any(|h| h == name));
+                self.hosts
+                    .keys()
+                    .map(String::as_str)
+                    .filter(|k| is_localhost(k) && !in_all(k))
+                    .collect()
+            }
+            _ => BTreeSet::new(),
+        };
         Enumerator::Values(
             self.hosts
                 .keys()
+                .filter(|k| !unlisted.contains(k.as_str()))
                 .map(|k| minijinja::Value::from(k.as_str()))
                 .collect(),
         )
