@@ -5245,9 +5245,8 @@ fn origin_cases() -> Vec<OriginCase> {
     ]
 }
 
-/// A name whose argument read text a managed host wrote is data whatever it holds: braces the
-/// playbook joins from two such names later are text too. Which argument it was does not matter,
-/// the aliases count, and in a loop only the item that read the text marks its own name.
+/// A name whose argument read a managed host's text is data whatever it holds, through every
+/// alias, and in a loop only the item that read the text marks its own name.
 #[test]
 fn a_name_from_a_hosts_text_is_data_whatever_it_holds() {
     let tmp = scratch();

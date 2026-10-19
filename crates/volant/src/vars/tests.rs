@@ -1089,7 +1089,7 @@ const EVERY_LIST: &[&str] = &[
     "ansible_play_hosts",
     "ansible_play_hosts_all",
     "groups",
-    "hostvars",
+    crate::template::HOSTVARS_KEYS,
     "inventory_hostname",
     "inventory_hostname_short",
     "play_hosts",
@@ -1103,20 +1103,27 @@ const NAME_ROWS: &[NameRow] = &[
         &[EVIL],
         "nh",
         &["nh"],
-        &["group_names", "groups", "hostvars"],
+        &["group_names", "groups"],
         false,
     ),
-    name_row("nh", &[EVIL], "h1", &["h1"], &["groups", "hostvars"], false),
+    name_row("nh", &[EVIL], "h1", &["h1"], &["groups"], false),
     name_row(
         "nh",
         &[NOTE],
         "nh",
         &["nh"],
-        &["group_names", "groups", "hostvars"],
+        &["group_names", "groups"],
         false,
     ),
     name_row(EVIL, &[], EVIL, &[EVIL], EVERY_LIST, true),
-    name_row(EVIL, &[], "h1", &["h1"], &["groups", "hostvars"], true),
+    name_row(
+        EVIL,
+        &[],
+        "h1",
+        &["h1"],
+        &["groups", crate::template::HOSTVARS_KEYS],
+        true,
+    ),
     NameRow {
         whole: &["h1", BLOCK],
         ..name_row(
@@ -1124,15 +1131,18 @@ const NAME_ROWS: &[NameRow] = &[
             &[],
             "h1",
             &["h1"],
-            &["ansible_play_hosts_all", "groups", "hostvars"],
+            &[
+                "ansible_play_hosts_all",
+                "groups",
+                crate::template::HOSTVARS_KEYS,
+            ],
             true,
         )
     },
 ];
 
-/// A host name or a group name that still holds a template after `add_host` rendered it came
-/// from text the playbook did not write. Reading it back through a list taints the render of
-/// that read, and a read of nothing it is in stays clean.
+/// An `add_host` name that still holds a template taints each read of a list that carries it,
+/// and a read of nothing it is in stays clean.
 #[test]
 fn an_add_host_name_that_holds_a_template_is_data_wherever_it_is_read() {
     const LISTS: [&str; 9] = [
@@ -1141,7 +1151,7 @@ fn an_add_host_name_that_holds_a_template_is_data_wherever_it_is_read() {
         "ansible_play_hosts_all",
         "group_names",
         "groups",
-        "hostvars",
+        crate::template::HOSTVARS_KEYS,
         "inventory_hostname",
         "inventory_hostname_short",
         "play_hosts",
@@ -1187,13 +1197,16 @@ fn a_group_by_name_that_holds_a_template_is_data_wherever_it_is_read() {
         store.add_to_group("h1", group, &parents);
         let data = store.untrusted_of("h1", &scope(&["h1"]));
         let holds = group == evil || parents.iter().any(|p| p == evil);
-        for name in ["groups", "hostvars"] {
-            assert_eq!(
-                data.contains(name),
-                holds,
-                "{name} after {group:?} under {parents:?}"
-            );
-        }
+        assert_eq!(
+            data.contains("groups"),
+            holds,
+            "groups after {group:?} under {parents:?}"
+        );
+        // A group is not among `hostvars`' keys: a nested template of a host still renders.
+        assert!(
+            !data.contains(crate::template::HOSTVARS_KEYS),
+            "hostvars after {group:?}"
+        );
         if group == evil {
             assert!(data.contains("group_names"), "group_names after {group:?}");
         }

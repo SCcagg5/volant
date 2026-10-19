@@ -11,6 +11,8 @@ use super::facts::no_facts;
 use super::load::{extend, extend_except};
 use super::magic::short_name;
 use super::{HostFacts, Scope, VarStore};
+use crate::template::HOSTVARS_KEYS;
+
 /// One host's variables as `layered_for_host` hands them out.
 #[derive(Debug)]
 pub struct Layers {
@@ -51,10 +53,11 @@ impl VarStore {
         names
     }
 
-    /// The names `host` reads that now carry a host name or a group name `add_host` took from
-    /// data: `groups`, the host lists of the play, `group_names`, `hostvars` and the two
-    /// `inventory_hostname` names. The read as a whole is data, where the reference tags each
-    /// string. A read of one host through `hostvars[name]` is the case of `untrusted_hosts`.
+    /// The names `host` reads that now carry a host name or a group name `add_host` or
+    /// `group_by` took from data: `groups`, the host lists of the play, `group_names`, the two
+    /// `inventory_hostname` names, and the list of `hostvars`' hosts. The read as a whole is
+    /// data, where the reference tags each string. A read of one host through `hostvars[name]`
+    /// is the case of `untrusted_hosts`, so a nested template of any other host still renders.
     fn data_names_read_by(&self, host: &str, scope: &Scope, names: &mut BTreeSet<String>) {
         if self.data_hosts.is_empty() && self.data_groups.is_empty() {
             return;
@@ -66,7 +69,7 @@ impl VarStore {
             .unwrap_or(&scope.all_play_hosts);
         let reads = [
             ("groups", true),
-            ("hostvars", true),
+            (HOSTVARS_KEYS, !self.data_hosts.is_empty()),
             ("inventory_hostname", self.data_hosts.contains(host)),
             ("inventory_hostname_short", self.data_hosts.contains(host)),
             (

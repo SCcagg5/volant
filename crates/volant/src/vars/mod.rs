@@ -87,8 +87,9 @@ pub struct VarStore {
     /// Of the `set_fact` layer's facts, the names that came from a managed host rather than
     /// from the playbook.
     untrusted: BTreeMap<String, BTreeSet<String>>,
-    /// The host names and group names `add_host` took from text the playbook did not write: a
-    /// name that still holds a template after the task rendered it. Reading one of them back
+    /// The host names and group names `add_host` and `group_by` took from text the playbook did
+    /// not write: a name whose argument read a managed host's value, or that still holds a
+    /// template after the task rendered it. Reading one of them back
     /// through `groups`, `hostvars`, `group_names`, a play's host list or `inventory_hostname`
     /// taints the render, so the name is shown as it is and never evaluated.
     data_hosts: BTreeSet<String>,
