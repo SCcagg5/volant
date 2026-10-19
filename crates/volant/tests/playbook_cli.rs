@@ -5632,6 +5632,49 @@ fn an_inventory_with_no_host_warns_that_only_localhost_is_left(
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A `localhost_warning` that is not a boolean stops the run before it starts, as the other
+/// boolean settings do, and names the setting and where it was set.
+#[rstest::rstest]
+#[case::env("env", "ANSIBLE_LOCALHOST_WARNING", "maybe")]
+#[case::ini("ini", "ANSIBLE_CONFIG", "maybe")]
+fn a_localhost_warning_that_is_not_a_boolean_is_refused(
+    #[case] source: &str,
+    #[case] var: &str,
+    #[case] value: &str,
+) {
+    let dir = probe_dir(&format!("bad-localhost-warning-{source}"));
+    std::fs::write(dir.join("inv.ini"), "h1 ansible_connection=local\n").expect("an inventory");
+    std::fs::write(
+        dir.join("play.yml"),
+        "- hosts: h1\n  gather_facts: false\n  tasks:\n    - debug: msg=ok\n",
+    )
+    .expect("the play");
+    let cfg = dir.join("ansible.cfg");
+    std::fs::write(&cfg, format!("[defaults]\nlocalhost_warning = {value}\n")).expect("a config");
+    let setting = if source == "env" {
+        value.to_string()
+    } else {
+        cfg.display().to_string()
+    };
+    let out = volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            dir.join("play.yml").to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(60),
+        &[(var, &setting)],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(5), "{stderr}");
+    assert!(
+        stderr.contains("Config 'LOCALHOST_WARNING' from") && stderr.contains("'maybe'"),
+        "{stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The register of the controller host is data when it is read through any of the three
 /// spellings, from any inventory shape: the text comes back as it was, never rendered.
 #[rstest::rstest]

@@ -290,10 +290,9 @@ impl Config {
         {
             config.force_handlers = on;
         }
-        if let Ok(flag) = std::env::var("ANSIBLE_LOCALHOST_WARNING")
-            && let Some(on) = crate::yaml::bool_from_str(flag.trim())
-        {
-            config.localhost_warning = on;
+        if let Ok(flag) = std::env::var("ANSIBLE_LOCALHOST_WARNING") {
+            config.localhost_warning =
+                boolean("LOCALHOST_WARNING", "env: ANSIBLE_LOCALHOST_WARNING", &flag)?;
         }
         if let Ok(flag) = std::env::var("ANSIBLE_SHOW_CUSTOM_STATS")
             && let Some(on) = crate::yaml::bool_from_str(flag.trim())
