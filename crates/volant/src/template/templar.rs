@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! `Templar`: renders templates, expressions and conditionals against a set of variables.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
 use minijinja::machinery::{Instruction, Instructions, WhitespaceConfig};
 use minijinja::{Environment, ErrorKind};
@@ -13,13 +13,12 @@ use serde_json::{Map, Value};
 use crate::bridge::{Bridge, PluginKind};
 
 use super::bridged;
-use super::context::{
-    Vars, begin, context_of, is_literal, reads, take_failure, tracking_inventory,
-};
+use super::context::{Vars, begin, context_of, is_literal, reads, take_failure};
 use super::env::{environment, holds_undefined, truthy, type_name};
 use super::filters;
 use super::vm::{
-    convert_error, eval_expr, holds_template, keep_literal, render_str, single_expression,
+    TemplateReads, convert_error, eval_expr, keep_literal, render_str, single_expression,
+    template_reads,
 };
 use super::{RESOLVING, Tainted, TemplateError};
 
@@ -33,7 +32,13 @@ pub struct Templar {
 struct Shared {
     env: RwLock<Bridged>,
     bridge: Option<Arc<Bridge>>,
+    /// What each template text read, found once: a variable's text is analyzed on every task.
+    reads: Mutex<HashMap<String, Option<Arc<TemplateReads>>>>,
 }
+
+/// Entries kept before the table starts over. Texts are the playbook's own variables, so a run
+/// stays far below it.
+const MAX_READS: usize = 8192;
 
 impl std::fmt::Debug for Templar {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -74,6 +79,7 @@ impl Templar {
                     seen: HashSet::new(),
                 }),
                 bridge,
+                reads: Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -166,6 +172,24 @@ impl Templar {
         Arc::clone(env)
     }
 
+    /// What the template `text` reads, cached. `None` when it does not compile.
+    pub(super) fn reads_of(&self, text: &str) -> Option<Arc<TemplateReads>> {
+        let mut table = self
+            .inner
+            .reads
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(known) = table.get(text) {
+            return known.clone();
+        }
+        let found = template_reads(text).map(Arc::new);
+        if table.len() >= MAX_READS {
+            table.clear();
+        }
+        table.insert(text.to_string(), found.clone());
+        found
+    }
+
     pub fn is_template(text: &str) -> bool {
         text.contains("{{") || text.contains("{%")
     }
@@ -191,14 +215,8 @@ impl Templar {
         // context, and a tainted field must not make the next field data too.
         tainted.store(false, Ordering::Relaxed);
         let before = begin(ctx);
-        let (first, read_inventory) = tracking_inventory(ctx, || self.render_once(text, ctx));
-        let mut value = first?;
+        let mut value = self.render_once(text, ctx)?;
         keep_literal(text, &value, ctx, true, reads(ctx) == before);
-        // A name added to the inventory from text a host sent is read here as the playbook's.
-        // No inventory name holds a template of its own, so one that does is data.
-        if read_inventory && holds_template(&value) {
-            tainted.store(true, Ordering::Relaxed);
-        }
         // A variable can hold a template of its own, so Ansible renders a result again while it
         // still carries a marker. Three further passes: a chain longer than that is a loop, and
         // an unchanged result ends it earlier. Not when the pass read a value that came from a

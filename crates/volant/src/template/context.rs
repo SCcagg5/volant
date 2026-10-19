@@ -210,8 +210,8 @@ pub(super) struct Context {
     /// Names whose rendered value was built from something a managed host wrote. A read of one is
     /// as much a read of host data as a read of the name it was built from.
     soiled: Mutex<BTreeSet<String>>,
-    /// Whether the render read the inventory's own names since the flag was last cleared.
-    inventory_read: AtomicBool,
+    /// Whether the text of a variable reads only what the playbook wrote, name by name.
+    author_only: Mutex<HashMap<String, bool>>,
     /// Whether `soiled` holds a name, so that a render that resolved nothing never takes its lock.
     any_soiled: AtomicBool,
     /// Set when `failed` is: the first error a nested render raised that the read cannot carry.
@@ -281,6 +281,51 @@ impl Context {
         }
     }
 
+    /// Whether rendering `key` reads nothing but what the playbook wrote: every name its text
+    /// looks up is an author-written variable, itself read the same way, or a name a managed
+    /// host sent, whose trust is tracked. A name of the inventory, the shared lists, `hostvars`
+    /// and any lookup by text are not: what they hold can come from a host in a form no tracking
+    /// sees, so a variable that reads one is left as written. The rule holds for a variable that
+    /// reads one that reads one, at any depth.
+    fn reads_author_text_only(&self, key: &str, seen: &mut Vec<String>) -> bool {
+        if self.untrusted.contains(key) {
+            return true;
+        }
+        if engine_owned(key)
+            || INVENTORY_NAMES.contains(&key)
+            || self.shared.as_ref().is_some_and(|s| s.contains_key(key))
+        {
+            return false;
+        }
+        let Some(value) = self.vars.get(key) else {
+            return true;
+        };
+        if !holds_template(value) || seen.iter().any(|name| name == key) {
+            return true;
+        }
+        if let Some(known) = self.author_only.lock().expect("template author").get(key) {
+            return *known;
+        }
+        seen.push(key.to_string());
+        let mut texts = Vec::new();
+        collect_templates(value, &mut texts);
+        let ok = texts.iter().all(|text| {
+            self.templar.reads_of(text).is_some_and(|reads| {
+                !reads.dynamic
+                    && reads
+                        .names
+                        .iter()
+                        .all(|n| self.reads_author_text_only(n, seen))
+            })
+        });
+        seen.pop();
+        self.author_only
+            .lock()
+            .expect("template author")
+            .insert(key.to_string(), ok);
+        ok
+    }
+
     fn read(self: &Arc<Self>, key: &str, untrusted: bool) -> Option<(minijinja::Value, bool)> {
         // A map that carries a `hostvars` key of its own - a fixture, a recorded scope -
         // keeps being read from the map when no view came with it, so the two sources never
@@ -324,7 +369,11 @@ impl Context {
             return Some((view, true));
         }
         if let Some(value) = self.vars.get(key) {
-            if !untrusted && !engine_owned(key) && holds_template(value) {
+            if !untrusted
+                && !engine_owned(key)
+                && holds_template(value)
+                && self.reads_author_text_only(key, &mut Vec::new())
+            {
                 return Some(self.resolve(key, value));
             }
             return Some((minijinja::Value::from_serialize(value), true));
@@ -337,20 +386,14 @@ impl Context {
     }
 }
 
-/// Runs one render pass and says whether it read the inventory's own names: the shared layer,
-/// the host's name and its groups. What it read stays marked for a pass that
-/// contains this one.
-pub(super) fn tracking_inventory<T>(ctx: &minijinja::Value, pass: impl FnOnce() -> T) -> (T, bool) {
-    let Some(context) = ctx.downcast_object_ref::<Context>() else {
-        return (pass(), false);
-    };
-    let earlier = context.inventory_read.swap(false, Ordering::Relaxed);
-    let out = pass();
-    let read = context.inventory_read.load(Ordering::Relaxed);
-    context
-        .inventory_read
-        .store(earlier || read, Ordering::Relaxed);
-    (out, read)
+/// The strings of `value` that hold a template.
+fn collect_templates<'a>(value: &'a Value, out: &mut Vec<&'a str>) {
+    match value {
+        Value::String(text) if Templar::is_template(text) => out.push(text),
+        Value::Array(items) => items.iter().for_each(|v| collect_templates(v, out)),
+        Value::Object(map) => map.values().for_each(|v| collect_templates(v, out)),
+        _ => {}
+    }
 }
 
 /// The error a nested render raised that its reader could not take, if one did, and clears it. A
@@ -432,16 +475,7 @@ impl Object for Context {
         }
         self.reads.fetch_add(1, Ordering::Relaxed);
         // Before the memo, never after: a second read of the same name is answered from the
-        // cache and would otherwise leave the render looking clean. The same goes for the
-        // inventory's own names.
-        if INVENTORY_NAMES.contains(&key)
-            || self
-                .shared
-                .as_ref()
-                .is_some_and(|shared| shared.contains_key(key))
-        {
-            self.inventory_read.store(true, Ordering::Relaxed);
-        }
+        // cache and would otherwise leave the render looking clean.
         // A `hostvars` the map carries as a plain value lists its hosts on any read, so a host
         // name that came from a managed host taints every read of it.
         let untrusted = self.untrusted.contains(key);
@@ -576,7 +610,7 @@ pub(super) fn context_of(templar: &Templar, vars: Vars<'_>) -> (minijinja::Value
         templar: templar.clone(),
         resolving: Mutex::new(Vec::new()),
         soiled: Mutex::new(BTreeSet::new()),
-        inventory_read: AtomicBool::new(false),
+        author_only: Mutex::new(HashMap::new()),
         any_soiled: AtomicBool::new(false),
         failure: Mutex::new(None),
         failed: AtomicBool::new(false),
