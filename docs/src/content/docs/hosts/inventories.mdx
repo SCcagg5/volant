@@ -86,8 +86,11 @@ A pattern in a play's `hosts:` or in `--limit` follows Ansible's grammar:
 | `web:&prod` | hosts in `web` that are also in `prod` |
 | `web:!web2` | hosts in `web` except `web2` |
 | `web[0]`, `web[0:2]`, `web[1:]` | an index or a slice of the hosts a term produced |
+| `::1`, `fe80::1`, `[::1]:22` | one host: an address is not cut at its colons |
 
 Slices include their end, as in Ansible: `web[0:2]` is three hosts. `name[N-M]` is accepted as an older spelling of `name[N:M]`.
+
+A pattern with a comma is cut at the commas only, so `web:db,cache` has the terms `web:db` and `cache`. A pattern without one is a single term when it is a valid address, a host name with a port or a range, and a list cut at the colons otherwise.
 
 Terms are not applied in the order you write them. Plain terms come first, then `&` terms, then `!` terms, which is what Ansible does. A pattern made only of `!` or `&` terms starts from `all`.
 

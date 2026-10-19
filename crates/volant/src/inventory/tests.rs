@@ -90,12 +90,11 @@ fn a_pattern_selects_in_inventory_order(#[case] pattern: &str, #[case] want: &[&
     assert_eq!(names(&inv.resolve(pattern).hosts), want, "{pattern}");
 }
 
-/// The controller is an implicit local host outside `all`; `::1` is cut by the pattern
-/// separator, a known divergence (the reference runs it on the controller).
+/// The controller is an implicit local host outside `all`, under each of its three spellings.
 #[test]
 fn the_controller_is_an_implicit_local_host() {
     let inv = Inventory::empty();
-    for name in ["localhost", "127.0.0.1"] {
+    for name in ["localhost", "127.0.0.1", "::1"] {
         let res = inv.resolve(name);
         assert_eq!(res.hosts.len(), 1, "{name} matched nothing");
         assert_eq!(res.hosts[0].name, name);
@@ -106,10 +105,77 @@ fn the_controller_is_an_implicit_local_host() {
         inv.resolve("all").hosts.is_empty(),
         "implicit localhost is not part of all"
     );
-    assert_eq!(split_terms("::1"), ["", "", "1"]);
-    let res = inv.resolve("::1");
-    assert!(res.hosts.is_empty(), "{:?}", names(&res.hosts));
-    assert_eq!(res.unmatched, ["1"]);
+}
+
+/// The terms of a pattern, as ansible-core 2.19.12's `split_host_pattern` cuts them: the
+/// controller's `::1` and IPv6 addresses stay whole, a comma list keeps the colons in its terms.
+#[rstest]
+#[case::ipv6_loopback("::1", &["::1"])]
+#[case::ipv6_address("fe80::1", &["fe80::1"])]
+#[case::ipv6_with_port("[::1]:22", &["[::1]:22"])]
+#[case::host_with_port("web:22", &["web:22"])]
+#[case::colon_list("a:b:c:d", &["a", "b", "c", "d"])]
+#[case::colon_list_with_operators("prod:&web:!web2", &["prod", "&web", "!web2"])]
+#[case::a_subscript_keeps_its_colon("web[0:1]", &["web[0:1]"])]
+#[case::a_subscript_in_a_list("web[0:1]:db", &["web[0:1]", "db"])]
+#[case::an_unbalanced_bracket_is_dropped("web[1:db", &["web", "1", "db"])]
+#[case::a_comma_list_keeps_colons("web:db,cache", &["web:db", "cache"])]
+#[case::a_comma_ignores_brackets("a[,b[1]", &["a[", "b[1]"])]
+#[case::a_leading_colon_pair_is_not_an_address("::1:web", &["1", "web"])]
+#[case::an_operator_before_an_address("!::1", &["!", "1"])]
+#[case::spaces_are_dropped(" web : db ", &["web", "db"])]
+#[case::colon_alone(":", &[])]
+#[case::empty("", &[])]
+fn a_pattern_is_cut_into_terms_as_the_reference_cuts_it(
+    #[case] pattern: &str,
+    #[case] want: &[&str],
+) {
+    assert_eq!(split_terms(pattern), want, "{pattern:?}");
+}
+
+/// The shortcut that turns a pattern away before the address expressions are built never
+/// disagrees with `parse_address`.
+#[test]
+fn the_address_shortcut_agrees_with_parse_address() {
+    let samples = [
+        "::1",
+        "fe80::1",
+        "[::1]:22",
+        "web:22",
+        "web",
+        "web:db",
+        "all:!web",
+        "prod:&web",
+        "a:b:c:d",
+        "web[0:1]",
+        "web[0:1]:db",
+        "web[1:db",
+        "web[a:c]",
+        "10.0.0.[1:3]",
+        "10.0.0.1:22",
+        "dead:beef",
+        "::",
+        ":",
+        "a:",
+        ":22",
+        "[::1]",
+        "[a",
+        "web[1]:22",
+        "ab:cd:ef:01:23:45:67:89",
+        "x:y:22",
+        "web:!db:22",
+        "1:2:3:4:5:6:7:8:9",
+        "web 1",
+        "::ffff:10.0.0.1",
+        "web.example.com:8080",
+    ];
+    for sample in samples {
+        assert_eq!(
+            patterns::is_one_address(sample),
+            ranges::parse_address(sample, true).is_ok(),
+            "{sample:?}"
+        );
+    }
 }
 
 #[rstest]
@@ -189,16 +255,6 @@ fn glob_matching_follows_fnmatch() {
     assert!(glob_match("a[!]", "a[!]") && !glob_match("a[!]", "a!") && !glob_match("a[!]", "a]"));
     // Ten stars and a miss: the scan is O(pattern * text), not a recursion per split point.
     assert!(!glob_match("*a*a*a*a*a*a*a*a*a*a*b", &"a".repeat(40)));
-}
-
-#[test]
-fn split_terms_does_not_swallow_terms_on_an_unbalanced_bracket() {
-    // No closing `]` anywhere: the `:` still separates `db` into its own term.
-    assert_eq!(split_terms("web[1:db"), ["web[1", "db"]);
-    // The first `[` must not borrow the later bracket's close.
-    assert_eq!(split_terms("a[,b[1]"), ["a[", "b[1]"]);
-    // A real subscript keeps the `:` inside the term.
-    assert_eq!(split_terms("web[0:1]"), ["web[0:1]"]);
 }
 
 /// The reference's own answer for a value ambiguous in Rust, taken from the inventory golden
