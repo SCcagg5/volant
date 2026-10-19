@@ -114,10 +114,8 @@ fn render_with<'a>(
         return Ok(Cow::Borrowed(play));
     }
     let all_hosts: Vec<String> = inventory
-        .resolve("all")
-        .hosts
+        .all_host_names()
         .into_iter()
-        .map(|h| h.name)
         .filter(|name| limit.is_none_or(|allowed| allowed.contains(name)))
         .collect();
     executor::render_hosts(
