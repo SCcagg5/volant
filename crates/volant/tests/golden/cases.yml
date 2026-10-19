@@ -527,3 +527,46 @@
 - template: "{{ r }}|{% raw %}{{ r }}{% endraw %}"
   untrusted: {r: "{% raw %}{{ x }}{% endraw %}{{ x }}"}
   vars: {x: 5}
+# A variable whose value is a template is rendered when a template reads it, so a filter or an
+# operator sees the final value.
+- template: "{{ s }}"
+  vars: {c: 7, b: "{{ c }}", s: "{{ b | int + 1 }}"}
+- template: "{{ b | int }}"
+  vars: {c: 7, b: "{{ c }}"}
+- template: "{{ d3 }}"
+  vars: {c: 7, d1: "{{ c }}", d2: "{{ d1 }}", d3: "{{ d2 | int * 2 }}"}
+- template: "{{ url | length }}|{{ url | regex_replace('example', 'zz') }}|{{ url | b64encode }}"
+  vars: {host: example.org, url: "http://{{ host }}:8080/x"}
+- template: "{{ l | map('upper') | list }}"
+  vars: {host: example.org, l: ["{{ host }}"]}
+- template: "{{ d.k | int + d.n.m | int }}"
+  vars: {c: 7, d: {k: "{{ c }}", n: {m: "{{ c }}"}}}
+- template: "{{ e.k | int + 1 }}"
+  vars: {c: 7, d: {k: "{{ c }}"}, e: "{{ d }}"}
+- template: "{{ d.ok }}"
+  vars: {d: {bad: "{{ missing }}", ok: 1}}
+- when: "cond"
+  vars: {port_s: "{{ 8080 }}", cond: "{{ port_s | int > 8000 }}"}
+- template: "{{ u | default('dflt') }}"
+  vars: {u: "{{ missing }}"}
+- template: "{{ u is defined }}"
+  vars: {u: "{{ missing }}"}
+- template: "{{ u }}"
+  vars: {u: "{{ missing }}"}
+- template: "{{ u | upper }}"
+  vars: {u: "{{ v }}", v: "{{ missing }}"}
+- template: "{{ a }}"
+  vars: {a: "{{ a }}"}
+- template: "{{ a }}"
+  vars: {a: "{{ b }}", b: "{{ a }}"}
+- template: "{{ a | default('x') }}"
+  vars: {a: "{{ a | default('x') }}"}
+- template: "{{ a | default('x') }}"
+  vars: {a: "{{ 1 | nosuchfilter }}"}
+# What came from a host stays text through a variable that reads it.
+- template: "{{ d | length }}|{{ d | upper }}|{{ (d | length) ~ (d | upper) }}"
+  vars: {c: 7, d: "{{ reg }}"}
+  untrusted: {reg: "{{ c }}"}
+- template: "{{ e | length }}|{{ e }}"
+  vars: {c: 7, d: "{{ reg }}", e: "{{ d | upper }}"}
+  untrusted: {reg: "{{ c }}"}

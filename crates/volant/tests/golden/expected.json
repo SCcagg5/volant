@@ -3566,5 +3566,213 @@
       }
     },
     "result": "{% raw %}{{ x }}{% endraw %}{{ x }}|{{ r }}"
+  },
+  {
+    "case": {
+      "template": "{{ s }}",
+      "vars": {
+        "c": 7,
+        "b": "{{ c }}",
+        "s": "{{ b | int + 1 }}"
+      }
+    },
+    "result": 8
+  },
+  {
+    "case": {
+      "template": "{{ b | int }}",
+      "vars": {
+        "c": 7,
+        "b": "{{ c }}"
+      }
+    },
+    "result": 7
+  },
+  {
+    "case": {
+      "template": "{{ d3 }}",
+      "vars": {
+        "c": 7,
+        "d1": "{{ c }}",
+        "d2": "{{ d1 }}",
+        "d3": "{{ d2 | int * 2 }}"
+      }
+    },
+    "result": 14
+  },
+  {
+    "case": {
+      "template": "{{ url | length }}|{{ url | regex_replace('example', 'zz') }}|{{ url | b64encode }}",
+      "vars": {
+        "host": "example.org",
+        "url": "http://{{ host }}:8080/x"
+      }
+    },
+    "result": "25|http://zz.org:8080/x|aHR0cDovL2V4YW1wbGUub3JnOjgwODAveA=="
+  },
+  {
+    "case": {
+      "template": "{{ l | map('upper') | list }}",
+      "vars": {
+        "host": "example.org",
+        "l": [
+          "{{ host }}"
+        ]
+      }
+    },
+    "result": [
+      "EXAMPLE.ORG"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ d.k | int + d.n.m | int }}",
+      "vars": {
+        "c": 7,
+        "d": {
+          "k": "{{ c }}",
+          "n": {
+            "m": "{{ c }}"
+          }
+        }
+      }
+    },
+    "result": 14
+  },
+  {
+    "case": {
+      "template": "{{ e.k | int + 1 }}",
+      "vars": {
+        "c": 7,
+        "d": {
+          "k": "{{ c }}"
+        },
+        "e": "{{ d }}"
+      }
+    },
+    "result": 8
+  },
+  {
+    "case": {
+      "template": "{{ d.ok }}",
+      "vars": {
+        "d": {
+          "bad": "{{ missing }}",
+          "ok": 1
+        }
+      }
+    },
+    "result": 1
+  },
+  {
+    "case": {
+      "when": "cond",
+      "vars": {
+        "port_s": "{{ 8080 }}",
+        "cond": "{{ port_s | int > 8000 }}"
+      }
+    },
+    "result": "ran"
+  },
+  {
+    "case": {
+      "template": "{{ u | default('dflt') }}",
+      "vars": {
+        "u": "{{ missing }}"
+      }
+    },
+    "result": "dflt"
+  },
+  {
+    "case": {
+      "template": "{{ u is defined }}",
+      "vars": {
+        "u": "{{ missing }}"
+      }
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ u }}",
+      "vars": {
+        "u": "{{ missing }}"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': 'missing' is undefined"
+  },
+  {
+    "case": {
+      "template": "{{ u | upper }}",
+      "vars": {
+        "u": "{{ v }}",
+        "v": "{{ missing }}"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': 'missing' is undefined"
+  },
+  {
+    "case": {
+      "template": "{{ a }}",
+      "vars": {
+        "a": "{{ a }}"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Recursive loop detected in template: maximum recursion depth exceeded"
+  },
+  {
+    "case": {
+      "template": "{{ a }}",
+      "vars": {
+        "a": "{{ b }}",
+        "b": "{{ a }}"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Recursive loop detected in template: maximum recursion depth exceeded"
+  },
+  {
+    "case": {
+      "template": "{{ a | default('x') }}",
+      "vars": {
+        "a": "{{ a | default('x') }}"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Recursive loop detected in template: maximum recursion depth exceeded"
+  },
+  {
+    "case": {
+      "template": "{{ a | default('x') }}",
+      "vars": {
+        "a": "{{ 1 | nosuchfilter }}"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Syntax error in template: No filter named 'nosuchfilter'."
+  },
+  {
+    "case": {
+      "template": "{{ d | length }}|{{ d | upper }}|{{ (d | length) ~ (d | upper) }}",
+      "vars": {
+        "c": 7,
+        "d": "{{ reg }}"
+      },
+      "untrusted": {
+        "reg": "{{ c }}"
+      }
+    },
+    "result": "7|{{ C }}|7{{ C }}"
+  },
+  {
+    "case": {
+      "template": "{{ e | length }}|{{ e }}",
+      "vars": {
+        "c": 7,
+        "d": "{{ reg }}",
+        "e": "{{ d | upper }}"
+      },
+      "untrusted": {
+        "reg": "{{ c }}"
+      }
+    },
+    "result": "7|{{ C }}"
   }
 ]
