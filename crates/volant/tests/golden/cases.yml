@@ -120,6 +120,26 @@
   vars: {v: True}
 - template: "{{ v }}"
   vars: {v: False}
+# Aliases, tags and plain scalars as PyYAML reads them, through `from_yaml`, which loads its text
+# with PyYAML's own loader. A date prints as `to_json` prints it: the value model has no date.
+# `from_yaml` knows neither `!unsafe` nor `!vault`: the vars loader's rows are in the scenarios.
+- {template: "{{ s | from_yaml }}", vars: {s: "a: &n 5\nb: *n"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: &n yes\nb: [*n, *n]"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: &k key\nm: {*k : 1}"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: &n 010\nb: *n"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: &n \"5\"\nb: *n"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: &n |\n  x\n  y\nb: *n"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !!str 5"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !!int \"5\""}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !!float 5"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !!bool \"yes\""}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !!null x"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: [1:30, 190:20:30, 1:30.5]"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: [+.5, -.5, .5, 5., 1.e+3]"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: [010, 08, 0o10, 0x1F, 1_000, 1e3, 1.0e+3]"}}
+- {template: "{{ s | from_yaml | to_json }}", vars: {s: "a: [2020-01-02, 2020-1-2, 2020-01-02 10:11:12, 2020-01-02T10:11:12Z, 2020-01-02t10:11:12.5+01:00]"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !custom x"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !!int abc"}}
 # Ansible filters
 - template: "{{ missing | default('fallback') }}"
 - template: "{{ empty | default('fallback') }}"
