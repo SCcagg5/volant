@@ -1,0 +1,6 @@
+# The `template` options for custom delimiters, each alone and together, multi-character and
+# regex-special ones, a delimiter inside a string literal, `raw` blocks, and text that is left
+# alone: what is written, and the check and diff output over a file that already exists.
+args: [-i, inv.ini, play.yml]
+modes: [check-diff, diff]
+needs: [ansible-core]

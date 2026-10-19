@@ -4,6 +4,7 @@
 use std::borrow::Cow;
 
 use minijinja::machinery::WhitespaceConfig;
+use minijinja::syntax::SyntaxConfig;
 use serde_json::Value;
 
 use super::file::trailing_newlines;
@@ -108,7 +109,8 @@ impl Templar {
             lstrip_blocks: false,
             trim_blocks: true,
         };
-        let counted = render_counted(self, "<string>", body, ctx, ws).map_err(convert_error);
+        let counted = render_counted(self, "<string>", body, ctx, ws, SyntaxConfig::default())
+            .map_err(convert_error);
         // A variable the text read failed to render: that is the error, whatever the undefined
         // value it was read as did to the text.
         if let Some(error) = take_failure(ctx) {

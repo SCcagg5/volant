@@ -100,11 +100,11 @@ pub(super) struct TemplateReads {
 /// answer more careful.
 pub(super) fn template_reads(source: &str) -> Option<TemplateReads> {
     let config = TemplateConfig {
-        syntax_config: SyntaxConfig,
+        syntax_config: SyntaxConfig::default(),
         ws_config: WhitespaceConfig::default(),
         default_auto_escape: Arc::new(|_| AutoEscape::None),
     };
-    let compiled = CompiledTemplate::new("<reads>", source, &config).ok()?;
+    let compiled = no_panic(|| CompiledTemplate::new("<reads>", source, &config)).ok()?;
     let mut reads = TemplateReads::default();
     for instructions in std::iter::once(&compiled.instructions).chain(compiled.blocks.values()) {
         let mut idx = 0;
@@ -293,8 +293,8 @@ pub(super) fn note_emit(out: &minijinja::Output<'_>, value: &minijinja::Value) {
 }
 
 /// `env.render_named_str`, with `~` routed through [`concat()`]. Compiled once per call, as
-/// `render_named_str` does, with the whitespace settings given. The only place that decides
-/// auto-escape and syntax. The environment is the templar's, with the filters and tests the
+/// `render_named_str` does, with the whitespace and syntax settings given. The only place that
+/// decides auto-escape. The environment is the templar's, with the filters and tests the
 /// compiled code calls that only the Python helper has ([`Templar::env_for`]).
 pub(super) fn render_str(
     templar: &Templar,
@@ -302,8 +302,9 @@ pub(super) fn render_str(
     source: &str,
     ctx: &minijinja::Value,
     ws_config: WhitespaceConfig,
+    syntax_config: SyntaxConfig,
 ) -> Result<String, minijinja::Error> {
-    render_counted(templar, name, source, ctx, ws_config).map(|(text, _)| text)
+    render_counted(templar, name, source, ctx, ws_config, syntax_config).map(|(text, _)| text)
 }
 
 /// [`render_str`], and what the render printed through `{{ }}`.
@@ -313,9 +314,10 @@ pub(super) fn render_counted(
     source: &str,
     ctx: &minijinja::Value,
     ws_config: WhitespaceConfig,
+    syntax_config: SyntaxConfig,
 ) -> Result<(String, Emitted), minijinja::Error> {
     let config = TemplateConfig {
-        syntax_config: SyntaxConfig,
+        syntax_config,
         ws_config,
         // Never by file name: measured on ansible-core 2.19.12, `index.html.j2` holding
         // `{{ "<b>" }}` writes `<b>`.

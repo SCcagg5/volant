@@ -1,0 +1,23 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    shared_v: play-var
+    rdef: play-rdef
+  tasks:
+    - name: before
+      debug:
+        msg: "before rdef={{ rdef | default('unset') }} rvar={{ rvar | default('unset') }} qdef={{ qdef | default('unset') }}"
+    - name: first
+      include_role:
+        name: r
+        public: true
+    - name: after the first
+      debug:
+        msg: "after1 rdef={{ rdef | default('unset') }} rvar={{ rvar | default('unset') }} shared={{ shared | default('unset') }} shared_v={{ shared_v | default('unset') }}"
+    - name: second
+      include_role:
+        name: q
+        public: true
+    - name: after the second
+      debug:
+        msg: "after2 qdef={{ qdef | default('unset') }} qvar={{ qvar | default('unset') }} shared={{ shared | default('unset') }} shared_v={{ shared_v | default('unset') }}"

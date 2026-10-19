@@ -1,0 +1,3 @@
+- name: show q
+  debug:
+    msg: "in q rdef={{ rdef | default('unset') }} rvar={{ rvar | default('unset') }} qdef={{ qdef }}"

@@ -1,0 +1,19 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - ansible.builtin.include_role:
+        name: q
+    - include_role:
+        role: q
+    - name: named
+      include_role:
+        name: q
+    - include_role:
+        name: "{{ which }}"
+      vars:
+        which: q
+    - include_role:
+        name: "{{ item }}"
+      loop: [q]
+    - ansible.legacy.include_role:
+        name: q

@@ -1,0 +1,7 @@
+# `allow_duplicates: false` makes an include_role or an import_role do nothing for a host that
+# already ran an identical one. The statement still shows its `included:` line.
+runs:
+  - args: [-i, inv.ini, include.yml]
+  - args: [-i, inv.ini, import.yml]
+  - args: [-i, inv.ini, per-host.yml]
+  - args: [-i, inv.ini, loop.yml]
