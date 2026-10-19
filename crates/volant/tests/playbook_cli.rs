@@ -6573,3 +6573,99 @@ fn the_system_runtime_keeps_the_refusal_and_installs_nothing() {
     );
     assert!(!data.exists(), "a runtime was installed");
 }
+
+/// A host that answers with a YAML document nested far past any real one fails its own task, and
+/// the run goes on for the other host. A stack overflow in the parser ended the process with
+/// SIGABRT, and no host finished.
+#[test]
+fn a_deeply_nested_yaml_text_from_a_host_fails_only_that_hosts_task() {
+    let dir = probe_dir("deep-yaml-text");
+    std::fs::write(
+        dir.join("inv.ini"),
+        "h1 ansible_connection=local\nh2 ansible_connection=local\n",
+    )
+    .expect("an inventory");
+    std::fs::write(dir.join("h1.yml"), format!("{}x\n", "- ".repeat(100_000))).expect("h1.yml");
+    std::fs::write(dir.join("h2.yml"), "- fine\n").expect("h2.yml");
+    std::fs::write(
+        dir.join("play.yml"),
+        "- hosts: all\n  gather_facts: false\n  tasks:\n    \
+         - command: cat {{ inventory_hostname }}.yml\n      register: r\n    \
+         - debug: {msg: \"items={{ r.stdout | from_yaml | length }}\"}\n",
+    )
+    .expect("the play");
+    let out = volant_within_full(
+        &["playbook", "-i", "inv.ini", "play.yml"],
+        PROBE_DEADLINE,
+        None,
+        None,
+        Some(&dir),
+        None,
+        &[],
+    );
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // Exit code 2 is a failed host: a SIGABRT has no code at all.
+    assert_eq!(out.status.code(), Some(2), "{text}");
+    assert!(!text.contains("overflowed its stack"), "{text}");
+    assert!(text.contains("maximum recursion depth exceeded"), "{text}");
+    assert!(text.contains(r#""msg": "items=1""#), "{text}");
+    let recap = |host: &str| {
+        text.lines()
+            .find(|l| l.starts_with(host) && l.contains("ok="))
+            .unwrap_or_else(|| panic!("no recap line for {host}: {text}"))
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    assert!(
+        recap("h1").contains("ok=1") && recap("h1").contains("failed=1"),
+        "{text}"
+    );
+    assert!(
+        recap("h2").contains("ok=2") && recap("h2").contains("failed=0"),
+        "{text}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A file nested past the limit is a load error, as a syntax error is: `vars_files` and the
+/// playbook itself exit with 4, `-e @file` with 1.
+#[test]
+fn a_deeply_nested_yaml_file_is_a_load_error() {
+    let dir = probe_dir("deep-yaml-file");
+    std::fs::write(dir.join("inv.ini"), "h1 ansible_connection=local\n").expect("an inventory");
+    let deep = format!("v:\n  {}x\n", "- ".repeat(100_000));
+    std::fs::write(dir.join("deep.yml"), &deep).expect("deep.yml");
+    let tasks = "  gather_facts: false\n  tasks:\n    - debug: {msg: ok}\n";
+    std::fs::write(
+        dir.join("vars_files.yml"),
+        format!("- hosts: all\n  vars_files: [deep.yml]\n{tasks}"),
+    )
+    .expect("the play");
+    std::fs::write(dir.join("plain.yml"), format!("- hosts: all\n{tasks}")).expect("the play");
+    let in_playbook = format!(
+        "- hosts: all\n  gather_facts: false\n  vars:\n    v:\n      {}x\n",
+        "- ".repeat(100_000)
+    );
+    std::fs::write(dir.join("in_playbook.yml"), in_playbook).expect("the deep play");
+    for (args, code) in [
+        (vec!["vars_files.yml"], 4),
+        (vec!["in_playbook.yml"], 4),
+        (vec!["plain.yml", "-e", "@deep.yml"], 1),
+    ] {
+        let mut argv = vec!["playbook", "-i", "inv.ini"];
+        argv.extend(args.iter().copied());
+        let out = volant_within_full(&argv, PROBE_DEADLINE, None, None, Some(&dir), None, &[]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(code), "{args:?}: {stderr}");
+        assert!(
+            stderr.contains("maximum recursion depth exceeded"),
+            "{args:?}: {stderr}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
