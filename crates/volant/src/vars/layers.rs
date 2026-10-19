@@ -7,10 +7,12 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value};
 
+use super::PENDING_PYTHON;
 use super::facts::no_facts;
 use super::load::{extend, extend_except};
 use super::magic::short_name;
 use super::{HostFacts, Scope, VarStore};
+use crate::inventory::{LOCALHOST_NAMES, is_localhost};
 /// One host's variables as `layered_for_host` hands them out.
 #[derive(Debug)]
 pub struct Layers {
@@ -212,6 +214,15 @@ impl VarStore {
     /// Inventory-level sources for one host, without play, facts, extra or magic variables.
     /// This is what other hosts see through `hostvars`.
     fn host_base(&self, host: &str) -> Map<String, Value> {
+        self.host_base_in(host, false)
+    }
+
+    /// `host_base`, and with `lazy` the implicit host's interpreter left as `PENDING_PYTHON`
+    /// for `settled` to fill in. Finding the controller's interpreter starts a Python, which a
+    /// run that never reads `hostvars['localhost']` must not pay for.
+    fn host_base_in(&self, host: &str, lazy: bool) -> Map<String, Value> {
+        // A spelling of the controller that the inventory lists under another one is that host.
+        let host = self.controller_alias(host).unwrap_or(host);
         let mut vars = Map::new();
         for files in &self.group_files {
             if let Some(all) = files.get("all") {
@@ -251,7 +262,12 @@ impl VarStore {
             // The reference also sets the controller's own interpreter there
             // (`sys.executable`), at the same layer, so the host runs Python tasks under it
             // and discovers nothing. Left unset when no interpreter resolves.
-            if let Some(python) = crate::runtime::resolve::controller_python() {
+            if lazy {
+                vars.insert(
+                    "ansible_python_interpreter".into(),
+                    Value::String(PENDING_PYTHON.to_string()),
+                );
+            } else if let Some(python) = crate::runtime::resolve::controller_python() {
                 vars.insert("ansible_python_interpreter".into(), Value::String(python));
             }
         }
@@ -267,7 +283,7 @@ impl VarStore {
     /// own identity. The reference carries `inventory_hostname` inside `hostvars[x]`, so a task
     /// naming another host can ask who that host is.
     fn host_view(&self, host: &str) -> Map<String, Value> {
-        let mut base = self.host_base(host);
+        let mut base = self.host_base_in(host, true);
         match self.gathered.get(host) {
             Some(gathered) => extend(&mut base, gathered),
             None => extend(&mut base, no_facts()),
@@ -315,21 +331,35 @@ impl VarStore {
     /// The `hostvars` view every host of this run renders against, as one shared map: templates
     /// read a host out of it rather than carrying a copy of it.
     ///
-    /// `host` is the host about to render. An implicit `localhost` belongs to no group, so it is
-    /// not in the inventory-wide map, and `hostvars[inventory_hostname]` has to answer for it
-    /// all the same: such a host gets its own completed map, kept beside the shared one.
+    /// `host` is the host about to render. The three spellings of the controller are in the map
+    /// whether the inventory lists them or not, as `hostvars` answers for them in the reference:
+    /// an implicit one belongs to no group and is not in `groups`. Any other name the inventory
+    /// does not carry (a `delegate_to` target) gets its own completed map, kept beside the
+    /// shared one.
     ///
     /// A host whose facts changed since the map was built has its own entry rebuilt, and only
     /// that one. The map is changed in place when nobody else holds it; a render still holding
     /// the previous map keeps it whole, which is what it saw when it took it, and the store
     /// then carries on with a copy.
     pub fn hostvars_shared(&mut self, host: &str) -> Arc<Map<String, Value>> {
+        // The reference keeps one implicit controller host, named after the first spelling that
+        // asked for it, and answers the other two spellings with that same host.
+        if self.implicit_controller.is_none() && self.is_implicit_localhost(host) {
+            self.implicit_controller = Some(host.to_string());
+            self.forget_hostvars();
+        }
         let base = if let Some(mut base) = self.hostvars.take() {
-            for name in std::mem::take(&mut self.stale) {
-                if base.contains_key(&name) {
-                    let view = self.view_value(&name);
-                    Arc::make_mut(&mut base).insert(name, view);
+            let stale = std::mem::take(&mut self.stale);
+            for name in &stale {
+                if base.contains_key(name) && self.controller_alias(name).is_none() {
+                    let view = self.view_value(name);
+                    Arc::make_mut(&mut base).insert(name.clone(), view);
                 }
+            }
+            // The spellings that stand for a host of the inventory, or for the implicit one,
+            // show whatever that host shows now.
+            if stale.iter().any(|name| is_localhost(name)) {
+                self.add_controller_views(Arc::make_mut(&mut base));
             }
             base
         } else {
@@ -340,6 +370,7 @@ impl VarStore {
                 let view = self.view_value(&name);
                 map.insert(name, view);
             }
+            self.add_controller_views(&mut map);
             Arc::new(map)
         };
         self.hostvars = Some(Arc::clone(&base));
@@ -355,6 +386,28 @@ impl VarStore {
         self.hostvars_with
             .insert(host.to_string(), Arc::clone(&completed));
         completed
+    }
+
+    /// Puts the three spellings of the controller that the inventory does not list into the
+    /// `hostvars` map, as the reference answers `hostvars` for them whether the inventory lists
+    /// them or not. A spelling stands for the first host of the inventory that has one of the
+    /// three names, and for the one implicit host when there is none. None of them is in
+    /// `groups`: `Hostvars` leaves them out of an iteration.
+    fn add_controller_views(&self, map: &mut Map<String, Value>) {
+        let implicit = self.implicit_controller.as_deref().unwrap_or("localhost");
+        let mut implicit_view = None;
+        for spelling in LOCALHOST_NAMES {
+            if self.inventory_vars.contains_key(spelling) {
+                continue;
+            }
+            let view = match self.controller_alias(spelling) {
+                Some(alias) => map.get(alias).cloned().unwrap_or_default(),
+                None => implicit_view
+                    .get_or_insert_with(|| Value::Object(self.host_view(implicit)))
+                    .clone(),
+            };
+            map.insert(spelling.to_string(), view);
+        }
     }
 
     /// The values every host of a batch reads the same: `groups`, which only a refresh of the

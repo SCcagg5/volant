@@ -94,7 +94,7 @@ fn a_pattern_selects_in_inventory_order(#[case] pattern: &str, #[case] want: &[&
 #[test]
 fn the_controller_is_an_implicit_local_host() {
     let inv = Inventory::empty();
-    for name in ["localhost", "127.0.0.1", "::1"] {
+    for name in LOCALHOST_NAMES {
         let res = inv.resolve(name);
         assert_eq!(res.hosts.len(), 1, "{name} matched nothing");
         assert_eq!(res.hosts[0].name, name);
@@ -105,6 +105,31 @@ fn the_controller_is_an_implicit_local_host() {
         inv.resolve("all").hosts.is_empty(),
         "implicit localhost is not part of all"
     );
+}
+
+/// A spelling of the controller that the inventory does not list means the inventory's own
+/// controller host, the first it defines, with that host's variables: ansible-core 2.19.12 keeps
+/// one controller host and hands it out for every spelling. With none defined the spelling is an
+/// implicit host of its own name.
+#[rstest]
+#[case::none_defined("[web]\nweb1\n", "127.0.0.1", &["127.0.0.1"], json!(null))]
+#[case::another_spelling("[web]\nweb1\nlocalhost foo=1\n", "127.0.0.1", &["localhost"], json!(1))]
+#[case::the_first_defined("127.0.0.1 foo=1\n::1 foo=2\n", "localhost", &["127.0.0.1"], json!(1))]
+#[case::listed_means_itself("localhost foo=1\n127.0.0.1 foo=2\n", "127.0.0.1", &["127.0.0.1"], json!(2))]
+#[case::a_pattern_of_spellings("localhost\n", "::1,localhost", &["localhost"], json!(null))]
+#[case::not_a_spelling("localhost\n", "web1", &[], json!(null))]
+fn an_unlisted_controller_spelling_is_the_inventorys_controller(
+    #[case] ini: &str,
+    #[case] pattern: &str,
+    #[case] want: &[&str],
+    #[case] foo: Value,
+) {
+    let inv = Inventory::parse_ini(ini).unwrap();
+    let res = inv.resolve(pattern);
+    assert_eq!(names(&res.hosts), want, "{pattern}");
+    if let Some(host) = res.hosts.first() {
+        assert_eq!(host.vars.get("foo").unwrap_or(&Value::Null), &foo);
+    }
 }
 
 /// The terms of a pattern, as ansible-core 2.19.12's `split_host_pattern` cuts them: the

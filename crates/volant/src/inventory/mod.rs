@@ -404,10 +404,26 @@ impl Inventory {
             return out;
         }
         if is_localhost(term) {
-            return vec![term.to_string()];
+            return vec![self.controller_alias(term).unwrap_or(term).to_string()];
         }
         res.unmatched.push(term.to_string());
         Vec::new()
+    }
+
+    /// The inventory's own host that answers to `name`, when `name` is one of the three spellings
+    /// of the controller (`localhost`, `127.0.0.1`, `::1`), the inventory has no host of that
+    /// name and it has a host of another of the three. The reference keeps one controller host
+    /// and hands it out for every spelling the inventory does not list, so `hosts: 127.0.0.1`
+    /// runs on the inventory's `localhost` and takes its variables. The first one the inventory
+    /// defines is the one.
+    pub fn controller_alias(&self, name: &str) -> Option<&str> {
+        if !is_localhost(name) || self.hosts.iter().any(|h| h.name == name) {
+            return None;
+        }
+        self.hosts
+            .iter()
+            .map(|h| h.name.as_str())
+            .find(|n| is_localhost(n))
     }
 
     /// Group vars from the outermost group to the innermost, then host vars on top.
@@ -458,8 +474,11 @@ fn show_unsafe(value: &Value) -> Value {
 }
 
 pub fn is_localhost(name: &str) -> bool {
-    matches!(name, "localhost" | "127.0.0.1" | "::1")
+    LOCALHOST_NAMES.contains(&name)
 }
+
+/// The three spellings of the controller host, in the order the reference lists them.
+pub const LOCALHOST_NAMES: [&str; 3] = ["localhost", "127.0.0.1", "::1"];
 
 fn implicit_localhost(name: &str) -> Host {
     let mut vars = BTreeMap::new();

@@ -29,6 +29,41 @@ pub struct HostVars {
     pub untrusted_hosts: Arc<BTreeSet<String>>,
 }
 
+/// What a `hostvars` entry holds in place of the implicit host's interpreter until someone reads
+/// the entry: see `settled`.
+pub(crate) const PENDING_PYTHON: &str = "\u{0}volant:controller-python";
+
+/// A `hostvars` entry as a reader sees it. The implicit host's `ansible_python_interpreter` is
+/// the controller's own Python, and finding it starts one, so the entry carries a stand-in and
+/// the interpreter is looked up here, the first time an entry that still has the stand-in is
+/// read. It is left out when no interpreter resolves.
+pub fn settled(entry: &Value) -> std::borrow::Cow<'_, Value> {
+    let pending = entry
+        .as_object()
+        .and_then(|map| host_setting(map, "ansible_python_interpreter"))
+        .and_then(Value::as_str)
+        .is_some_and(|python| python == PENDING_PYTHON);
+    if !pending {
+        return std::borrow::Cow::Borrowed(entry);
+    }
+    let mut entry = entry.clone();
+    if let Some(map) = entry.as_object_mut() {
+        match crate::runtime::resolve::controller_python() {
+            Some(python) => map.insert("ansible_python_interpreter".into(), Value::String(python)),
+            None => map.shift_remove("ansible_python_interpreter"),
+        };
+    }
+    std::borrow::Cow::Owned(entry)
+}
+
+/// `settled` for every entry of a `hostvars` map.
+pub fn settled_all(hostvars: &Map<String, Value>) -> Map<String, Value> {
+    hostvars
+        .iter()
+        .map(|(host, entry)| (host.clone(), settled(entry).into_owned()))
+        .collect()
+}
+
 impl HostVars {
     /// `insert`, for a name whose value came from a managed host: a `register`, `result`, a loop
     /// item built from one. The name is data from here on and is never rendered again.

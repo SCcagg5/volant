@@ -406,6 +406,108 @@ fn the_run_s_tag_lists_decide_the_kubeconfig_block() {
     assert_eq!(holds(&mut store), (false, json!(["all"]), json!(["foo"])));
 }
 
+/// `hostvars` answers for the three spellings of the controller whether the inventory lists them
+/// or not, as ansible-core 2.19.12 does. An unlisted one is an implicit host with a local
+/// connection and the controller's Python, named after the first spelling a host ran under
+/// (`localhost` until one has) and shared by the three spellings. Another spelling of a listed
+/// one is that host.
+#[rstest::rstest]
+#[case::implicit_localhost("", "web1", "localhost", "localhost", json!("local"), json!(null))]
+#[case::implicit_loopback("", "web1", "127.0.0.1", "localhost", json!("local"), json!(null))]
+#[case::implicit_v6("", "web1", "::1", "localhost", json!("local"), json!(null))]
+#[case::named_after_the_first_spelling("", "::1", "localhost", "::1", json!("local"), json!(null))]
+#[case::listed_keeps_its_vars("localhost foo=1\n", "web1", "localhost", "localhost", json!(null), json!(1))]
+#[case::another_spelling_is_the_listed_host("localhost foo=1\n", "web1", "::1", "localhost", json!(null), json!(1))]
+#[case::the_first_listed_wins("::1 foo=2\nlocalhost foo=1\n", "web1", "127.0.0.1", "::1", json!(null), json!(2))]
+fn hostvars_answers_for_every_spelling_of_the_controller(
+    #[case] listed: &str,
+    #[case] first_host: &str,
+    #[case] spelling: &str,
+    #[case] name: &str,
+    #[case] connection: Value,
+    #[case] foo: Value,
+) {
+    let tmp = scratch();
+    let dir = tmp.path();
+    write(
+        dir,
+        "inventory/hosts.ini",
+        &format!("[web]\nweb1\n{listed}"),
+    );
+    let inv = Inventory::load(&dir.join("inventory/hosts.ini")).unwrap();
+    let mut store = VarStore::new(
+        &inv,
+        Some(&dir.join("inventory/hosts.ini")),
+        &dir.join("play"),
+        Map::new(),
+    )
+    .unwrap();
+    crate::runtime::resolve::set_test_python(Some("/ctl/python3"));
+    let view = store.hostvars_shared(first_host);
+    let entry = &*settled(&view[spelling]);
+    assert_eq!(entry["inventory_hostname"], json!(name));
+    assert_eq!(
+        entry.get("ansible_connection").unwrap_or(&Value::Null),
+        &connection
+    );
+    assert_eq!(entry.get("foo").unwrap_or(&Value::Null), &foo);
+    if connection == json!("local") {
+        assert_eq!(entry["ansible_python_interpreter"], json!("/ctl/python3"));
+    }
+    assert_eq!(entry["ansible_facts"], json!({}));
+}
+
+/// Finding the controller's Python starts one, so the implicit host's entry holds a stand-in until
+/// it is read, and a layer above the inventory's own still replaces the interpreter before then.
+#[rstest::rstest]
+#[case::the_controllers_python(None, Some("/ctl/python3"), Some(json!("/ctl/python3")))]
+#[case::none_resolves(None, None, None)]
+#[case::a_host_file_wins(Some("ansible_python_interpreter: /hv/python\n"), Some("/ctl/python3"), Some(json!("/hv/python")))]
+fn the_implicit_hosts_interpreter_is_looked_up_when_its_entry_is_read(
+    #[case] host_file: Option<&str>,
+    #[case] controller: Option<&str>,
+    #[case] want: Option<Value>,
+) {
+    let tmp = scratch();
+    let dir = tmp.path();
+    write(dir, "inventory/hosts.ini", "[web]\nweb1\n");
+    if let Some(text) = host_file {
+        write(dir, "inventory/host_vars/localhost.yml", text);
+    }
+    let inv = Inventory::load(&dir.join("inventory/hosts.ini")).unwrap();
+    let mut store = VarStore::new(
+        &inv,
+        Some(&dir.join("inventory/hosts.ini")),
+        &dir.join("play"),
+        Map::new(),
+    )
+    .unwrap();
+    crate::runtime::resolve::set_test_python(controller);
+    let view = store.hostvars_shared("web1");
+    let raw = view["localhost"].get("ansible_python_interpreter");
+    if host_file.is_none() {
+        assert_eq!(raw, Some(&json!(PENDING_PYTHON)), "built without a lookup");
+    }
+    let entry = settled(&view["localhost"]);
+    assert_eq!(entry.get("ansible_python_interpreter"), want.as_ref());
+}
+
+/// A fact the controller gathers shows in every spelling that stands for it.
+#[test]
+fn a_spelling_of_the_controller_follows_its_host() {
+    let tmp = scratch();
+    let dir = tmp.path();
+    write(dir, "inventory/hosts.ini", "[web]\nweb1\nlocalhost\n");
+    let inv = Inventory::load(&dir.join("inventory/hosts.ini")).unwrap();
+    let mut store = VarStore::new(&inv, None, &dir.join("play"), Map::new()).unwrap();
+    assert!(store.hostvars_shared("web1")["::1"]["marker"].is_null());
+    store.set_fact("localhost", "marker", json!("set"));
+    let view = store.hostvars_shared("web1");
+    assert_eq!(view["localhost"]["marker"], json!("set"));
+    assert_eq!(view["127.0.0.1"]["marker"], json!("set"));
+    assert_eq!(view["::1"]["marker"], json!("set"));
+}
+
 /// The view `hostvars` reads: one shared map for every host of the inventory, and a completed
 /// one for a host the inventory does not carry.
 #[test]
@@ -430,7 +532,11 @@ fn the_shared_hostvars_view_answers_for_every_host() {
     );
     let implicit = store.hostvars_shared("localhost");
     assert!(
-        !view.contains_key("localhost"),
+        view.contains_key("localhost"),
+        "the controller answers in hostvars though it is in no group"
+    );
+    assert!(
+        !store.groups["all"].contains(&"localhost".to_string()),
         "an implicit localhost is in no group"
     );
     assert_eq!(

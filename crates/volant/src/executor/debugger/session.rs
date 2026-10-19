@@ -163,7 +163,7 @@ impl Session {
             all.entry(k.clone()).or_insert_with(|| v.clone());
         }
         all.entry("hostvars".to_string())
-            .or_insert_with(|| Value::Object((*self.vars.hostvars).clone()));
+            .or_insert_with(|| Value::Object(crate::vars::settled_all(&self.vars.hostvars)));
         all
     }
 
