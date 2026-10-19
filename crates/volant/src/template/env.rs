@@ -15,10 +15,13 @@ use crate::bridge::Bridge;
 
 use super::context::Context;
 use super::filters;
-use super::pymethods::mutable::{is_literal, mutable};
+use super::pymethods::mutable::{
+    MutDict, MutList, is_literal, is_mutable, key, mutable, snapshot_answer,
+};
 use super::vm::concat;
 use super::{
-    ATTR_KEY, CONCAT_KEY, CONST_KEY, CONTEXT_KEY, ITEM_KEY, MATTR_KEY, MITEM_KEY, VAR_KEY,
+    ATTR_KEY, CONCAT_KEY, CONST_KEY, CONTEXT_KEY, ITEM_KEY, MATTR_KEY, MITEM_KEY, MKLIST_KEY,
+    MKMAP_KEY, VAR_KEY,
 };
 
 /// The engine's environment: minijinja's, strict about undefined values, with every filter,
@@ -51,6 +54,19 @@ pub(super) fn environment(base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) -> En
     env.add_function("range", range);
     env.add_function(ITEM_KEY, chained_item);
     env.add_function(MITEM_KEY, mutable_item);
+    env.add_function(MKLIST_KEY, |items: Rest<minijinja::Value>| {
+        MutList::from_items(items.0)
+    });
+    env.add_function(
+        MKMAP_KEY,
+        |pairs: Rest<minijinja::Value>| -> Result<minijinja::Value, minijinja::Error> {
+            let mut entries = indexmap::IndexMap::new();
+            for pair in pairs.chunks(2) {
+                entries.insert(key(&pair[0])?, pair[1].clone());
+            }
+            Ok(MutDict::from_entries(entries))
+        },
+    );
     env
 }
 
@@ -276,7 +292,14 @@ where
         if any_undefined(&args[..checked.min(args.len())]) {
             return Ok(minijinja::Value::UNDEFINED);
         }
-        f.call(state, &args)
+        let answer = f.call(state, &args)?;
+        // ansible-core hands back a copy of what a filter answers, so a list changed in place
+        // does not change through what a filter made of it.
+        Ok(if args.iter().any(is_mutable) {
+            snapshot_answer(&answer)
+        } else {
+            answer
+        })
     }
 }
 

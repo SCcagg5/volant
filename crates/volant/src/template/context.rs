@@ -13,7 +13,7 @@ use super::env::{chained_attr, fresh_const, mutable_attr, mutable_var};
 use super::pymethods::mutable::{identity, mutable};
 use super::{
     ATTR_KEY, CONCAT_KEY, CONST_KEY, CONTEXT_KEY, HOSTVARS_KEYS, ITEM_KEY, MATTR_KEY, MITEM_KEY,
-    QUERY_KEY, TAINT_KEY, Tainted, VAR_KEY,
+    MKLIST_KEY, MKMAP_KEY, QUERY_KEY, TAINT_KEY, Tainted, VAR_KEY,
 };
 
 /// The name, in the variables an extended loop shares between its items, under which the list of
@@ -261,11 +261,17 @@ impl Object for Context {
         let key = key.as_str()?;
         // Not a variable: the VM looks the root up before the globals, so a variable of that
         // name (`-e '{"volant::concat": 1}'`) would otherwise replace every `~`.
-        if key == CONCAT_KEY
-            || key == QUERY_KEY
-            || key == ITEM_KEY
-            || key == MITEM_KEY
-            || key == ALLITEMS_KEY
+        if [
+            CONCAT_KEY,
+            QUERY_KEY,
+            ITEM_KEY,
+            MITEM_KEY,
+            MKLIST_KEY,
+            MKMAP_KEY,
+            ALLITEMS_KEY,
+        ]
+        .contains(&key)
+        {
             return None;
         }
         if let Some(attr) = key.strip_prefix(ATTR_KEY) {

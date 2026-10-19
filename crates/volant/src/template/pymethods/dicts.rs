@@ -6,7 +6,7 @@ use minijinja::{Error, Value};
 
 use super::args::{Call, iterate, raise};
 use super::format::repr;
-use super::mutable::{Dict, MutDict, child, snapshot};
+use super::mutable::{Dict, MutDict, key, snapshot};
 
 fn none() -> Result<Value, Error> {
     Ok(Value::from(()))
@@ -20,16 +20,17 @@ fn list(items: Vec<Value>) -> Value {
 pub(super) fn call(me: &MutDict, name: &str, args: &[Value]) -> Option<Result<Value, Error>> {
     let call = Call::of("dict", args);
     Some(match name {
-        "get" => call.between(name, 1, 2).map(|a| {
-            let found = me.with(|d| d.get(&a[0]).cloned());
-            found.map_or_else(
+        "get" => call.between(name, 1, 2).and_then(|a| {
+            let k = key(&a[0])?;
+            let found = me.read(|d| d.get(&k).cloned());
+            Ok(found.map_or_else(
                 || a.get(1).cloned().unwrap_or_else(|| Value::from(())),
                 |v| snapshot(&v),
-            )
+            ))
         }),
         "keys" => call
             .none(name)
-            .map(|()| list(me.with(|d| d.keys().cloned().collect()))),
+            .map(|()| list(me.read(|d| d.keys().cloned().collect()))),
         "values" => call
             .none(name)
             .map(|()| list(me.entries().values().map(snapshot).collect())),
@@ -41,38 +42,39 @@ pub(super) fn call(me: &MutDict, name: &str, args: &[Value]) -> Option<Result<Va
                     .collect(),
             )
         }),
-        "copy" => call
-            .none(name)
-            .map(|()| snapshot(&Value::from_iter(me.entries()))),
+        "copy" => call.none(name).map(|()| me.copy_of()),
         "clear" => call.none(name).map(|()| {
             me.with(Dict::clear);
             Value::from(())
         }),
-        "pop" => call
-            .between(name, 1, 2)
-            .and_then(|a| match me.with(|d| d.shift_remove(&a[0])) {
+        "pop" => call.between(name, 1, 2).and_then(|a| {
+            let k = key(&a[0])?;
+            match me.with(|d| d.shift_remove(&k)) {
                 Some(v) => Ok(v),
-                None => a.get(1).cloned().ok_or_else(|| raise(repr(&a[0]))),
-            }),
+                None => a.get(1).cloned().ok_or_else(|| raise(repr(&k))),
+            }
+        }),
         "popitem" => call.none(name).and_then(|()| {
             me.with(Dict::pop)
                 .map(|(k, v)| list(vec![k, v]))
                 .ok_or_else(|| raise("'popitem(): dictionary is empty'"))
         }),
-        "setdefault" => call.between(name, 1, 2).map(|a| {
+        "setdefault" => call.between(name, 1, 2).and_then(|a| {
+            let k = key(&a[0])?;
             let default = a.get(1).map_or_else(|| Value::from(()), snapshot);
-            me.with(|d| {
-                d.entry(a[0].clone()).or_insert(default);
-                child(d, &a[0]).unwrap_or_else(|| Value::from(()))
-            })
+            Ok(me.with_store(|store| {
+                store.entries_mut().entry(k.clone()).or_insert(default);
+                store.child(&k).unwrap_or_else(|| Value::from(()))
+            }))
         }),
         "update" => update(me, &call),
         "fromkeys" => call.between(name, 1, 2).and_then(|a| {
             let value = a.get(1).map_or_else(|| Value::from(()), snapshot);
-            Ok(iterate(&a[0])?
-                .into_iter()
-                .map(|k| (k, value.clone()))
-                .collect())
+            let mut keys = Vec::new();
+            for k in iterate(&a[0])? {
+                keys.push(key(&k)?);
+            }
+            Ok(keys.into_iter().map(|k| (k, value.clone())).collect())
         }),
         _ => return None,
     })
@@ -91,7 +93,7 @@ fn update(me: &MutDict, call: &Call<'_>) -> Result<Value, Error> {
         if other.kind() == ValueKind::Map {
             for key in other.try_iter()? {
                 let value = other.get_item(&key)?;
-                pairs.push((key, snapshot(&value)));
+                pairs.push((super::mutable::key(&key)?, snapshot(&value)));
             }
         } else {
             for (at, item) in iterate(other)?.iter().enumerate() {
@@ -106,7 +108,7 @@ fn update(me: &MutDict, call: &Call<'_>) -> Result<Value, Error> {
                         pair.len()
                     ))
                 })?;
-                pairs.push((key, snapshot(&value)));
+                pairs.push((super::mutable::key(&key)?, snapshot(&value)));
             }
         }
     }

@@ -43,13 +43,15 @@ pub(super) fn call(me: &MutList, name: &str, args: &[Value]) -> Option<Result<Va
             none()
         }),
         "remove" => call.one(name).and_then(|v| {
-            me.with(|items| match items.iter().position(|x| x == v) {
+            // The item is copied first: comparing it with a list that is itself locked waits for ever.
+            let v = snapshot(v);
+            match me.read(|items| items.iter().position(|x| *x == v)) {
                 Some(at) => {
-                    items.remove(at);
+                    me.with(|items| items.remove(at));
                     none()
                 }
                 None => Err(raise("list.remove(x): x not in list")),
-            })
+            }
         }),
         "pop" => call.between(name, 0, 1).and_then(|a| {
             let at = a.first().map_or(Ok(-1), index)?;
@@ -74,22 +76,26 @@ pub(super) fn call(me: &MutList, name: &str, args: &[Value]) -> Option<Result<Va
             me.with(Vec::clear);
             Value::from(())
         }),
-        "copy" => call.none(name).map(|()| snapshot(&Value::from(me.items()))),
+        "copy" => call.none(name).map(|()| me.copy_of()),
         "index" => call.between(name, 1, 3).and_then(|a| {
-            let items = me.items();
-            let (start, end) = clamp(items.len(), bound(a.get(1))?, bound(a.get(2))?);
-            items
-                .iter()
-                .enumerate()
-                .take(end)
-                .skip(start)
-                .find(|(_, x)| *x == &a[0])
-                .map(|(at, _)| Value::from(at))
-                .ok_or_else(|| raise(format!("{} is not in list", repr(&a[0]))))
+            let (start, end) = (bound(a.get(1))?, bound(a.get(2))?);
+            let item = snapshot(&a[0]);
+            me.read(|items| {
+                let (start, end) = clamp(items.len(), start, end);
+                items
+                    .iter()
+                    .enumerate()
+                    .take(end)
+                    .skip(start)
+                    .find(|(_, x)| **x == item)
+                    .map(|(at, _)| Value::from(at))
+                    .ok_or_else(|| raise(format!("{} is not in list", repr(&item))))
+            })
         }),
-        "count" => call
-            .one(name)
-            .map(|v| Value::from(me.items().iter().filter(|x| *x == v).count())),
+        "count" => call.one(name).map(|v| {
+            let item = snapshot(v);
+            Value::from(me.read(|items| items.iter().filter(|x| **x == item).count()))
+        }),
         _ => return None,
     })
 }
@@ -118,7 +124,7 @@ fn sort(me: &MutList, call: &Call<'_>) -> Result<Value, Error> {
             }
         }
     }
-    let mut items = me.items();
+    let mut items = me.items().to_vec();
     let mut failure = None;
     items.sort_by(|a, b| {
         compare(a, b).unwrap_or_else(|e| {

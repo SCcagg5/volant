@@ -18,7 +18,10 @@ use super::context::set_literal;
 use super::env::{attr_call, const_call, container_repr, holds_undefined, var_call};
 use super::pymethods::mutable::MUTATORS;
 use super::templar::Templar;
-use super::{CONCAT_KEY, ITEM_KEY, MITEM_KEY, QUERY_KEY, TemplateError, UNDEFINED, VAULT_NAME};
+use super::{
+    CONCAT_KEY, ITEM_KEY, MITEM_KEY, MKLIST_KEY, MKMAP_KEY, QUERY_KEY, TemplateError, UNDEFINED,
+    VAULT_NAME,
+};
 
 /// Replaces every `!unsafe` wrapper inside `value` by its text, and every `!vault` wrapper that
 /// decrypts by what it holds; whether there was one. A vault wrapper that does not decrypt stays
@@ -145,6 +148,12 @@ pub(super) fn route_calls(instructions: &mut Instructions<'_>, mutating: bool) {
             }
             Instruction::GetAttr(name) => {
                 *op = Instruction::CallFunction(attr_call(name, mutating), Some(1));
+            }
+            Instruction::BuildList(Some(n)) if mutating && u16::try_from(*n).is_ok() => {
+                *op = Instruction::CallFunction(MKLIST_KEY, u16::try_from(*n).ok());
+            }
+            Instruction::BuildMap(n) if mutating && u16::try_from(*n * 2).is_ok() => {
+                *op = Instruction::CallFunction(MKMAP_KEY, u16::try_from(*n * 2).ok());
             }
             Instruction::LoadConst(value) if mutating => {
                 if let Some(name) = const_call(value) {

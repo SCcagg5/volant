@@ -17,7 +17,7 @@ mod text;
 mod translate;
 
 use args::{Call, raise, type_of};
-use mutable::{Dict, MutDict, MutList, is_dict, is_list, plain_list, plain_map};
+use mutable::{Dict, MutDict, MutList, is_dict, is_list};
 
 /// Installs the hook on `env`.
 pub(super) fn register(env: &mut Environment<'static>) {
@@ -82,15 +82,14 @@ fn call(state: &State, value: &Value, method: &str, args: &[Value]) -> Result<Va
 /// `hostvars[h].items.append(1)`). The method runs on a copy, so what it returns is right and
 /// what it changes is lost.
 fn container(value: &Value, method: &str, args: &[Value]) -> Option<Result<Value, Error>> {
-    if let Some(items) = plain_list(value) {
-        return lists::call(&MutList::temp(items.clone()), method, args);
-    }
-    if let Some(entries) = plain_map(value) {
-        let entries: Dict = entries.clone();
-        return dicts::call(&MutDict::temp(entries), method, args);
+    let object = value.as_object()?;
+    if let Some(items) = object.downcast::<Vec<Value>>() {
+        return lists::call(&MutList::temp(items), method, args);
     }
     // A mutable list or mapping reaches here for a name that no method has.
-    None
+    object
+        .downcast::<Dict>()
+        .and_then(|entries| dicts::call(&MutDict::temp(entries), method, args))
 }
 
 /// Every method `str` has in CPython 3.13. A name outside this list is no method at all; one in

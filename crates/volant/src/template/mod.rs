@@ -102,6 +102,9 @@ const CONST_KEY: &str = "volant::const:";
 const VAR_KEY: &str = "volant::var:";
 /// `ITEM_KEY` for such a template.
 const MITEM_KEY: &str = "volant::mitem";
+/// What a list or mapping written out in such a template is built by, so that it can change.
+const MKLIST_KEY: &str = "volant::mklist";
+const MKMAP_KEY: &str = "volant::mkmap";
 
 /// The global a call to `query` or `q` is compiled to call, see [`vm::route_calls`]. Not a global of
 /// either name: measured on ansible-core 2.19.12, `q is defined` is false on a host with no
