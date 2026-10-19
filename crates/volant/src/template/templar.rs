@@ -7,6 +7,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use minijinja::machinery::{Instruction, Instructions, WhitespaceConfig};
+use minijinja::syntax::SyntaxConfig;
 use minijinja::{Environment, ErrorKind};
 use serde_json::{Map, Value};
 
@@ -198,7 +199,7 @@ impl Templar {
             keep_trailing_newline: true,
             ..WhitespaceConfig::default()
         };
-        render_str(self, "<string>", text, ctx, ws)
+        render_str(self, "<string>", text, ctx, ws, SyntaxConfig::default())
             .map(Value::String)
             .map_err(convert_error)
     }

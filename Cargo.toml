@@ -49,6 +49,7 @@ insta = { version = "1", features = ["filters"] }
 libc = "0.2"
 miniz_oxide = "0.9.1"
 minijinja = { version = "~2.24", features = [
+  "custom_syntax",
   "preserve_order",
   "unstable_machinery",
 ] }

@@ -147,8 +147,8 @@ pub(super) fn route_calls(instructions: &mut Instructions<'_>) {
 }
 
 /// `env.render_named_str`, with `~` routed through [`concat()`]. Compiled once per call, as
-/// `render_named_str` does, with the whitespace settings given. The only place that decides
-/// auto-escape and syntax. The environment is the templar's, with the filters and tests the
+/// `render_named_str` does, with the whitespace and syntax settings given. The only place that
+/// decides auto-escape. The environment is the templar's, with the filters and tests the
 /// compiled code calls that only the Python helper has ([`Templar::env_for`]).
 pub(super) fn render_str(
     templar: &Templar,
@@ -156,9 +156,10 @@ pub(super) fn render_str(
     source: &str,
     ctx: &minijinja::Value,
     ws_config: WhitespaceConfig,
+    syntax_config: SyntaxConfig,
 ) -> Result<String, minijinja::Error> {
     let config = TemplateConfig {
-        syntax_config: SyntaxConfig,
+        syntax_config,
         ws_config,
         // Never by file name: measured on ansible-core 2.19.12, `index.html.j2` holding
         // `{{ "<b>" }}` writes `<b>`.

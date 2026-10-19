@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use minijinja::value::Kwargs;
 use minijinja::{Error, ErrorKind, State, Value};
 
 use super::{invalid, search_path};
@@ -33,7 +34,30 @@ thread_local! {
 /// Deeper than this, a template that looks itself up would overflow the stack rather than fail.
 pub(super) const MAX_TEMPLATE_DEPTH: usize = 32;
 
-/// The file rendered once, with the `template` module's default options, against the variables
+/// The options `lookup('template')` takes: the four delimiters and `trim_blocks`, read the way
+/// the reference reads them, and nothing else.
+pub(super) fn options(kwargs: &Kwargs) -> Result<FileRender, Error> {
+    let mut options = FileRender::default();
+    let syntax = &mut options.syntax;
+    for (name, field) in [
+        ("variable_start_string", &mut syntax.variable_start),
+        ("variable_end_string", &mut syntax.variable_end),
+        ("comment_start_string", &mut syntax.comment_start),
+        ("comment_end_string", &mut syntax.comment_end),
+    ] {
+        if let Some(value) = kwargs.get::<Option<String>>(name)? {
+            *field = value;
+        }
+    }
+    syntax.check_starts().map_err(invalid)?;
+    if let Some(trim) = kwargs.get::<Option<bool>>("trim_blocks")? {
+        options.trim_blocks = trim;
+    }
+    Ok(options)
+}
+
+/// The file rendered once, with the options of the call (the `template` module's defaults when
+/// it gave none), against the variables
 /// and the trust of the render that called the lookup. A lookup reaches only the borrowed
 /// `Environment` behind its `State`, not a `Templar`, so it builds one: a render per lookup call
 /// does not make keeping one worth it.
@@ -56,6 +80,7 @@ pub(super) fn render_template(
     text: &str,
     base_dir: &Path,
     bridge: Option<&Arc<Bridge>>,
+    options: &FileRender,
 ) -> Result<Value, Error> {
     let depth = TEMPLATE_DEPTH.get();
     if depth >= MAX_TEMPLATE_DEPTH {
@@ -64,7 +89,7 @@ pub(super) fn render_template(
         )));
     }
     TEMPLATE_DEPTH.set(depth + 1);
-    let out = render_template_at(state, name, path, text, base_dir, bridge);
+    let out = render_template_at(state, name, path, text, base_dir, bridge, options);
     TEMPLATE_DEPTH.set(depth);
     out.map(Value::from).map_err(|e| lookup_error(name, &e))
 }
@@ -76,6 +101,7 @@ pub(super) fn render_template_at(
     text: &str,
     base_dir: &Path,
     bridge: Option<&Arc<Bridge>>,
+    options: &FileRender,
 ) -> Result<String, TemplateError> {
     let templar = Templar::with_bridge(base_dir.to_path_buf(), bridge.cloned());
     let root = state.lookup(crate::template::CONTEXT_KEY);
@@ -154,7 +180,7 @@ pub(super) fn render_template_at(
         untrusted: Some(&untrusted),
         untrusted_hosts,
     };
-    templar.render_file(text, vars, &FileRender::default())
+    templar.render_file(text, vars, options)
 }
 
 pub(super) fn lookup_error(name: &str, e: &TemplateError) -> Error {

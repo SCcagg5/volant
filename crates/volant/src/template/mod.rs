@@ -28,7 +28,7 @@ pub use templar::Templar;
 use vm::{convert_error, holds_template, render_str};
 
 pub use bridged::{bridged_name, not_sent_reason};
-pub use file::FileRender;
+pub use file::{FileRender, Syntax};
 pub use lookups::supported as lookup_supported;
 
 /// Prefix of every error raised because a variable had no value, the one template failure

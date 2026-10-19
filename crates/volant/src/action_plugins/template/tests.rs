@@ -107,11 +107,16 @@ fn sent(plugin: &mut dyn Plugin) -> Sub {
     }
 }
 
-/// The bytes a sub-task stages, as text.
-fn staged(sub: &Sub) -> String {
+/// The bytes a sub-task stages.
+fn staged_bytes(sub: &Sub) -> Vec<u8> {
     assert_eq!(sub.module, "copy");
     assert_eq!(sub.files.len(), 1, "{:?}", sub.files);
-    String::from_utf8(b64_decode(&sub.files[0].1.b64).unwrap()).unwrap()
+    b64_decode(&sub.files[0].1.b64).unwrap()
+}
+
+/// The bytes a sub-task stages, as text.
+fn staged(sub: &Sub) -> String {
+    String::from_utf8(staged_bytes(sub)).unwrap()
 }
 
 /// The task's result when it ends before any sub-task.
@@ -208,6 +213,37 @@ fn the_options_and_variables_are_the_reference_s() {
     }
 }
 
+/// The delimiters of a task reach the file, each row as `ansible-playbook` of ansible-core
+/// 2.19.12 wrote it.
+#[test]
+fn the_delimiters_reach_the_file() {
+    let dir = with_template(
+        "d.j2",
+        "[[ template_path ]] {{ one }} <% if 1 %>b<% endif %>\nx\n",
+    );
+    let at = |extra: Value| {
+        let mut args = map(json!({"src": "d.j2", "dest": "/tmp/d"}));
+        args.extend(map(extra));
+        let mut plugin = start_plain(&dir, Value::Object(args));
+        staged(&sent(plugin.as_mut()))
+    };
+    let vs = json!({"variable_start_string": "[[", "variable_end_string": "]]"});
+    assert_eq!(at(vs.clone()), "d.j2 {{ one }} <% if 1 %>b<% endif %>\nx\n");
+    let mut both = map(vs);
+    both.extend(map(
+        json!({"block_start_string": "<%", "block_end_string": "%>"}),
+    ));
+    assert_eq!(at(Value::Object(both)), "d.j2 {{ one }} bx\n");
+    // A text with none of the start strings is written as it is.
+    assert_eq!(
+        at(
+            json!({"variable_start_string": "@@", "block_start_string": "@%",
+                  "comment_start_string": "@#"})
+        ),
+        "[[ template_path ]] {{ one }} <% if 1 %>b<% endif %>\nx\n"
+    );
+}
+
 /// `ansible_managed` is the reference's default unless the variable is already there.
 #[test]
 fn ansible_managed_is_set_only_when_absent() {
@@ -291,6 +327,8 @@ fn what_cannot_be_rendered_is_refused_before_the_host_is_asked() {
             ),
         ),
     ];
+    // The reference reads an empty or null string as none, and its overrides refuse none; two
+    // start strings that are one are refused too, a list is not a string, and a number is.
     for name in [
         "variable_start_string",
         "variable_end_string",
@@ -299,13 +337,34 @@ fn what_cannot_be_rendered_is_refused_before_the_host_is_asked() {
         "comment_start_string",
         "comment_end_string",
     ] {
+        for value in [json!(""), Value::Null] {
+            let mut args = map(json!({"src": "t.j2", "dest": "/x"}));
+            args.insert(name.into(), value);
+            cases.push((
+                Value::Object(args),
+                format!(
+                    "TemplateOverrides.{name} must be <class 'str'> instead of <class 'NoneType'>"
+                ),
+            ));
+        }
+    }
+    for extra in [
+        json!({"variable_start_string": "{%"}),
+        json!({"variable_start_string": "[[", "block_start_string": "[["}),
+        json!({"comment_start_string": "{{"}),
+        json!({"block_start_string": "{#"}),
+    ] {
         let mut args = map(json!({"src": "t.j2", "dest": "/x"}));
-        args.insert(name.into(), json!("<<"));
+        args.extend(map(extra));
         cases.push((
             Value::Object(args),
-            format!("argument '{name}' is not supported yet on 'template'"),
+            "Block, variable and comment start strings must be different.".into(),
         ));
     }
+    cases.push((
+        json!({"src": "t.j2", "dest": "/x", "variable_start_string": ["a"]}),
+        "Invalid value provided for 'string': ['a']".into(),
+    ));
     for (args, msg) in cases {
         let mut plugin = start_plain(&dir, args.clone());
         assert_eq!(refused(plugin.as_mut()), msg, "{args}");
