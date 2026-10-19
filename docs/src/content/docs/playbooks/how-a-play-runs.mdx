@@ -62,7 +62,7 @@ The render has no host. It reads `groups`, the extra variables, the play's `vars
 
 A string is one pattern. A list is a list of patterns. An empty list matches no host and the play is skipped. An undefined variable, an empty string or a result that is not a string stops the run with exit 4 before the banner. `--limit` narrows the rendered hosts afterwards. `--list-hosts`, `--list-tasks` and `--syntax-check` render the same way, with no play behind them.
 
-Text a host sent back is data. A registered result that holds `{{ ... }}` is a pattern of its own words and is not evaluated. So is a host or group that `add_host` or `group_by` made during the run: once the run has made one, a `hosts` that reads `groups`, `hostvars` or `ansible_play_hosts_all` renders to data. Variables that name each other in a ring stop the run with exit 4.
+Text a host sent back is data. A registered result that holds `{{ ... }}` is a pattern of its own words and is not evaluated. So is a host or group that `add_host` or `group_by` made during the run: once the run has made one, a `hosts` that reads `groups`, `hostvars` or `ansible_play_hosts_all` renders to data. Variables that name each other settle however long the chain is, up to a hundred links, and a ring stops the run with exit 4. Text that only holds braces, such as `{{ '{{' }}x`, is a pattern of its own words.
 
 ### Other strategies
 
