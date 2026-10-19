@@ -9,5 +9,6 @@ pub mod frame;
 pub mod interpreter;
 pub mod messages;
 pub mod modules;
+pub mod shape;
 
 pub use messages::*;

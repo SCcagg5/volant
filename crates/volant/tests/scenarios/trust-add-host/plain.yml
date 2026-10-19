@@ -1,0 +1,39 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: A host joins two groups
+      add_host:
+        name: web1
+        groups: [web, app]
+        ansible_connection: local
+      changed_when: false
+    - name: The inventory shows it
+      debug:
+        msg: "{{ groups['web'] }} {{ groups.keys() | list | sort }} {{ hostvars.keys() | list | sort }}"
+    - name: A play targets the group
+      debug:
+        msg: "{{ hostvars['web1'].inventory_hostname }}"
+
+- hosts: web
+  gather_facts: false
+  tasks:
+    - name: The host reads its own names
+      debug:
+        msg: "{{ inventory_hostname }} {{ group_names | sort }} {{ ansible_play_hosts_all }}"
+    - name: A template in the play still renders
+      debug:
+        msg: "{{ later }}"
+      vars:
+        later: "{{ first }}"
+        first: "{{ inventory_hostname }}-ok"
+
+- hosts: web1
+  gather_facts: false
+  tasks:
+    - name: group_by adds a group beside the added ones
+      group_by:
+        key: "kind_{{ inventory_hostname }}"
+      changed_when: false
+    - name: The groups are read
+      debug:
+        msg: "{{ groups.keys() | list | sort | join(',') }}"

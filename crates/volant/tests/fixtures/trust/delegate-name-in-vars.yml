@@ -1,0 +1,14 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: Read a file whose text looks like a template
+      command: cat {{ payload }}
+      register: r
+    - name: A variable of the task reads the delegate's name
+      command: id
+      delegate_to: "{{ r.stdout }}"
+      vars:
+        ansible_connection: local
+        ansible_user: "{{ inventory_hostname }}"
+        ansible_become_user: "{{ inventory_hostname_short }}"
+        where: "{{ hostvars[inventory_hostname].inventory_hostname }}"

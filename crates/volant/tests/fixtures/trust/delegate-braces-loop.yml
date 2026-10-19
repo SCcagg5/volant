@@ -1,0 +1,15 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: Read a file whose text is part of a template
+      command: cat {{ bare }}
+      register: r
+    - name: Delegate a loop once, with braces built next to the name
+      command: id
+      delegate_to: "{{ r.stdout_lines[0] }}"
+      loop: [1, 2]
+      run_once: true
+      ignore_unreachable: true
+      vars:
+        where: "{{ '{{ ' ~ inventory_hostname ~ ' }}' }}"
+        again: "{{ where }}"

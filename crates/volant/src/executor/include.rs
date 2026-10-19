@@ -281,11 +281,11 @@ fn include_request(
             .map(String::as_str)
             .chain(["ansible_loop"]);
         for name in bound {
-            if let Some(value) = item.vars.get(name) {
+            if let Some(value) = item.vars.get_whole(name) {
                 if item.vars.untrusted.contains(name) {
                     vars.untrusted.insert(name.to_string());
                 }
-                vars.values.insert(name.to_string(), value.clone());
+                vars.values.insert(name.to_string(), value);
             }
         }
         vars.values.insert(

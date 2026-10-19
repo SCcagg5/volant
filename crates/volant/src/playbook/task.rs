@@ -224,7 +224,11 @@ pub(super) fn parse_task(yaml: &Yaml, handler: bool) -> anyhow::Result<PlayTask>
             let k = k
                 .as_str()
                 .ok_or_else(|| anyhow!("task '{label}': 'args' keys must be strings"))?;
-            args.insert(k.to_string(), to_json(v)?);
+            // The reference lets the module's own string or mapping override `args`, so a key
+            // the action line already gave stays as it is.
+            if !args.contains_key(k) {
+                args.insert(k.to_string(), to_json(v)?);
+            }
         }
     }
     let context = format!("task '{label}': ");

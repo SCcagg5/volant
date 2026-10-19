@@ -209,6 +209,7 @@ pub(super) fn load_play_vars_files(
             facts: Some(&layers.facts),
             untrusted: Some(&untrusted),
             untrusted_hosts: Some(&untrusted_hosts),
+            base: None,
         });
         let vars = Vars {
             map: &resolved,
@@ -217,6 +218,7 @@ pub(super) fn load_play_vars_files(
             facts: Some(&layers.facts),
             untrusted: Some(&untrusted),
             untrusted_hosts: Some(&untrusted_hosts),
+            base: None,
         };
         let mut files = Vec::new();
         for raw in &play.vars_files {

@@ -22,6 +22,7 @@ fn a_host_value_in_a_template_is_written_as_text() {
         facts: None,
         untrusted: Some(&untrusted),
         untrusted_hosts: None,
+        base: None,
     };
     let out = templar()
         .render_file("banner: {{ motd }}\n", vars, &FileRender::default())

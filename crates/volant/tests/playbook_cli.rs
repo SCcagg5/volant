@@ -1016,6 +1016,71 @@ fn an_unreadable_ansible_cfg_is_ignored_with_a_warning() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// A planted `ansible.cfg` in a world-writable directory (sticky bit or not) is ignored with the
+/// reference's warning on stderr; a directory without the world-write bit is read as before.
+#[rstest]
+#[case::world_writable(0o777, false)]
+#[case::sticky_and_world_writable(0o1777, false)]
+#[case::only_the_world_bit(0o757, false)]
+#[case::group_writable(0o770, true)]
+#[case::owner_only(0o755, true)]
+fn an_ansible_cfg_in_a_world_writable_directory_is_ignored_with_a_warning(
+    #[case] mode: u32,
+    #[case] read: bool,
+) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let work = dir.path();
+    std::fs::write(
+        work.join("ansible.cfg"),
+        "[defaults]\nvault_password_file = ./pw.sh\n",
+    )
+    .unwrap();
+    std::fs::write(work.join("pw.sh"), "#!/bin/sh\ntouch PLANTED\necho pw\n").unwrap();
+    std::fs::set_permissions(work.join("pw.sh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        work.join("inventory.ini"),
+        "[all]\nh1 ansible_connection=local\n",
+    )
+    .unwrap();
+    std::fs::write(
+        work.join("playbook.yml"),
+        "- hosts: h1\n  gather_facts: false\n  tasks:\n    - debug:\n        msg: hi\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(work, std::fs::Permissions::from_mode(mode)).unwrap();
+    let out = volant_within_full(
+        &["playbook", "-i", "inventory.ini", "playbook.yml"],
+        DEFAULT_DEADLINE,
+        None,
+        None,
+        Some(work),
+        None,
+        &[("HOME", &home.path().display().to_string())],
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{text}\n{err}");
+    assert!(
+        text.contains("\"msg\": \"hi\""),
+        "the play still runs: {text}\n{err}"
+    );
+    assert_eq!(work.join("PLANTED").exists(), read, "{text}\n{err}");
+    let warning = format!(
+        "[WARNING]: Ansible is being run in a world writable directory ({}), ignoring it as an \
+         ansible.cfg source. For more information see \
+         https://docs.ansible.com/ansible/devel/reference_appendices/config.html#cfg-in-world-writable-dir\n",
+        work.canonicalize().unwrap().display()
+    );
+    assert_eq!(err.contains(&warning), !read, "{err}");
+    assert!(
+        !text.contains("world writable"),
+        "the warning is on stderr: {text}"
+    );
+    std::fs::set_permissions(work, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
 #[test]
 fn the_agent_connection_survives_across_plays() {
     let out = volant(&["playbook", &fixture("reuse.yml")]);
@@ -1301,6 +1366,146 @@ fn su_answers_its_prompt_with_the_password(
         !asked.contains("s3cret-su") && !text.contains("s3cret-su"),
         "the password reaches neither su's arguments nor the output"
     );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// [`fake_su_host`] with an `ssh` that wants a password. It logs its program name and arguments
+/// to `ssh.log` and its environment to `ssh.log.env`, and lets the command in only when it was
+/// started with `BatchMode=no` and its askpass answers the password in `expected`. Anything else
+/// is `Permission denied`, as `sshd` says it. `ssh-alt` is the same program under another name.
+fn fake_password_host(name: &str, expected: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = fake_su_host(name);
+    std::fs::write(dir.join("expected"), expected).unwrap();
+    let script = "#!/bin/sh\n\
+        echo \"$0 $*\" >> \"$FAKE_SSH_DIR/ssh.log\"\n\
+        env | sort >> \"$FAKE_SSH_DIR/ssh.log.env\"\n\
+        ask=\n\
+        case \" $* \" in *' BatchMode=no '*) ask=1;; esac\n\
+        given=\n\
+        [ -n \"$ask\" ] && [ -n \"$SSH_ASKPASS\" ] && given=$(\"$SSH_ASKPASS\" \"tester@fake-host's password: \")\n\
+        if [ \"$given\" != \"$(cat \"$FAKE_SSH_DIR/expected\")\" ]; then\n\
+          echo 'tester@fake-host: Permission denied (publickey,password).' >&2\n\
+          exit 255\n\
+        fi\n\
+        while [ $# -gt 0 ] && [ \"$1\" != -- ]; do shift; done\n\
+        [ $# -gt 1 ] || exit 0\n\
+        exec sh -c \"$2\"\n";
+    for file in ["ssh", "ssh-alt"] {
+        let path = dir.join("bin").join(file);
+        std::fs::write(&path, script).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    dir
+}
+
+/// A password variable reaches `ssh` only through `SSH_ASKPASS`, in the reference's name order and
+/// over the password file: at `-vvvv` no output, argument or environment holds it.
+#[rstest]
+#[case::password("ansible_password=s3cret-conn-pw", &[], 0, "changed: [box]")]
+#[case::ssh_pass("ansible_ssh_pass=s3cret-conn-pw", &[], 0, "changed: [box]")]
+#[case::ssh_password("ansible_ssh_password=s3cret-conn-pw", &[], 0, "changed: [box]")]
+#[case::ssh_pass_over_password(
+    "ansible_password=wrong-conn-pw ansible_ssh_pass=s3cret-conn-pw", &[], 0, "changed: [box]"
+)]
+#[case::password_under_ssh_pass(
+    "ansible_password=s3cret-conn-pw ansible_ssh_pass=wrong-conn-pw", &[], 4, "Permission denied"
+)]
+#[case::wrong_password("ansible_password=wrong-conn-pw", &[], 4, "Permission denied")]
+#[case::empty_password("ansible_password=''", &[], 4, "Permission denied")]
+#[case::no_password("", &[], 4, "Permission denied")]
+#[case::variable_over_file(
+    "ansible_password=s3cret-conn-pw", &["wrong-conn-pw"], 0, "changed: [box]"
+)]
+#[case::wrong_variable_over_file(
+    "ansible_password=wrong-conn-pw", &["s3cret-conn-pw"], 4, "Permission denied"
+)]
+#[case::file_alone("", &["s3cret-conn-pw"], 0, "changed: [box]")]
+#[case::own_ssh_program(
+    "ansible_password=s3cret-conn-pw ansible_ssh_executable={dir}/bin/ssh-alt", &[], 0, "changed: [box]"
+)]
+fn a_connection_password_variable_reaches_ssh_through_askpass_only(
+    #[case] vars: &str,
+    #[case] file: &[&str],
+    #[case] code: i32,
+    #[case] says: &str,
+) {
+    // One directory per case: the cases run side by side under `cargo test`.
+    let name = {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (vars, file).hash(&mut hasher);
+        format!("pw-{:x}", hasher.finish())
+    };
+    let dir = fake_password_host(&name, "s3cret-conn-pw");
+    let vars = vars.replace("{dir}", &dir.display().to_string());
+    std::fs::write(
+        dir.join("inv.ini"),
+        format!(
+            "box ansible_host=fake-host ansible_user=tester ansible_remote_tmp={} {vars}\n",
+            dir.join("remote").display()
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("play.yml"),
+        "- hosts: box\n  gather_facts: false\n  tasks:\n    - command: id -un\n",
+    )
+    .unwrap();
+    let (inv, play, agents, dir_text) = (
+        dir.join("inv.ini").display().to_string(),
+        dir.join("play.yml").display().to_string(),
+        dir.join("agents").display().to_string(),
+        dir.display().to_string(),
+    );
+    let mut args = vec!["playbook", "-vvvv", "-i", &inv];
+    let file_text;
+    if let Some(password) = file.first() {
+        std::fs::write(dir.join("conn.pw"), password).unwrap();
+        file_text = dir.join("conn.pw").display().to_string();
+        args.extend(["--connection-password-file", &file_text]);
+    }
+    args.push(&play);
+    let out = volant_within_with_path(
+        &args,
+        DEFAULT_DEADLINE,
+        Some(&dir.join("bin")),
+        &[("VOLANT_AGENT_DIR", &agents), ("FAKE_SSH_DIR", &dir_text)],
+    );
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.status.code(), Some(code), "{text}");
+    assert!(text.contains(says), "{text}");
+    let ran = |file: &str| std::fs::read_to_string(dir.join(file)).unwrap_or_default();
+    let (log, env) = (ran("ssh.log"), ran("ssh.log.env"));
+    assert!(!log.is_empty(), "the fake ssh never ran: {text}");
+    for password in ["s3cret-conn-pw", "wrong-conn-pw"] {
+        for (what, seen) in [
+            ("the output", &text),
+            ("an argument of ssh", &log),
+            ("the environment of ssh", &env),
+        ] {
+            assert!(!seen.contains(password), "{password} is in {what}:\n{seen}");
+        }
+    }
+    if vars.contains("ssh_executable") {
+        assert!(
+            log.lines().all(|line| line.contains("/bin/ssh-alt ")),
+            "a call went to another program than the host named: {log}"
+        );
+    }
+    if let Some(offered) = env
+        .lines()
+        .find_map(|line| line.strip_prefix("VOLANT_ASKPASS_FILE="))
+    {
+        assert!(
+            !Path::new(offered).exists(),
+            "the password file outlived the run: {offered}"
+        );
+    }
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -4973,6 +5178,104 @@ fn a_fact_carrying_a_result_cannot_name_a_variable() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A `delegate_to` built from text a managed host returned names a host of that text: it stays
+/// text in the delegate's variables, `hostvars` and output, and nothing of it runs here.
+#[rstest]
+#[case::run_once("delegate-run-once.yml", "UNREACHABLE")]
+#[case::loop_("delegate-loop.yml", "UNREACHABLE")]
+#[case::each_item_names_one("delegate-loop-item.yml", "")]
+#[case::facts_written_on_it("delegate-facts.yml", "changed: [h1 -> {{ lookup('pipe', 'touch ")]
+#[case::its_name_in_a_variable(
+    "delegate-name-in-vars.yml",
+    "changed: [h1 -> {{ lookup('pipe', 'touch "
+)]
+#[case::braces_built_in_a_loop("delegate-braces-loop.yml", "UNREACHABLE")]
+#[case::braces_built_in_a_handler("delegate-braces-handler.yml", "UNREACHABLE")]
+#[case::a_host_add_host_made("delegate-added-host.yml", "changed: [h1 -> lookup('pipe', 'touch ")]
+#[case::a_host_the_playbook_made(
+    "delegate-added-host-by-author.yml",
+    "changed: [h1 -> made-by-the-playbook]"
+)]
+fn a_delegate_named_by_a_result_stays_text(#[case] playbook: &str, #[case] shown: &str) {
+    let (dir, marker) = trust_dir(
+        &format!("delegate-{}", playbook.trim_end_matches(".yml")),
+        "h1 ansible_connection=local\n",
+    );
+    // `add_host` is the controller's ansible-core action: without it the row has nothing to say.
+    let python = python::reference_python().map(|p| p.display().to_string());
+    if playbook.contains("added-host") && python.is_none() {
+        return;
+    }
+    let envs: Vec<(&str, &str)> = python
+        .iter()
+        .map(|p| ("VOLANT_PYTHON", p.as_str()))
+        .collect();
+    let out = volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            "-e",
+            &format!("payload={}", dir.join("payload.txt").display()),
+            "-e",
+            &format!("bare={}", dir.join("bare.txt").display()),
+            &fixture(&format!("trust/{playbook}")),
+        ],
+        std::time::Duration::from_secs(30),
+        &envs,
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !marker.exists(),
+        "the text a host returned ran on the controller:\n{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains(shown), "{playbook}:\n{stdout}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Text a managed host printed is text, whatever raw tags it holds: a raw block around an
+/// expression, or tags that close one the author wrote, never makes the expression run.
+#[test]
+fn host_text_holding_raw_tags_is_never_rendered() {
+    let (dir, marker) = trust_dir("raw-wrapped", "h1 ansible_connection=local\n");
+    let call = format!("{{{{ lookup('pipe', 'touch {}') }}}}", marker.display());
+    let payloads = [
+        ("wrapped", format!("{{% raw %}}{call}{{% endraw %}}")),
+        ("split", format!("{{% endraw %}}{call}{{% raw %}}")),
+        ("opened", format!("{{% raw %}}{{% endraw %}}{call}")),
+    ];
+    for (name, text) in payloads {
+        let payload = dir.join(format!("{name}.txt"));
+        std::fs::write(&payload, &text).expect("the payload");
+        let out = volant_within(
+            &[
+                "playbook",
+                "-i",
+                dir.join("inv.ini").to_str().expect("a path"),
+                "-e",
+                &format!("payload={}", payload.display()),
+                &fixture("trust/raw-wrapped-host-text.yml"),
+            ],
+            std::time::Duration::from_secs(30),
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            !marker.exists(),
+            "{name}: text from a host ran on the controller:\n{stdout}"
+        );
+        assert_eq!(out.status.code(), Some(0), "{name}: {stdout}");
+        let shown = text.replace('"', "\\\"");
+        assert!(
+            stdout.contains(&format!(
+                "\"msg\": \"{shown}|{{{{ r.stdout }}}}|{{{{ r.stdout }}}}|{shown}\""
+            )),
+            "{name}: the text is shown as it came:\n{stdout}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A directory holding one executable `ssh` that writes `marker` and exits 255, first on `PATH`,
 /// beside an inventory file holding `inventory`. Nothing here reaches the network: the fake is
 /// what a run opening an ssh connection finds, and the marker is what it leaves behind.
@@ -5319,7 +5622,7 @@ fn fake_python_answering(dir: &Path, answers: &[&[u8]]) -> std::path::PathBuf {
         &script,
         format!(
             "#!/bin/sh\n\
-             if [ \"$2\" = 'import ansible' ]; then exit 0; fi\n\
+             for word in \"$@\"; do if [ \"$word\" = 'import ansible' ]; then exit 0; fi; done\n\
              echo start >> '{dir}/starts.log'\n\
              cat '{dir}/answer.bin'\n\
              cat > /dev/null\n",

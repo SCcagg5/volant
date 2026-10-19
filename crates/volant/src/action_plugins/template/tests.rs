@@ -70,6 +70,7 @@ fn start_in(
     };
     let mut warnings = Vec::new();
     start(Context {
+        link: &crate::action_plugins::LinkFacts::default(),
         args: &args,
         args_untrusted: untrusted,
         running_vars: &running,

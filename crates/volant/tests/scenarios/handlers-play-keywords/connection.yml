@@ -1,0 +1,12 @@
+- hosts: remote
+  gather_facts: false
+  connection: ssh
+  port: 1
+  tasks:
+    - command: "true"
+      connection: local
+      notify: over ssh
+    - meta: flush_handlers
+  handlers:
+    - name: over ssh
+      command: "true"

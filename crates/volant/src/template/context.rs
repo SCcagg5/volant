@@ -3,14 +3,71 @@
 //! the sink that records a read of one.
 
 use std::collections::{BTreeSet, HashMap};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use minijinja::value::{Enumerator, Object};
 use serde_json::{Map, Value};
 
 use super::env::chained_attr;
-use super::{ATTR_KEY, CONCAT_KEY, CONTEXT_KEY, ITEM_KEY, QUERY_KEY, TAINT_KEY, Tainted};
+use super::{
+    ATTR_KEY, CONCAT_KEY, CONTEXT_KEY, HOSTVARS_KEYS, ITEM_KEY, QUERY_KEY, TAINT_KEY, Tainted,
+};
+
+/// The name, in the variables an extended loop shares between its items, under which the list of
+/// all the items is kept once. It is no variable: a render never finds it by name, it reads it
+/// through `ansible_loop.allitems`, and `HostVars::own_variables` puts it back into `ansible_loop`.
+pub const ALLITEMS_KEY: &str = "volant::allitems";
+
+/// The variable an extended loop binds.
+const LOOP_KEY: &str = "ansible_loop";
+
+/// The fields of `ansible_loop` that sit before `allitems`, as the reference lists them.
+const BEFORE_ALLITEMS: &str = "revindex0";
+
+/// `fields` with the list of all the items in its place.
+pub fn with_allitems(fields: &Map<String, Value>, all: &Value) -> Map<String, Value> {
+    let mut out = Map::new();
+    for (key, value) in fields {
+        out.insert(key.clone(), value.clone());
+        if key == BEFORE_ALLITEMS {
+            out.insert("allitems".into(), all.clone());
+        }
+    }
+    out.entry("allitems").or_insert_with(|| all.clone());
+    out
+}
+
+/// `ansible_loop` of an extended loop: its own fields, and `allitems` read from the one list the
+/// whole loop shares, converted only when a template asks for it.
+#[derive(Debug)]
+struct LoopView {
+    fields: Map<String, Value>,
+    base: Arc<Map<String, Value>>,
+}
+
+impl Object for LoopView {
+    fn get_value(self: &Arc<Self>, key: &minijinja::Value) -> Option<minijinja::Value> {
+        let key = key.as_str()?;
+        let found = if key == "allitems" {
+            self.base.get(ALLITEMS_KEY)
+        } else {
+            self.fields.get(key)
+        };
+        found.map(minijinja::Value::from_serialize)
+    }
+
+    fn enumerate(self: &Arc<Self>) -> Enumerator {
+        let mut keys = Vec::new();
+        for key in self.fields.keys() {
+            keys.push(minijinja::Value::from(key.as_str()));
+            if key == BEFORE_ALLITEMS {
+                keys.push(minijinja::Value::from("allitems"));
+            }
+        }
+        Enumerator::Values(keys)
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct TaintSink(pub(crate) Tainted);
@@ -49,6 +106,9 @@ pub struct Vars<'a> {
     /// Hosts that have at least one such name, for the `hostvars[other]` path. Coarser than the
     /// reference, which tags each string: reading any name of such a host taints the render.
     pub untrusted_hosts: Option<&'a BTreeSet<String>>,
+    /// Variables an item shares with the others of its loop, read after `map`: a name in `map`
+    /// answers first. A caller that owns its whole map leaves it empty.
+    pub base: Option<&'a Arc<Map<String, Value>>>,
 }
 
 impl<'a> From<&'a Map<String, Value>> for Vars<'a> {
@@ -60,6 +120,7 @@ impl<'a> From<&'a Map<String, Value>> for Vars<'a> {
             facts: None,
             untrusted: None,
             untrusted_hosts: None,
+            base: None,
         }
     }
 }
@@ -94,13 +155,66 @@ impl Memo {
 #[derive(Debug)]
 pub(super) struct Context {
     pub(super) vars: Map<String, Value>,
+    pub(super) base: Option<Arc<Map<String, Value>>>,
     pub(super) hostvars: Option<Arc<Map<String, Value>>>,
     pub(super) shared: Option<Arc<Map<String, Value>>>,
     pub(super) facts: Option<Arc<Map<String, Value>>>,
     pub(super) untrusted: BTreeSet<String>,
     pub(super) untrusted_hosts: BTreeSet<String>,
     tainted: Tainted,
+    /// Set when a pass left text that must stay as it is: see `Templar::render_in`. Not data:
+    /// nothing is refused because of it.
+    literal: AtomicBool,
+    /// How many names the render has read, to tell a pass that read none.
+    reads: AtomicUsize,
     memo: Memo,
+}
+
+/// Starts a render over `ctx`: clears the mark of the last one and returns the reads so far.
+pub(super) fn begin(ctx: &minijinja::Value) -> usize {
+    set_literal(ctx, false);
+    reads(ctx)
+}
+
+/// Records that the render over `ctx` left text that no further pass may render.
+pub(super) fn set_literal(ctx: &minijinja::Value, on: bool) {
+    if let Some(root) = ctx.downcast_object_ref::<Context>() {
+        root.literal.store(on, Ordering::Relaxed);
+    }
+}
+
+/// How many names the renders over `ctx` have read so far.
+pub(super) fn reads(ctx: &minijinja::Value) -> usize {
+    ctx.downcast_object_ref::<Context>()
+        .map_or(0, |root| root.reads.load(Ordering::Relaxed))
+}
+
+/// Whether the render over `ctx` left such text.
+pub(super) fn is_literal(ctx: &minijinja::Value) -> bool {
+    ctx.downcast_object_ref::<Context>()
+        .is_some_and(|root| root.literal.load(Ordering::Relaxed))
+}
+
+/// Puts the shared list of all the items back into `ansible_loop` and drops the shared entry.
+pub fn complete_loop(all: &mut Map<String, Value>) {
+    let Some(list) = all.shift_remove(ALLITEMS_KEY) else {
+        return;
+    };
+    if let Some(Value::Object(fields)) = all.get(LOOP_KEY) {
+        let whole = with_allitems(fields, &list);
+        all.insert(LOOP_KEY.into(), Value::Object(whole));
+    }
+}
+
+impl Context {
+    /// The host's own variables as one map: the base shared by the items of a loop, then the
+    /// map over it.
+    pub(super) fn flat_vars(&self) -> Map<String, Value> {
+        let mut all = self.base.as_deref().cloned().unwrap_or_default();
+        all.extend(self.vars.iter().map(|(k, v)| (k.clone(), v.clone())));
+        complete_loop(&mut all);
+        all
+    }
 }
 
 impl Object for Context {
@@ -108,7 +222,7 @@ impl Object for Context {
         let key = key.as_str()?;
         // Not a variable: the VM looks the root up before the globals, so a variable of that
         // name (`-e '{"volant::concat": 1}'`) would otherwise replace every `~`.
-        if key == CONCAT_KEY || key == QUERY_KEY || key == ITEM_KEY {
+        if key == CONCAT_KEY || key == QUERY_KEY || key == ITEM_KEY || key == ALLITEMS_KEY {
             return None;
         }
         if let Some(attr) = key.strip_prefix(ATTR_KEY) {
@@ -122,9 +236,16 @@ impl Object for Context {
         if key == CONTEXT_KEY {
             return Some(minijinja::Value::from_dyn_object(Arc::clone(self)));
         }
+        self.reads.fetch_add(1, Ordering::Relaxed);
         // Before the memo, never after: a second read of the same name is answered from the
         // cache and would otherwise leave the render looking clean.
-        if self.untrusted.contains(key) {
+        // A `hostvars` the map carries as a plain value lists its hosts on any read, so a host
+        // name that came from a managed host taints every read of it.
+        if self.untrusted.contains(key)
+            || (key == "hostvars"
+                && self.hostvars.is_none()
+                && self.untrusted.contains(HOSTVARS_KEYS))
+        {
             self.tainted.store(true, Ordering::Relaxed);
         }
         self.memo.get(key, || {
@@ -137,6 +258,7 @@ impl Object for Context {
                 return Some(minijinja::Value::from_object(Hostvars {
                     hosts: Arc::clone(hostvars),
                     untrusted_hosts: self.untrusted_hosts.clone(),
+                    keys_untrusted: self.untrusted.contains(HOSTVARS_KEYS),
                     tainted: Arc::clone(&self.tainted),
                     memo: Memo::default(),
                 }));
@@ -156,28 +278,48 @@ impl Object for Context {
             {
                 return Some(minijinja::Value::from_serialize(value));
             }
-            self.vars.get(key).map(minijinja::Value::from_serialize)
+            if key == LOOP_KEY
+                && let (Some(Value::Object(fields)), Some(base)) = (self.vars.get(key), &self.base)
+                && base.contains_key(ALLITEMS_KEY)
+            {
+                return Some(minijinja::Value::from_object(LoopView {
+                    fields: fields.clone(),
+                    base: Arc::clone(base),
+                }));
+            }
+            self.vars
+                .get(key)
+                .or_else(|| self.base.as_ref().and_then(|base| base.get(key)))
+                .map(minijinja::Value::from_serialize)
         })
     }
 
     fn enumerate(self: &Arc<Self>) -> Enumerator {
+        // The host's own names, `map` over the base a loop's items share: a later layer lists
+        // only the names neither of them holds, so a name is never listed twice.
+        let own = |key: &str| {
+            self.vars.contains_key(key) || self.base.as_ref().is_some_and(|b| b.contains_key(key))
+        };
         let mut keys: Vec<minijinja::Value> = self
             .vars
             .keys()
             .map(|k| minijinja::Value::from(k.as_str()))
             .collect();
-        if self.hostvars.is_some() && !self.vars.contains_key("hostvars") {
+        for key in self.base.iter().flat_map(|b| b.keys()) {
+            if !self.vars.contains_key(key) && key != ALLITEMS_KEY {
+                keys.push(minijinja::Value::from(key.as_str()));
+            }
+        }
+        if self.hostvars.is_some() && !own("hostvars") {
             keys.push(minijinja::Value::from("hostvars"));
         }
         for key in self.shared.iter().flat_map(|s| s.keys()) {
-            if !self.vars.contains_key(key) {
+            if !own(key) {
                 keys.push(minijinja::Value::from(key.as_str()));
             }
         }
         for key in self.facts.iter().flat_map(|f| f.keys()) {
-            if !self.vars.contains_key(key)
-                && !self.shared.as_ref().is_some_and(|s| s.contains_key(key))
-            {
+            if !own(key) && !self.shared.as_ref().is_some_and(|s| s.contains_key(key)) {
                 keys.push(minijinja::Value::from(key.as_str()));
             }
         }
@@ -194,6 +336,8 @@ pub(super) struct Hostvars {
     /// Hosts holding at least one name that came from a managed host. Reading any name of such
     /// a host taints the render, which is coarser than the reference's per-string tag.
     untrusted_hosts: BTreeSet<String>,
+    /// Whether one of the host names came from a managed host: listing them taints the render.
+    keys_untrusted: bool,
     tainted: Tainted,
     memo: Memo,
 }
@@ -211,6 +355,9 @@ impl Object for Hostvars {
     }
 
     fn enumerate(self: &Arc<Self>) -> Enumerator {
+        if self.keys_untrusted {
+            self.tainted.store(true, Ordering::Relaxed);
+        }
         Enumerator::Values(
             self.hosts
                 .keys()
@@ -224,12 +371,15 @@ pub(super) fn context_of(vars: Vars<'_>) -> (minijinja::Value, Tainted) {
     let tainted: Tainted = Arc::new(AtomicBool::new(false));
     let ctx = minijinja::Value::from_object(Context {
         vars: vars.map.clone(),
+        base: vars.base.cloned(),
         hostvars: vars.hostvars.cloned(),
         shared: vars.shared.cloned(),
         facts: vars.facts.cloned(),
         untrusted: vars.untrusted.cloned().unwrap_or_default(),
         untrusted_hosts: vars.untrusted_hosts.cloned().unwrap_or_default(),
         tainted: Arc::clone(&tainted),
+        literal: AtomicBool::new(false),
+        reads: AtomicUsize::new(0),
         memo: Memo::default(),
     });
     (ctx, tainted)

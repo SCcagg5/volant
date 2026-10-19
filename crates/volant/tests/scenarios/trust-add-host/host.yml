@@ -1,0 +1,49 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    all_hosts: "{{ hostvars | list | sort }}"
+  tasks:
+    - name: One host records the payload
+      command: cat {{ payload }}
+      register: r
+    - name: A host is named after the payload
+      add_host:
+        name: "{{ r.stdout }}"
+        ansible_connection: local
+      changed_when: false
+    - name: The host names are read through a variable of the play
+      debug:
+        msg: "{{ all_hosts }}"
+    - name: The host names are listed
+      debug:
+        msg: "{{ hostvars.keys() | list | sort | join(',') }}"
+    - name: The hosts of the group all are listed
+      debug:
+        msg: "{{ groups['all'] | sort | join(',') }}"
+
+- hosts: all:!h1
+  gather_facts: false
+  tasks:
+    - name: The new host reads its own name
+      debug:
+        msg: "{{ inventory_hostname }}"
+    - name: The new host reads its short name
+      debug:
+        msg: "{{ inventory_hostname_short }}"
+    - name: The new host reads the hosts of the play
+      debug:
+        msg: "{{ ansible_play_hosts_all | join(',') }}"
+    - name: The new host reads its own variables
+      debug:
+        msg: "{{ hostvars[inventory_hostname].inventory_hostname }}"
+
+- name: Whether the payload ran
+  hosts: h1
+  gather_facts: false
+  tasks:
+    - name: Look for the marker the payload would have written
+      shell: "test -e {{ playbook_dir }}/marker && echo ran || echo never ran"
+      register: marker
+    - name: The payload never ran
+      debug:
+        var: marker.stdout

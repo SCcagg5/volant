@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! YAML loading shared by playbooks, variable files and inventories, with the PyYAML habits
 //! Ansible content relies on (`yes`/`no` booleans, leading-zero and underscore-grouped
-//! integers) and the tags Ansible adds (`!vault`, `!unsafe`).
+//! integers), the merge key `<<` and the tags Ansible adds (`!vault`, `!unsafe`).
+
+mod merge;
 
 use std::fmt::Write;
 
@@ -18,16 +20,16 @@ pub fn load<'a>(text: &'a str, source: &str) -> anyhow::Result<Vec<Yaml<'a>>> {
     if holds_nothing(text) {
         return Ok(docs.iter().map(|_| Yaml::Value(Scalar::Null)).collect());
     }
-    Ok(docs.into_iter().map(|doc| lower(doc, text)).collect())
+    let offsets = Offsets::new(text);
+    Ok(docs.into_iter().map(|doc| lower(doc, &offsets)).collect())
 }
 
 /// Every document of `text` with saphyr's positions, a key written twice keeping its last value.
 fn marked<'a>(text: &'a str, source: &str) -> anyhow::Result<Vec<MarkedYaml<'a>>> {
     let mut loader = YamlLoader::<MarkedYaml>::default();
     loader.allow_duplicate_keys(true);
-    saphyr_parser::Parser::new_from_str(text)
-        .load(&mut loader, true)
-        .and_then(|()| loader.error().cloned().map_or(Ok(()), Err))
+    merge::parse(text, source, &mut loader)
+        .and_then(|()| loader.error().cloned().map_or(Ok(()), |e| Err(e.into())))
         .with_context(|| format!("{source}: invalid YAML"))?;
     Ok(loader.into_documents())
 }
@@ -82,7 +84,8 @@ pub fn load_with_origins<'a>(
     for doc in &marked {
         mapping_starts(doc, &mut starts);
     }
-    let docs: Vec<Yaml<'a>> = marked.into_iter().map(|doc| lower(doc, text)).collect();
+    let offsets = Offsets::new(text);
+    let docs: Vec<Yaml<'a>> = marked.into_iter().map(|doc| lower(doc, &offsets)).collect();
     let mut addresses = (Vec::new(), Vec::new());
     for doc in &docs {
         mapping_addresses(doc, &mut addresses);
@@ -164,37 +167,54 @@ fn holds_nothing(text: &str) -> bool {
 /// scalar resolution along the way where it's confirmed to diverge from saphyr's YAML 1.2 core
 /// schema (see `pyyaml_scalar`). Every other function in this module keeps working on the
 /// plain `Yaml` tree it already expected; only `load` needs to know this happened.
-fn lower<'a>(node: MarkedYaml<'a>, text: &'a str) -> Yaml<'a> {
+fn lower<'a>(node: MarkedYaml<'a>, offsets: &Offsets<'a>) -> Yaml<'a> {
     match node.data {
         YamlData::Value(scalar) => {
-            let start = char_to_byte(text, node.span.start.index());
-            let end = char_to_byte(text, node.span.end.index());
-            let raw = text.get(start..end).unwrap_or_default();
+            let start = offsets.byte(node.span.start.index());
+            let end = offsets.byte(node.span.end.index());
+            let raw = offsets.text.get(start..end).unwrap_or_default();
             Yaml::Value(pyyaml_scalar(scalar, raw))
         }
         YamlData::Sequence(items) => {
-            Yaml::Sequence(items.into_iter().map(|n| lower(n, text)).collect())
+            Yaml::Sequence(items.into_iter().map(|n| lower(n, offsets)).collect())
         }
         YamlData::Mapping(map) => {
             let mut out = Mapping::new();
             for (k, v) in map {
-                out.insert(lower(k, text), lower(v, text));
+                out.insert(lower(k, offsets), lower(v, offsets));
             }
             Yaml::Mapping(out)
         }
-        YamlData::Tagged(tag, inner) => Yaml::Tagged(tag, Box::new(lower(*inner, text))),
+        YamlData::Tagged(tag, inner) => Yaml::Tagged(tag, Box::new(lower(*inner, offsets))),
         YamlData::Alias(id) => Yaml::Alias(id),
         YamlData::Representation(v, style, tag) => Yaml::Representation(v, style, tag),
         YamlData::BadValue => Yaml::BadValue,
     }
 }
 
-/// `text`'s byte offset for the `chars`-th character in it: saphyr's markers count characters,
-/// while `str` slicing needs bytes.
-fn char_to_byte(text: &str, chars: usize) -> usize {
-    text.char_indices()
-        .nth(chars)
-        .map_or(text.len(), |(i, _)| i)
+/// Where each character of a text starts, in bytes: saphyr's markers count characters, while
+/// `str` slicing needs bytes. A text of ASCII only has one byte for each character and needs no
+/// table; any other text gets one table, built once, so a lookup costs the same for every
+/// scalar however far into the text it lies.
+struct Offsets<'a> {
+    text: &'a str,
+    /// The byte offset of each character, `None` when the text is ASCII.
+    starts: Option<Vec<usize>>,
+}
+
+impl<'a> Offsets<'a> {
+    fn new(text: &'a str) -> Self {
+        let starts = (!text.is_ascii()).then(|| text.char_indices().map(|(i, _)| i).collect());
+        Self { text, starts }
+    }
+
+    /// The byte offset of the `chars`-th character, or the text's length past the last one.
+    fn byte(&self, chars: usize) -> usize {
+        match &self.starts {
+            None => chars.min(self.text.len()),
+            Some(starts) => starts.get(chars).copied().unwrap_or(self.text.len()),
+        }
+    }
 }
 
 /// Every spelling PyYAML reads as `true`. The single source for both the scalar resolver

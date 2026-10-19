@@ -9,6 +9,7 @@ use volant_protocol::frame::{header, payload_len};
 use volant_protocol::{FromAgent, PROTOCOL_VERSION, ToAgent};
 
 mod blobs;
+mod decode;
 pub(crate) mod embedded;
 mod source;
 
@@ -34,6 +35,9 @@ const DROP_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis
 pub struct AgentLink {
     stdin: Option<ChildStdin>,
     frames: mpsc::Receiver<std::io::Result<Vec<u8>>>,
+    /// The batch last sent and which of its tasks have answered, for a refused result to be
+    /// matched with a task that waits for it.
+    batch: Option<(u64, Vec<bool>)>,
     child: Child,
     blobs: BlobMemory,
     interpreters: Vec<String>,
@@ -66,6 +70,7 @@ impl AgentLink {
         Ok(Self {
             stdin: Some(stdin),
             frames: rx,
+            batch: None,
             child,
             blobs: BlobMemory::default(),
             interpreters: Vec::new(),
@@ -189,6 +194,9 @@ impl AgentLink {
     }
 
     pub async fn send(&mut self, msg: &ToAgent) -> std::io::Result<()> {
+        if let ToAgent::RunBatch { id, tasks } = msg {
+            self.batch = Some((*id, vec![false; tasks.len()]));
+        }
         self.send_bytes(&serde_json::to_vec(msg)?).await
     }
 
@@ -204,9 +212,31 @@ impl AgentLink {
     /// dedicated reader task, so a dropped `recv` future never desyncs the stream.
     pub async fn recv(&mut self) -> std::io::Result<Option<FromAgent>> {
         match self.frames.recv().await {
-            Some(Ok(payload)) => Ok(Some(serde_json::from_slice(&payload)?)),
+            Some(Ok(payload)) => {
+                let waits = |batch: u64, index: usize| {
+                    self.batch.as_ref().is_some_and(|(id, answered)| {
+                        *id == batch && answered.get(index) == Some(&false)
+                    })
+                };
+                let answer = decode::decode(&payload, &waits)?;
+                self.note(&answer);
+                Ok(Some(answer))
+            }
             Some(Err(e)) => Err(e),
             None => Ok(None),
+        }
+    }
+
+    /// Remembers which task an answer closes, and forgets the batch when it is done.
+    fn note(&mut self, answer: &FromAgent) {
+        match (answer, &mut self.batch) {
+            (FromAgent::TaskResult { batch, index, .. }, Some((id, answered))) if batch == id => {
+                if let Some(done) = answered.get_mut(*index) {
+                    *done = true;
+                }
+            }
+            (FromAgent::BatchDone { batch, .. }, Some((id, _))) if batch == id => self.batch = None,
+            _ => {}
         }
     }
 

@@ -10,7 +10,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, watch};
 use volant_protocol::modules::short_name;
 use volant_protocol::{BatchOutcome, TaskResult};
 
-use crate::action_plugins::Kind;
+use crate::action_plugins::{Kind, LinkFacts};
 use crate::agent::{AgentLink, AgentSource};
 use crate::compile::{StepKind, after_failure, first, rescue_target};
 use crate::inventory::Host;
@@ -1236,7 +1236,7 @@ pub(super) async fn drive_host(
                             &results,
                             &templar,
                         );
-                        record_inventory_results(&mut vars, task, &name, &results);
+                        record_inventory_results(&mut vars, task, &items, &name, &results);
                     }
                     let rescuable = !handlers_only && rescue_target(&c, pos).is_some();
                     // Whether a body shows at verbosity 0 is each result's own: see
@@ -1287,7 +1287,7 @@ pub(super) async fn drive_host(
                     let target_vars = running_host_vars(delegate.as_ref(), &items);
                     // The host's own map is enough here: every connection setting is a name a
                     // gather strips, so none of them is ever in the facts layer beside it.
-                    let vars = &target_vars.map;
+                    let vars = &*target_vars.own_variables();
                     let transport =
                         match Transport::for_task(&target, vars, &options.defaults, &connect) {
                             Ok(transport) => transport.shared(
@@ -1775,15 +1775,11 @@ pub(super) async fn drive_host(
                         None => None,
                     };
                     let mut warnings = Vec::new();
+                    let delegate = delegate.as_ref();
                     let start = PluginStart {
+                        link: &LinkFacts::of(&key.transport, batch_escalation.as_ref(), delegate),
                         kind,
-                        running_vars: running_host_vars(
-                            delegate.as_ref(),
-                            std::slice::from_ref(item),
-                        ),
-                        delegated: delegate.is_some(),
-                        escalated: batch_escalation.is_some(),
-                        local: matches!(key.transport, Transport::Local),
+                        running_vars: running_host_vars(delegate, std::slice::from_ref(item)),
                         templar: &templar,
                         origin: &step.origin,
                         playbook_dir: &playbook_dir,

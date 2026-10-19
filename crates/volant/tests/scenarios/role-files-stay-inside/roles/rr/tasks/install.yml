@@ -1,0 +1,2 @@
+- debug:
+    msg: "tasks install, extra={{ extra_var | default('unset') }}"

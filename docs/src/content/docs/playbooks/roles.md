@@ -19,7 +19,9 @@ A role nobody can find stops the run with exit code 1, and the message lists eve
 
 ## Inside a role
 
-Each directory is read file first, then directory: `tasks/main.yml` if it exists, otherwise `tasks/main/`. On a role entry, `tasks_from`, `vars_from`, `defaults_from` and `handlers_from` pick a file other than `main`.
+`defaults/` and `vars/` are read file first, then directory: `vars/main.yml` if it exists, otherwise every file of `vars/main/`, in name order. `tasks/`, `handlers/` and `meta/` take a single file and never a directory. On a role entry, `tasks_from`, `vars_from`, `defaults_from` and `handlers_from` pick a file other than `main`.
+
+The name is a path under the matching directory, with or without its extension (`install`, `install.yml`, `sub/install`). A name that leaves that directory, such as `../../../x` or an absolute path outside it, stops the run with `Failed loading '...' for role (name) as it is not inside the expected role path`. Volant follows a symbolic link inside the directory wherever it points, as ansible-core does.
 
 A role's `handlers/` directory is read with its tasks. At a flush, the role's handlers run before the play's own.
 

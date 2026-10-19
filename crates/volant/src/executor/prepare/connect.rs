@@ -89,17 +89,21 @@ pub(super) fn connect_for(
 /// link, and a task whose items each name a different delegate would have to split across links
 /// and interleave the answers. The reference does delegate per item; that divergence is named
 /// here rather than left to look like the operator's own typo.
+///
+/// The flag says the name is data: the render read a value that came from a managed host or a
+/// file read at run time. Such a name is a host name whatever it holds, and the view built for
+/// it renders none of the names it derives from it.
 pub(super) fn delegate_for(
     task: &PlayTask,
     vars: &HostVars,
     templar: &Templar,
-) -> Result<Option<String>, TemplateError> {
+) -> Result<Option<(String, bool)>, TemplateError> {
     let Some(raw) = &task.delegate_to else {
         return Ok(None);
     };
-    let name = if Templar::is_template(raw) {
-        templar
-            .render(raw, vars)
+    let (name, data) = if Templar::is_template(raw) {
+        let (rendered, data) = templar
+            .render_value_tainted(&Value::String(raw.clone()), vars)
             .map_err(|err| {
                 let hint = if task.loop_items.is_some() && raw.contains(&task.loop_var) {
                     ". A 'delegate_to' that changes per loop item is not supported yet: one batch runs over one link"
@@ -108,16 +112,15 @@ pub(super) fn delegate_for(
                     String::new()
                 };
                 TemplateError(format!("rendering 'delegate_to' {raw}: {}{hint}", err.0))
-            })?
-            .as_str()
-            .map(str::to_string)
-            .ok_or_else(|| {
-                TemplateError(format!("'delegate_to' must render to a host name: {raw}"))
-            })?
+            })?;
+        let name = rendered.as_str().map(str::to_string).ok_or_else(|| {
+            TemplateError(format!("'delegate_to' must render to a host name: {raw}"))
+        })?;
+        (name, data)
     } else {
-        raw.clone()
+        (raw.clone(), false)
     };
-    Ok(Some(name).filter(|n| !n.is_empty()))
+    Ok(Some((name, data)).filter(|(n, _)| !n.is_empty()))
 }
 
 /// `role_path` and `ansible_search_path`, which a role's tasks and the `first_found` and
