@@ -9,3 +9,5 @@ runs:
   - args: [escape-handlers.yml]
   - args: [escape-absolute.yml]
   - args: [escape-sibling.yml]
+  - args: [escape-link-tasks.yml]
+  - args: [escape-link-vars.yml]

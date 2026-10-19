@@ -171,6 +171,9 @@ fn escape_tree() -> tempfile::TempDir {
         link("../../../outsidedir", "roles/rr/tasks/linkdir_out");
         link("../../../outside_vars.yml", "roles/rr/vars/vlink_out.yml");
         link("../../../../outside_vars.yml", "roles/rr/vars/vd/o.yml");
+        link("../../../outsidedir", "roles/rr/vars/vdl");
+        link("../../../outsidedir", "roles/rr/defaults/dl");
+        link("../../../outsidedir", "roles/rr/handlers/hl");
     }
     tmp
 }
@@ -354,6 +357,29 @@ fn check_from(sub: &str, from: &str, want: Result<&str, &str>) {
 #[case("vars", "vlink_out", Ok("seen_outside"))]
 // A directory of variables is read whole: its link to a file outside is read as well.
 #[case("vars", "vd", Ok("seen_outside"))]
+// A `..` after a link to a directory is folded out of the text first, as the reference does, so it
+// never climbs out through the link. The file the kernel would reach that way is not found.
+#[case("tasks", "linkdir_in/../install", Ok("ran-install"))]
+#[case(
+    "tasks",
+    "linkdir_out/../outside_tasks",
+    Err("Could not find specified file in role: tasks/linkdir_out/../outside_tasks")
+)]
+#[case(
+    "vars",
+    "vdl/../outside_vars",
+    Err("Could not find specified file in role: vars/vdl/../outside_vars")
+)]
+#[case(
+    "defaults",
+    "dl/../outside_vars",
+    Err("Could not find specified file in role: defaults/dl/../outside_vars")
+)]
+#[case(
+    "handlers",
+    "hl/../outside_tasks",
+    Err("Could not find specified file in role: handlers/hl/../outside_tasks")
+)]
 fn a_link_inside_the_directory_is_followed(
     #[case] sub: &str,
     #[case] from: &str,
