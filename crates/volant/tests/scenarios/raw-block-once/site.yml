@@ -1,0 +1,102 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    x: val
+    pv: "{% raw %}{{ x }}{% endraw %}"
+    pw: "{{ pv }}"
+    pa: "a{% raw %}{{ x }}{% endraw %}b{{ x }}"
+    ps: "{%- raw -%} {{ x }} {%- endraw -%}"
+    pe: "{{ '{{' }} x {{ '}}' }}"
+    pd:
+      k: "{% raw %}{{ x }}{% endraw %}"
+      l: ["{% raw %}{% if x %}{% endraw %}"]
+  vars_files: [extra.yml]
+  tasks:
+    - name: An argument
+      debug:
+        msg: "{% raw %}{{ x }}{% endraw %}"
+
+    - name: An argument in a list and a mapping
+      debug:
+        msg:
+          k: "{% raw %}{{ x }}{% endraw %}"
+          l: ["{% raw %}{% if x %}{% endraw %}", "a{% raw %}{{ x }}{% endraw %}b{{ x }}"]
+
+    - name: Variables
+      debug:
+        msg: "{{ pv }}|{{ pw }}|{{ pa }}|{{ ps }}|{{ pe }}|{{ pd }}|{{ pv | upper }}"
+
+    - name: A variable in the arguments of a task
+      debug:
+        msg: "{{ q }}|{{ pv }}"
+      vars:
+        q: "{% raw %}{{ x }}{% endraw %}"
+
+    - name: set_fact
+      set_fact:
+        sf: "{% raw %}{{ x }}{% endraw %}"
+        sd: {a: "{% raw %}{{ x }}{% endraw %}", l: ["{% raw %}{% if x %}{% endraw %}"]}
+        se: "{{ pv }}"
+
+    - name: set_fact values, read in a later task
+      debug:
+        msg: "{{ sf }}|{{ sd }}|{{ se }}"
+
+    - name: A vars file and an included one
+      include_vars: more.yml
+
+    - name: Read from the vars files
+      debug:
+        msg: "{{ fv }}|{{ fw }}|{{ iv }}|{{ ivl }}"
+
+    - name: A loop over raw text
+      debug:
+        msg: "{{ item }}|{{ sf }}"
+      loop:
+        - "{% raw %}{{ x }}{% endraw %}"
+        - "{{ pv }}"
+        - "{{ sf }}"
+
+    - name: A loop built by an expression
+      debug:
+        msg: "{{ item }}"
+      loop: "{{ ['{% raw %}{{ x }}{% endraw %}'] }}"
+
+    - name: with_items
+      debug:
+        msg: "{{ item }}"
+      with_items: ["{% raw %}{{ x }}{% endraw %}"]
+
+    - name: A command argument and what it printed
+      command: echo "{% raw %}{{ x }}{% endraw %}"
+      register: printed
+      changed_when: false
+
+    - name: The printed text is text
+      debug:
+        msg: "{{ printed.stdout }}|{% raw %}{{ printed.stdout }}{% endraw %}"
+
+    - name: A file written from raw text
+      copy:
+        content: "{% raw %}{{ x }}{% endraw %}{{ pv }}\n"
+        dest: "{{ playbook_dir }}/{% raw %}{{ x }}{% endraw %}.txt"
+
+    - name: The path the text named
+      shell: ls *.txt
+      args:
+        chdir: "{{ playbook_dir }}"
+      register: listing
+      changed_when: false
+
+    - name: Read back
+      debug:
+        msg: "{{ lookup('file', playbook_dir ~ '/{{ x }}.txt') }}|{{ listing.stdout_lines }}"
+
+    - name: A template file
+      template:
+        src: t.j2
+        dest: "{{ playbook_dir }}/out.txt"
+
+    - name: A template lookup
+      debug:
+        msg: "{{ lookup('template', 't.j2') }}"

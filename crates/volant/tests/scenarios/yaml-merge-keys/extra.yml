@@ -1,0 +1,2 @@
+ev_base: &ev_base {a: 1}
+ev_derived: {z: 0, <<: *ev_base}

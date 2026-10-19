@@ -395,6 +395,24 @@ fn a_timeout_kills_the_program_and_reports_ansible_shape() {
     assert!(r.0.get("cmd").is_none());
 }
 
+/// A `timeout` the clock cannot add to the current time never expires. It is no panic.
+#[rstest]
+#[case::u64_max(u64::MAX)]
+#[case::i64_max(i64::MAX as u64)]
+fn a_timeout_past_what_the_clock_counts_never_expires(#[case] seconds: u64) {
+    let r = done(execute(
+        &args(json!({"_raw_params": "true"})),
+        false,
+        &Context {
+            timeout: Some(Duration::from_secs(seconds)),
+            ..Context::default()
+        },
+        &|| false,
+    ));
+    assert!(!r.failed(), "{:?}", r.0);
+    assert_eq!(r.0["rc"], json!(0));
+}
+
 #[test]
 fn cancellation_kills_the_whole_process_group() {
     // `sh -c` forks a grandchild; killing only the shell would leave `sleep` running.

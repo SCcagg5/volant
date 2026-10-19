@@ -1,0 +1,19 @@
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - import_role:
+        name: rr
+        tasks_from: install
+        vars_from: extra
+    - import_role:
+        name: rr
+        tasks_from: install.yml
+    - import_role:
+        name: rr
+        tasks_from: sub/x
+    - import_role:
+        name: rr
+        tasks_from: sub/../install
+    - import_role:
+        name: rr
+        tasks_from: ../tasks/install

@@ -10,7 +10,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 
@@ -142,9 +142,7 @@ pub(crate) fn note_helper_python(python: &str) {
 #[cfg(any(unix, not(test)))]
 fn locate(python: &str) -> Option<String> {
     if python.contains('/') {
-        return std::path::Path::new(python)
-            .is_file()
-            .then(|| python.to_owned());
+        return Path::new(python).is_file().then(|| python.to_owned());
     }
     std::env::split_paths(&std::env::var_os("PATH")?)
         .map(|dir| dir.join(python))
@@ -206,6 +204,13 @@ pub(crate) fn set_test_python(python: Option<&str>) {
     TEST_PYTHON.with_borrow_mut(|held| *held = python.map(str::to_owned));
 }
 
+/// The flag that keeps the working directory off the interpreter's module path. Without it,
+/// `python -c` and `python -m` import `ansible.py` or `json.py` from the directory the run starts
+/// in, ahead of the real module, as `ansible-playbook` (a script) never does. It leaves
+/// `PYTHONPATH` and the user site alone: they are how a user's own interpreter finds its
+/// ansible-core. Python 3.11 added it, and ansible-core 2.19 needs that version too.
+pub(crate) const NO_CWD_IMPORTS: &str = "-P";
+
 /// Whether `python` imports ansible-core. The probe is the import itself rather than a version
 /// string: an interpreter that cannot import `ansible` cannot build a payload, whatever it reports.
 pub(crate) fn has_ansible(python: &str) -> bool {
@@ -219,17 +224,26 @@ pub(crate) fn has_ansible(python: &str) -> bool {
     {
         return known;
     }
-    let has = Command::new(python)
-        .args(["-c", "import ansible"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success());
+    let has = imports(python, "ansible", None);
     if let Ok(mut seen) = PROBED.lock() {
         seen.insert(python.to_owned(), has);
     }
     has
+}
+
+/// Whether `python`, started in `dir` (the working directory when `None`), imports `module`.
+pub(super) fn imports(python: &str, module: &str, dir: Option<&Path>) -> bool {
+    let mut probe = Command::new(python);
+    probe.args([NO_CWD_IMPORTS, "-c", &format!("import {module}")]);
+    if let Some(dir) = dir {
+        probe.current_dir(dir);
+    }
+    probe
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 /// What `volant runtime status` says about the resolution: the mode, the interpreter the next

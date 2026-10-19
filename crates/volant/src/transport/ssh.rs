@@ -2,14 +2,36 @@
 //! The `ssh` command lines of an `SshTarget`.
 
 use super::bootstrap::{
-    EXIT_AGENT_MISSING, EXIT_AGENT_UNRUNNABLE, EXIT_NO_SPACE, EXIT_SHORT_WRITE, EXIT_UNAME_FAILED,
-    space_needed_kib,
+    EXIT_AGENT_DIR_UNSAFE, EXIT_AGENT_MISSING, EXIT_AGENT_UNRUNNABLE, EXIT_NO_SPACE,
+    EXIT_SHORT_WRITE, EXIT_UNAME_FAILED, space_needed_kib,
 };
-use super::control::{CONTROL_PERSIST, SERVER_ALIVE_COUNT_MAX, SERVER_ALIVE_INTERVAL, SSH_PROGRAM};
-use super::defaults::SshTarget;
-use super::shell::shell_word;
+use super::control::{CONTROL_PERSIST, SERVER_ALIVE_COUNT_MAX, SERVER_ALIVE_INTERVAL};
+use super::defaults::{ConnectError, SshTarget};
 
 impl SshTarget {
+    /// Which password an `ssh` call of this target offers: the host variable's, or the one of
+    /// the command line when the host names none.
+    fn password_source(&self) -> crate::askpass::Source<'_> {
+        match &self.own.password {
+            Some(password) => crate::askpass::Source::Variable(password.expose()),
+            None => crate::askpass::Source::Run,
+        }
+    }
+
+    /// Whether an `ssh` call of this target offers a password.
+    pub(super) fn offers_password(&self) -> bool {
+        crate::askpass::offers(self.password_source())
+    }
+
+    /// The environment an `ssh` call of this target is started with, which hands it the password
+    /// through `SSH_ASKPASS` when there is one.
+    pub(super) fn askpass_environment(
+        &self,
+    ) -> Result<Vec<(&'static str, std::ffi::OsString)>, ConnectError> {
+        crate::askpass::environment(self.password_source())
+            .map_err(|e| ConnectError::Unreachable(format!("storing the connection password: {e}")))
+    }
+
     /// The `ssh` command line for one remote command. Options first, then the host, then `--`.
     pub fn ssh_argv(&self, remote_command: &str) -> Vec<String> {
         self.ssh_argv_with(remote_command, false)
@@ -20,7 +42,8 @@ impl SshTarget {
     /// is the remote command's own argument list, and an option appended there would reach
     /// the remote shell instead.
     pub fn ssh_argv_with(&self, remote_command: &str, compress: bool) -> Vec<String> {
-        let mut argv = vec![SSH_PROGRAM.to_string()];
+        let offers_password = self.offers_password();
+        let mut argv = vec![self.own.executable.clone()];
         if compress {
             argv.push("-C".into());
         }
@@ -28,7 +51,7 @@ impl SshTarget {
             "-o".to_string(),
             // A password given with `-k` or a password file comes through `SSH_ASKPASS`, which
             // `BatchMode` would switch off.
-            if crate::askpass::installed() {
+            if offers_password {
                 "BatchMode=no"
             } else {
                 "BatchMode=yes"
@@ -37,7 +60,7 @@ impl SshTarget {
             "-o".into(),
             format!("ConnectTimeout={}", self.connect_timeout.as_secs()),
         ]);
-        if crate::askpass::installed() {
+        if offers_password {
             // One wrong answer is the end of it, as in the reference, not three tries.
             argv.extend(["-o".into(), "NumberOfPasswordPrompts=1".into()]);
         }
@@ -78,7 +101,7 @@ impl SshTarget {
         if let Some(port) = self.port {
             argv.extend(["-p".into(), port.to_string()]);
         }
-        if let Some(key) = &self.private_key {
+        if let Some(key) = &self.own.private_key {
             argv.extend(["-i".into(), key.display().to_string()]);
         }
         argv.extend(self.common_args.iter().cloned());
@@ -94,28 +117,17 @@ impl SshTarget {
         argv
     }
 
-    pub(super) fn cache_dir(&self) -> String {
-        format!(
-            "{}/volant-agent-{}",
-            self.remote_tmp,
-            env!("CARGO_PKG_VERSION")
-        )
-    }
-
-    /// Where the agent itself sits on the host, as this controller writes it in a message.
-    pub(super) fn agent_path(&self) -> String {
-        format!("{}/volant-agent", self.cache_dir())
-    }
-
     /// Prints the machine architecture, then the cached agent's version and the hash of its own
     /// file, or exits 42 when no agent is cached. The architecture names the binary this
     /// controller would upload, whose hash decides whether the cached one is reused. A cached
     /// agent that cannot run exits 45 and `uname` failing exits 46, so neither hands its own
-    /// status back to `ssh`, where 255 would read as a connection failure.
+    /// status back to `ssh`, where 255 would read as a connection failure. A cached agent in a
+    /// directory, or under a `remote_tmp`, that another user could change is never run: the probe
+    /// exits 47 and names the path on stderr.
     pub fn probe_command(&self) -> String {
         format!(
-            "uname -m || exit {EXIT_UNAME_FAILED}; a={agent}; if [ -x \"$a\" ]; then \"$a\" --version --build-id || {{ echo \"exit status $?\" >&2; exit {EXIT_AGENT_UNRUNNABLE}; }}; else exit {EXIT_AGENT_MISSING}; fi",
-            agent = shell_word(&self.agent_path())
+            "uname -m || exit {EXIT_UNAME_FAILED}; {checks}if [ -x \"$a\" ]; then verify || exit {EXIT_AGENT_DIR_UNSAFE}; \"$a\" --version --build-id || {{ echo \"$a: exit status $?\" >&2; exit {EXIT_AGENT_UNRUNNABLE}; }}; else exit {EXIT_AGENT_MISSING}; fi",
+            checks = self.agent_checks()
         )
     }
 
@@ -131,9 +143,15 @@ impl SshTarget {
     /// connection killed mid-transfer still orphans its own `.tmp.<pid>` file, since nothing
     /// left running can clean it up; an hour-old sweep after a successful `mv` removes those
     /// without ever touching a sibling upload still in flight.
+    ///
+    /// Everything it makes is made under `umask 077`. It first checks `remote_tmp` and the
+    /// agent's directory, and exits 47 with the reason on stderr when another user owns or can
+    /// write to either; a directory that is this user's own but too open is emptied of what this
+    /// controller put there and made again. Only the other versions' directories that this user
+    /// owns are removed.
     pub fn upload_command(&self, size: u64) -> String {
         format!(
-            "d={dir}; mkdir -p \"$d\" || exit 1; \
+            "umask 077; {checks}prepare || exit $?; \
              t=\"$d/volant-agent.tmp.$$\"; \
              avail=$(df -Pk \"$d\" | awk 'NR==2 {{print $4}}'); \
              case \"$avail\" in ''|*[!0-9]*) avail=0;; esac; \
@@ -141,13 +159,12 @@ impl SshTarget {
              head -c {size} > \"$t\" || {{ rm -f \"$t\"; exit 1; }}; \
              [ \"$(wc -c < \"$t\")\" -eq {size} ] || {{ rm -f \"$t\"; exit {EXIT_SHORT_WRITE}; }}; \
              chmod 755 \"$t\" || {{ rm -f \"$t\"; exit 1; }}; \
-             mv \"$t\" \"$d/volant-agent\" || {{ rm -f \"$t\"; exit 1; }}; \
+             mv \"$t\" \"$a\" || {{ rm -f \"$t\"; exit 1; }}; \
              find \"$d\" -name 'volant-agent.tmp.*' -mmin +60 -delete 2>/dev/null; \
-             for old in {tmp}/volant-agent-*; do [ \"$old\" = \"$d\" ] || rm -rf \"$old\"; done; \
+             sweep; \
              exit 0",
-            dir = shell_word(&self.cache_dir()),
+            checks = self.agent_checks(),
             need = space_needed_kib(size),
-            tmp = shell_word(&self.remote_tmp),
         )
     }
 }

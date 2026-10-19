@@ -2,7 +2,7 @@
 //! Rendering one task for one host: variables, escalation, environment and loop items.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value, json};
 use volant_protocol::TaskResult;
@@ -10,7 +10,7 @@ use volant_protocol::modules::short_name;
 
 use crate::compile::Step;
 use crate::playbook::{Flag, python_repr};
-use crate::template::{Templar, TemplateError};
+use crate::template::{ALLITEMS_KEY, Templar, TemplateError};
 use crate::transport::ConnectionDefaults;
 use crate::vars::{HostVars, VarStore};
 
@@ -30,7 +30,7 @@ pub(in crate::executor) use item::{
 };
 pub(in crate::executor) use plan::{Gate, PlayPlan, Strategy};
 pub(in crate::executor) use vars::host_vars;
-use vars::{merged_vars, resolved};
+use vars::{Named, delegate_host_vars, merged_vars, resolved};
 
 use carry::Carry;
 use connect::{connect_for, delegate_for};
@@ -90,6 +90,14 @@ pub(super) fn prepare(
         );
         (base, None)
     };
+    // Every item of a loop starts from these variables. They are shared rather than copied
+    // into each item, so that the memory of a loop does not grow with the size of what the host
+    // holds, a registered result for one.
+    let mut base = if task.loop_items.is_some() {
+        base.shared_by_items()
+    } else {
+        base
+    };
     // Whether the list this loop walks came from a managed host. A loop over a literal list the
     // playbook wrote binds author content; one over `{{ r.stdout_lines }}` binds data, and the
     // items of such a loop are never rendered again.
@@ -144,6 +152,11 @@ pub(super) fn prepare(
     };
     let list_value = (options.extended && options.allitems)
         .then(|| Value::Array(list.iter().map(|v| (*v).clone()).collect()));
+    // The list of all the items is one value for the loop: an item reads it through
+    // `ansible_loop.allitems`, see `ALLITEMS_KEY`.
+    if let Some(all) = &list_value {
+        Arc::make_mut(&mut base.base).insert(ALLITEMS_KEY.into(), all.clone());
+    }
     let mut notify_failures = 0;
     let mut first_notify_error: Option<TemplateError> = None;
     for (index, element) in elements.iter().cloned().enumerate() {
@@ -173,9 +186,6 @@ pub(super) fn prepare(
                 ansible_loop.insert("length".into(), Value::from(list.len()));
                 ansible_loop.insert("revindex".into(), Value::from(list.len() - index));
                 ansible_loop.insert("revindex0".into(), Value::from(last - index));
-                if let Some(all) = &list_value {
-                    ansible_loop.insert("allitems".into(), all.clone());
-                }
                 if index < last {
                     ansible_loop.insert("nextitem".into(), list[index + 1].clone());
                 }
@@ -365,7 +375,7 @@ pub(super) fn prepare(
     }
     let delegate = delegate_for(task, &base, templar)?;
     if is_local(&task.module) || crate::action_plugins::controller_side(&task.module) {
-        return Ok(Prepared::Local(items, delegate));
+        return Ok(Prepared::Local(items, delegate.map(|(name, _)| name)));
     }
     let connect = Box::new(connect_for(task, &base, templar)?);
     // A delegate's variables come back merged under the full precedence, like any host's: its
@@ -377,9 +387,10 @@ pub(super) fn prepare(
     // load-time error. The implicit spellings get their local connection from
     // `VarStore::for_host`, which is where every host's view is built and where the delegating
     // host's own implicit `localhost` gets it too.
-    let delegate = delegate.map(|name| {
-        let vars = host_vars(
+    let delegate = delegate.map(|(name, data)| {
+        let vars = delegate_host_vars(
             &name,
+            Named::ByDelegate { data },
             plan,
             &task.vars,
             step.role,

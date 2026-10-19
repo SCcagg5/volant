@@ -345,6 +345,23 @@ fn loop_control_sub_keys_are_read() {
 #[case::template_words("ns.coll.mod: port={{ x }} {{ a b }}", "ns.coll.mod", &[("_raw_params", "{{ a b }}"), ("port", "{{ x }}")])]
 #[case::open_quote("ns.coll.mod: a='open", "ns.coll.mod", &[("_raw_params", "a='open")])]
 #[case::builtin_stray_word("ping: data=x foo", "ping", &[("_raw_params", "foo"), ("data", "x")])]
+#[case::command_creates("command: echo hi creates=/etc/passwd", "command", &[("_raw_params", "echo hi"), ("creates", "/etc/passwd")])]
+#[case::command_removes("ansible.builtin.command: echo hi removes=/x", "ansible.builtin.command", &[("_raw_params", "echo hi"), ("removes", "/x")])]
+#[case::shell_chdir("shell: pwd chdir=/etc", "shell", &[("_raw_params", "pwd"), ("chdir", "/etc")])]
+#[case::shell_executable("ansible.legacy.shell: echo $0 executable=/bin/bash", "ansible.legacy.shell", &[("_raw_params", "echo $0"), ("executable", "/bin/bash")])]
+#[case::command_quoted_value("command: echo hi creates=\"/tmp/a b\"", "command", &[("_raw_params", "echo hi"), ("creates", "/tmp/a b")])]
+#[case::command_templated_value("command: echo hi creates={{ a ~ ' x' }} chdir={{ d }}", "command", &[("_raw_params", "echo hi"), ("chdir", "{{ d }}"), ("creates", "{{ a ~ ' x' }}")])]
+#[case::command_other_word("command: echo foo=bar cmd=x", "command", &[("_raw_params", "echo foo=bar cmd=x")])]
+#[case::command_escaped_equals("command: echo a\\=b creates=/x", "command", &[("_raw_params", "echo a=b"), ("creates", "/x")])]
+#[case::command_repeated_option("command: echo creates=/a creates=/b", "command", &[("_raw_params", "echo"), ("creates", "/b")])]
+#[case::raw_executable("raw: echo $0 creates=/x executable=/bin/bash", "raw", &[("_raw_params", "echo $0"), ("creates", "/x"), ("executable", "/bin/bash")])]
+#[case::script_options("script: s.sh a=1 removes=/x", "script", &[("_raw_params", "s.sh a=1"), ("removes", "/x")])]
+#[case::win_shell_chdir("ansible.windows.win_shell: dir chdir=C:/", "ansible.windows.win_shell", &[("_raw_params", "dir"), ("chdir", "C:/")])]
+#[case::command_line_beats_args(
+    "command: echo hi creates=/a\n      args: {creates: /b, chdir: /c}",
+    "command",
+    &[("_raw_params", "echo hi"), ("chdir", "/c"), ("creates", "/a")]
+)]
 #[case::jinja_block_kept_whole(
     "copy: dest={{ base ~ '/x' }} mode=0644 content=u\"v w\"",
     "copy",
@@ -366,6 +383,20 @@ fn raw_arguments_are_split_as_the_reference_splits_them(
         .collect();
     got.sort_unstable();
     assert_eq!(got, expect, "{line}");
+}
+
+/// A command line that does not split fails the load, as it fails the reference's: an unbalanced
+/// quote or Jinja block is an error for `command` and `shell`, not a word of the command.
+#[rstest]
+#[case::quote("command: echo it's")]
+#[case::double_quote("shell: echo \"a b")]
+#[case::block("command: echo {{ a")]
+fn an_unbalanced_command_line_fails_the_load(#[case] line: &str) {
+    let err = parse(&format!("- hosts: all\n  tasks:\n    - {line}\n"), "x.yml").expect_err(line);
+    assert!(
+        format!("{err:#}").contains("failed at splitting arguments"),
+        "{line}: {err:#}"
+    );
 }
 
 /// `action:` and `local_action:` read as the module's own key would, in every spelling the

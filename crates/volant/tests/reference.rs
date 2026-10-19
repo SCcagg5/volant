@@ -98,6 +98,7 @@ fn every_golden_case_matches_the_reference() {
             facts: None,
             untrusted: Some(&untrusted),
             untrusted_hosts: None,
+            base: None,
         };
         let ours: Result<Option<Value>, String> =
             if let Some(when) = case.get("when").and_then(Value::as_str) {
