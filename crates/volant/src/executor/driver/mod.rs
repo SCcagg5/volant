@@ -10,7 +10,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, watch};
 use volant_protocol::modules::short_name;
 use volant_protocol::{BatchOutcome, TaskResult};
 
-use crate::action_plugins::Kind;
+use crate::action_plugins::{Kind, LinkFacts};
 use crate::agent::{AgentLink, AgentSource};
 use crate::compile::{StepKind, after_failure, first, rescue_target};
 use crate::inventory::Host;
@@ -1776,15 +1776,11 @@ pub(super) async fn drive_host(
                         None => None,
                     };
                     let mut warnings = Vec::new();
+                    let delegate = delegate.as_ref();
                     let start = PluginStart {
+                        link: &LinkFacts::of(&key.transport, batch_escalation.as_ref(), delegate),
                         kind,
-                        running_vars: running_host_vars(
-                            delegate.as_ref(),
-                            std::slice::from_ref(item),
-                        ),
-                        delegated: delegate.is_some(),
-                        escalated: batch_escalation.is_some(),
-                        local: matches!(key.transport, Transport::Local),
+                        running_vars: running_host_vars(delegate, std::slice::from_ref(item)),
                         templar: &templar,
                         origin: &step.origin,
                         playbook_dir: &playbook_dir,

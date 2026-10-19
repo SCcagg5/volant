@@ -71,6 +71,51 @@ pub(super) struct Bridged {
     connect_timeout: Duration,
 }
 
+/// The fields of ansible-core's `PlayContext` a plugin reads off the link its module runs over.
+/// `running` is that host's own variables. What a plugin that runs `rsync -e ssh` from the
+/// controller reads is here too: the key, and the escalation it asks the other end for. A field
+/// the link has no value for is left out, as the reference leaves it unset.
+fn play_context_of(ctx: &Context<'_>, running: &Map<String, Value>) -> Value {
+    let text = |key: &str| running.get(key).and_then(Value::as_str);
+    let connection = if ctx.local {
+        "local"
+    } else {
+        text("ansible_connection").unwrap_or("ssh")
+    };
+    let mut play_context = json!({
+        "connection": connection,
+        "remote_addr": text("ansible_host").or_else(|| text("inventory_hostname")),
+        "remote_user": text("ansible_user").or(ctx.link.remote_user.as_deref()),
+        "check_mode": ctx.check_mode,
+        "diff": ctx.diff,
+    });
+    if let Some(key) = &ctx.link.private_key {
+        play_context["private_key_file"] = json!(key);
+    }
+    if let Some((method, user)) = &ctx.link.escalation {
+        play_context["become"] = json!(true);
+        play_context["become_method"] = json!(method);
+        play_context["become_user"] = json!(user);
+    }
+    play_context
+}
+
+/// One host's variables as a plugin reads them: the layers in the order a read goes through
+/// them, the host's own map last. Each other host's variables are asked for when a plugin reads
+/// them, so `hostvars` is left out.
+fn flat_vars(vars: &crate::vars::HostVars) -> Map<String, Value> {
+    let mut flat: Map<String, Value> = (*vars.shared).clone();
+    flat.extend(vars.facts.iter().map(|(k, v)| (k.clone(), v.clone())));
+    flat.extend(
+        vars.own_variables()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone())),
+    );
+    // Each other host's variables are asked for when a plugin reads them.
+    flat.remove("hostvars");
+    flat
+}
+
 /// ansible-core's plugin `name`, which may run `modules` and no other module.
 #[expect(clippy::too_many_lines)]
 pub(super) fn start(
@@ -115,6 +160,9 @@ pub(super) fn start(
     }
     // The task's own modes, which the plugin reads off `self._task`: `--check` alone would miss a
     // task's `check_mode: false`, and a plugin that never heard of check mode changes the host.
+    if let Some(delegate) = &ctx.link.delegate {
+        task.insert("delegate_to".into(), json!(delegate));
+    }
     task.insert("check_mode".into(), Value::Bool(ctx.check_mode));
     task.insert("diff".into(), Value::Bool(ctx.diff));
     // What `ActionBase.run` reads to refuse an action that does not support it, and what a plugin
@@ -123,17 +171,20 @@ pub(super) fn start(
         task.insert("async".into(), json!(ctx.async_val));
     }
     let task = Value::Object(task);
-    let vars = ctx.running_vars;
-    // The layers in the order a read goes through them: the host's own map last.
-    let mut task_vars: Map<String, Value> = (*vars.shared).clone();
-    task_vars.extend(vars.facts.iter().map(|(k, v)| (k.clone(), v.clone())));
-    task_vars.extend(
-        vars.own_variables()
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone())),
-    );
-    // Each other host's variables are asked for when a plugin reads them.
-    task_vars.remove("hostvars");
+    // What the link is opened with comes from the host the module runs on, the delegate when
+    // there is one. What the plugin reads as `task_vars` is the task's own host, and the delegate's
+    // variables are in `ansible_delegated_vars`, as the reference hands them over.
+    let running = flat_vars(ctx.running_vars);
+    let mut task_vars = if ctx.delegated {
+        let mut own = flat_vars(ctx.item_vars);
+        own.insert(
+            "ansible_delegated_vars".into(),
+            Value::Object(running.clone()),
+        );
+        own
+    } else {
+        running.clone()
+    };
     // Where the plugin looks for a `src`: the role's root, the directory of the task's file, then
     // the playbook's directory, as `Task.get_search_path` answers for a task that is in a role,
     // the roles it is a dependency of coming right after the role.
@@ -144,19 +195,16 @@ pub(super) fn start(
         .map(|p| p.display().to_string())
         .collect();
     task_vars.insert("_volant_search_path".into(), json!(search));
-    let text = |key: &str| task_vars.get(key).and_then(Value::as_str);
-    let connection = if ctx.local {
-        "local"
-    } else {
-        text("ansible_connection").unwrap_or("ssh")
-    };
-    let play_context = json!({
-        "connection": connection,
-        "remote_addr": text("ansible_host").or_else(|| text("inventory_hostname")),
-        "remote_user": text("ansible_user"),
-        "check_mode": ctx.check_mode,
-        "diff": ctx.diff,
-    });
+    // The connection options a plugin reads with `get_option` for the ssh arguments its own
+    // `ssh` runs take (`synchronize` with `use_ssh_args`).
+    task_vars.insert(
+        "_volant_ssh_options".into(),
+        json!({
+            "ssh_common_args": ctx.link.ssh_common_args,
+            "ssh_extra_args": ctx.link.ssh_extra_args,
+        }),
+    );
+    let play_context = play_context_of(&ctx, &running);
     let task_vars = Value::Object(task_vars);
     let (to_plugin, asks) = channel();
     let (replies, from_plugin) = channel::<Reply>();
@@ -186,7 +234,7 @@ pub(super) fn start(
     Box::new(Bridged {
         name,
         modules,
-        hostvars: Arc::clone(&vars.hostvars),
+        hostvars: Arc::clone(&ctx.running_vars.hostvars),
         asks,
         replies: Some(replies),
         ready,

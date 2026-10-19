@@ -180,9 +180,11 @@ async fn controller_side(
         )));
     };
     let mut warnings = Vec::new();
+    let link = crate::action_plugins::LinkFacts::default();
     let mut plugin = start(
         kind,
         Context {
+            link: &link,
             args: &item.args,
             args_untrusted: &item.args_untrusted,
             running_vars: &item.vars,

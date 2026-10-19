@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use super::helpers::{command_reply, plain_path};
 use super::*;
+use crate::action_plugins::LinkFacts;
 
 /// A command's reply carries its return code and both streams, and one with none is an error.
 #[test]
@@ -49,6 +50,7 @@ fn a_host_named_controller_file_is_refused(#[case] name: &'static str, #[case] a
         name,
         &[],
         Context {
+            link: &LinkFacts::default(),
             args: &args,
             args_untrusted: &untrusted,
             running_vars: &running,
@@ -165,4 +167,70 @@ fn a_command_that_must_not_escalate_runs_over_the_task_link(
         sub.args.get("_volant_tty").and_then(Value::as_bool),
         terminal
     );
+}
+
+/// The play context a plugin reads names the connection, address and user of the host the module
+/// runs on, and the key and escalation of the link: `synchronize` builds `rsync` from them.
+#[rstest::rstest]
+#[case::ssh(
+    json!({"ansible_host": "192.0.2.4", "ansible_user": "deploy"}),
+    LinkFacts { private_key: Some("/k/id".into()), ..LinkFacts::default() },
+    false,
+    json!({"connection": "ssh", "remote_addr": "192.0.2.4", "remote_user": "deploy",
+           "check_mode": false, "diff": false, "private_key_file": "/k/id"}),
+)]
+#[case::the_link_s_user_when_the_host_names_none(
+    json!({"inventory_hostname": "h1"}),
+    LinkFacts { remote_user: Some("ops".into()), ..LinkFacts::default() },
+    false,
+    json!({"connection": "ssh", "remote_addr": "h1", "remote_user": "ops",
+           "check_mode": false, "diff": false}),
+)]
+#[case::escalation(
+    json!({"inventory_hostname": "h1"}),
+    LinkFacts { escalation: Some(("sudo".into(), "postgres".into())), ..LinkFacts::default() },
+    false,
+    json!({"connection": "ssh", "remote_addr": "h1", "remote_user": null,
+           "check_mode": false, "diff": false,
+           "become": true, "become_method": "sudo", "become_user": "postgres"}),
+)]
+#[case::local(
+    json!({"inventory_hostname": "h1", "ansible_connection": "ssh"}),
+    LinkFacts::default(),
+    true,
+    json!({"connection": "local", "remote_addr": "h1", "remote_user": null,
+           "check_mode": false, "diff": false}),
+)]
+fn the_play_context_describes_the_link_the_module_runs_over(
+    #[case] running: Value,
+    #[case] link: LinkFacts,
+    #[case] local: bool,
+    #[case] want: Value,
+) {
+    let args = Map::new();
+    let untrusted = std::collections::BTreeSet::new();
+    let vars = crate::vars::HostVars::default();
+    let templar = crate::template::Templar::new(std::path::PathBuf::from("."));
+    let origin = crate::compile::Origin::default();
+    let mut warnings = Vec::new();
+    let ctx = Context {
+        link: &link,
+        args: &args,
+        args_untrusted: &untrusted,
+        running_vars: &vars,
+        delegated: false,
+        escalated: false,
+        local,
+        item_vars: &vars,
+        templar: &templar,
+        origin: &origin,
+        playbook_dir: std::path::Path::new("."),
+        warnings: &mut warnings,
+        environment: None,
+        timeout: None,
+        check_mode: false,
+        diff: false,
+        async_val: 0,
+    };
+    assert_eq!(play_context_of(&ctx, running.as_object().unwrap()), want);
 }
