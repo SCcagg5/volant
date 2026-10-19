@@ -21,6 +21,7 @@ pub use defaults::{
     MISSING_SUDO_PASSWORD, SshTarget, Transport,
 };
 pub(crate) use shell::validate_remote_tmp;
+pub(crate) use trace::shell_quote;
 
 #[cfg(test)]
 mod tests;

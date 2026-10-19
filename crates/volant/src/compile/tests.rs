@@ -8,7 +8,7 @@ use serde_json::{Map, Value, json};
 use super::include::include_role_options;
 use super::*;
 use crate::inventory::Host;
-use crate::playbook::{PlayTask, parse};
+use crate::playbook::{Debugger, PlayTask, parse};
 use crate::roles::RoleSearch;
 use crate::template::Templar;
 use crate::testing::{compiled, play, scratch};
@@ -944,6 +944,104 @@ fn a_notify_takes_the_first_handler_of_that_name_and_every_listener() {
     assert!(resolve_notify(&c, "nobody", &names).is_empty());
     assert_eq!(c.steps[1].task.notify, ["h"]);
     assert_eq!(c.steps[2].task.notify, ["own", "h"]);
+}
+
+/// Every keyword a play shares with a task reaches the handlers of its own `handlers` list, and a
+/// handler that writes the keyword itself keeps its own value.
+#[test]
+fn a_play_keyword_reaches_the_handlers_of_its_own_list() {
+    let c = compiled(
+        r"
+- hosts: all
+  no_log: true
+  environment: {A: play}
+  ignore_errors: true
+  ignore_unreachable: true
+  any_errors_fatal: true
+  run_once: true
+  timeout: 7
+  throttle: 2
+  debugger: on_failed
+  connection: ssh
+  port: 2222
+  remote_user: someone
+  become_method: sudo
+  become_exe: /bin/sudo
+  become_flags: -x
+  check_mode: true
+  diff: true
+  collections: [a.b]
+  module_defaults: {debug: {msg: m}}
+  tags: [t]
+  handlers:
+    - name: inherits
+      debug: msg=h
+    - name: own
+      no_log: false
+      environment: {B: handler}
+      ignore_errors: false
+      ignore_unreachable: false
+      any_errors_fatal: false
+      run_once: false
+      timeout: 9
+      port: 22
+      debug: msg=h
+",
+    );
+    let inherits = &c.handlers[0].task;
+    assert!(inherits.censors(), "no_log");
+    assert_eq!(inherits.environment, [json!({"A": "play"})]);
+    assert!(matches!(
+        inherits.ignore_errors,
+        Some(crate::playbook::Flag::Fixed(true))
+    ));
+    assert_eq!(inherits.ignore_unreachable, Some(true));
+    assert_eq!(inherits.any_errors_fatal, Some(true));
+    assert!(inherits.runs_once(), "run_once");
+    assert_eq!(inherits.timeout, Some(7));
+    assert_eq!(
+        inherits.throttle.as_ref().map(|t| &t.value),
+        Some(&json!(2))
+    );
+    assert!(matches!(inherits.debugger, Some(Debugger::OnFailed)));
+    let connect = &inherits.connect;
+    assert_eq!(connect.connection.as_deref(), Some("ssh"));
+    assert_eq!(connect.port.as_deref(), Some("2222"));
+    assert_eq!(connect.remote_user.as_deref(), Some("someone"));
+    assert_eq!(connect.become_method.as_deref(), Some("sudo"));
+    assert_eq!(connect.become_exe.as_deref(), Some("/bin/sudo"));
+    assert_eq!(connect.become_flags.as_deref(), Some("-x"));
+    assert!(matches!(
+        inherits.check_mode,
+        Some(crate::playbook::Flag::Fixed(true))
+    ));
+    assert!(matches!(
+        inherits.diff,
+        Some(crate::playbook::Flag::Fixed(true))
+    ));
+    assert_eq!(
+        inherits.collections.as_deref(),
+        Some(&["a.b".to_string()][..])
+    );
+    assert_eq!(inherits.module_defaults.len(), 1);
+
+    let own = &c.handlers[1].task;
+    assert!(!own.censors(), "its own no_log wins");
+    assert_eq!(
+        own.environment,
+        [json!({"A": "play"}), json!({"B": "handler"})],
+        "environment layers stack, the handler's last"
+    );
+    assert!(matches!(
+        own.ignore_errors,
+        Some(crate::playbook::Flag::Fixed(false))
+    ));
+    assert_eq!(own.ignore_unreachable, Some(false));
+    assert_eq!(own.any_errors_fatal, Some(false));
+    assert!(!own.runs_once());
+    assert_eq!(own.timeout, Some(9));
+    assert_eq!(own.connect.port.as_deref(), Some("22"));
+    assert_eq!(own.connect.connection.as_deref(), Some("ssh"));
 }
 
 /// A play that gathers facts opens with an unlisted `setup` step, kept by `always` tags.

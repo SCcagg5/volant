@@ -33,7 +33,7 @@ use std::time::Duration;
 
 use serde_json::{Map, Value};
 use volant_protocol::TaskResult;
-use volant_protocol::modules::{ACTION_PLUGINS, short_name};
+use volant_protocol::modules::{ACTION_PLUGINS, resolved_name, short_name};
 
 use crate::template::Templar;
 use crate::vars::HostVars;
@@ -118,7 +118,7 @@ pub(crate) fn waits_for_later(name: &str) -> bool {
 /// Gated on [`ACTION_PLUGINS`], the list the modules page is built from, so a name this match
 /// knows and the page does not is never run.
 pub(crate) fn kind(module: &str) -> Option<Kind> {
-    let short = short_name(module);
+    let short = resolved_name(module);
     if !builtin_spelling(module) {
         return collection_actions()
             .action
@@ -290,8 +290,61 @@ pub(crate) trait Plugin: Send {
     }
 }
 
+/// What a plugin reads of the link its module runs over that is not a variable: the settings the
+/// link was opened with, which the reference puts on the plugin's play context and connection.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct LinkFacts {
+    /// The ssh key and user the link uses: the host's variable, else the command line or
+    /// `ansible.cfg`.
+    pub private_key: Option<String>,
+    pub remote_user: Option<String>,
+    /// The method and the user the link escalates to, when it does.
+    pub escalation: Option<(String, String)>,
+    /// `ssh_common_args` and `ssh_extra_args` of an ssh link, as one string each.
+    pub ssh_common_args: Option<String>,
+    pub ssh_extra_args: Option<String>,
+    /// The host the task is delegated to, as the plugin reads it off `delegate_to`.
+    pub delegate: Option<String>,
+    /// Whether the link runs the agent on the controller itself.
+    pub local: bool,
+}
+
+impl LinkFacts {
+    /// The facts of the link `transport` opens, escalated as `escalation` says.
+    pub(crate) fn of(
+        transport: &crate::transport::Transport,
+        escalation: Option<&crate::transport::Escalation>,
+        delegate: Option<&(String, HostVars)>,
+    ) -> Self {
+        let words = |words: &[String]| {
+            (!words.is_empty()).then(|| {
+                words
+                    .iter()
+                    .map(|word| crate::transport::shell_quote(word))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+        };
+        let mut facts = LinkFacts {
+            escalation: escalation.map(|e| (e.method.name().to_string(), e.user.clone())),
+            delegate: delegate.map(|(name, _)| name.clone()),
+            local: matches!(transport, crate::transport::Transport::Local),
+            ..LinkFacts::default()
+        };
+        if let crate::transport::Transport::Ssh(target) = transport {
+            facts.private_key = target.private_key.as_ref().map(|k| k.display().to_string());
+            facts.remote_user.clone_from(&target.user);
+            facts.ssh_common_args = words(&target.common_args);
+            facts.ssh_extra_args = words(&target.extra_args);
+        }
+        facts
+    }
+}
+
 /// What a plugin reads of the task and the host, all of it already rendered.
 pub(crate) struct Context<'a> {
+    /// The link the module runs over.
+    pub link: &'a LinkFacts,
     /// The item's rendered arguments and the names among them whose render read a host.
     pub args: &'a Map<String, Value>,
     pub args_untrusted: &'a BTreeSet<String>,

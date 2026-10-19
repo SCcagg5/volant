@@ -1,0 +1,23 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    from_author: "{% raw %}{{ r.stdout }}{% endraw %}"
+    from_host: "{{ r.stdout }}"
+  tasks:
+    - name: Read a file whose text holds raw tags and an expression
+      command: cat {{ payload }}
+      register: r
+    - name: The text as an argument, and under the author's own raw block
+      debug:
+        msg: "{{ r.stdout }}|{% raw %}{{ r.stdout }}{% endraw %}|{{ from_author }}|{{ from_host }}"
+    - name: The text carried by set_fact and read again
+      set_fact:
+        kept: "{{ r.stdout }}"
+        wrapped: "{% raw %}{{ r.stdout }}{% endraw %}"
+    - name: The carried text, alone and in a list
+      debug:
+        msg: "{{ kept }}|{{ wrapped }}|{{ [kept] }}"
+    - name: The text as a loop item
+      debug:
+        msg: "{{ item }}"
+      loop: ["{{ r.stdout }}", "{{ kept }}"]

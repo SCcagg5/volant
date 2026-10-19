@@ -1,0 +1,11 @@
+- hosts: local
+  gather_facts: false
+  run_once: true
+  tasks:
+    - command: "true"
+      run_once: false
+      notify: say
+  handlers:
+    - name: say
+      debug:
+        msg: "ran on {{ inventory_hostname }}"

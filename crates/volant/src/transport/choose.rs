@@ -21,6 +21,26 @@ use super::escalation::check_local_escalation;
 use super::escalation::{local_argv, preamble};
 use super::shell::validate_remote_tmp;
 
+/// The destination `ssh` gets for a host: `ansible_host`, or the inventory name when that is
+/// unset. Both can come from data the playbook reads, and the address sits in the argument list
+/// where `ssh` reads options, so a value that starts with `-` would be taken as one and the
+/// remote command as the host. A value with whitespace or a control character is no address
+/// either. ansible-core 2.19.12 passes the value on unchecked, so this is stricter than the
+/// reference on purpose. `user@host` and IPv6 literals pass.
+fn ssh_address(host_name: &str, ansible_host: Option<String>) -> anyhow::Result<String> {
+    let (variable, address) = match ansible_host {
+        Some(address) => ("ansible_host", address),
+        None => ("inventory_hostname", host_name.to_string()),
+    };
+    if address.starts_with('-') || address.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        bail!(
+            "host '{host_name}': {variable} must be a host name or address, found '{}'",
+            address.escape_debug()
+        );
+    }
+    Ok(address)
+}
+
 impl Transport {
     /// The connection one host uses, read from its effective variables: the merged view under
     /// the full precedence rather than the inventory object. `ansible_connection` and its
@@ -55,7 +75,7 @@ impl Transport {
         match connection.as_deref().unwrap_or("ssh") {
             "local" => Ok(Transport::Local),
             "ssh" => Ok(Transport::Ssh(SshTarget {
-                address: setting_text("ansible_host").unwrap_or_else(|| host_name.to_string()),
+                address: ssh_address(host_name, setting_text("ansible_host"))?,
                 port: port_of(vars).or(keywords.port),
                 user: setting_text("ansible_user")
                     .or_else(|| keywords.user.clone())

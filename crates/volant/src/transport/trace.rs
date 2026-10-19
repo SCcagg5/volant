@@ -79,7 +79,7 @@ pub(super) fn result(target: &SshTarget, captured: &Captured) {
 }
 
 /// `shlex.quote`: a word of safe characters stays bare, any other is single-quoted.
-fn shell_quote(word: &str) -> String {
+pub(crate) fn shell_quote(word: &str) -> String {
     let safe = |c: char| c.is_ascii_alphanumeric() || "@%+=:,./-_".contains(c);
     if !word.is_empty() && word.chars().all(safe) {
         word.to_string()
