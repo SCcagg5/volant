@@ -280,7 +280,7 @@ fn a_delimiter_a_host_chose_is_read_as_the_mode_says(
 ",
     );
     let untrusted: BTreeSet<String> = ["variable_start_string".to_string()].into();
-    let args = json!({"src": "t.j2", "dest": "/tmp/x", "variable_start_string": "[["});
+    let args = json!({"src": "t.j2", "dest": "/tmp/x", "variable_start_string": "[[", "variable_end_string": "]]"});
     let mut plugin = start_mode(mode, &dir, args, &untrusted, &HostVars::default());
     if refuse {
         assert_eq!(
@@ -303,7 +303,7 @@ fn a_delimiter_a_host_chose_is_read_as_the_mode_says(
 fn a_header_in_a_file_a_host_named_is_read(#[case] mode: HostNamedPaths) {
     let dir = with_template(
         "t.j2",
-        "#jinja2: variable_start_string:'[['
+        "#jinja2: variable_start_string:'[[', variable_end_string:']]'
 x [[ 1 ]]
 ",
     );
