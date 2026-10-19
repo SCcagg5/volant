@@ -1,0 +1,2 @@
+inc_base: &inc_base {a: 1}
+inc_derived: {z: 0, <<: *inc_base}

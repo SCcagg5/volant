@@ -58,6 +58,8 @@ A value also answers a handful of Python methods: `.split()`, `.startswith()` an
 
 The `template` module and `lookup('template')` share one render, and it differs from a task argument's render in one way: it renders the file's text **once**. A task argument goes through further passes, which is how a value that still holds `{{ ... }}` after rendering can be read as a template again. A template file does not get that second pass, so a value a managed host contributed lands in the written file as plain text and never runs as a template of its own.
 
+Text that a `raw` block writes, or a string such as `'{{'`, is literal: it is not rendered again as an argument, in a variable, in a `set_fact` value or in a loop item. A variable that holds a `raw` block is read to its end first, so `a: "{{ b }}"` with `b: "{% raw %}{{ x }}{% endraw %}"` gives `{{ x }}`.
+
 It takes the options the `template` module reads:
 
 | Option | Default | Effect |
@@ -70,6 +72,7 @@ The file's own trailing newline survives the render. [Action plugins](/reference
 
 ## Not there yet
 
+- A string that reads two variables, one of them chained through a third that holds a `raw` block, is rendered once more than in the reference.
 - A value under `!unsafe` is data and is never templated. A `!vault` value is decrypted; see [Vault](/variables/vault/).
 - A variable that reads another templated variable through a filter or an operator gives wrong data. With `b: "{{ c }}"` and `s: "{{ b | int + 1 }}"`, `s` is not `c + 1` ([issue 466](https://github.com/lorica-labs/volant/issues/466), [pull request 483](https://github.com/lorica-labs/volant/pull/483)).
 - A `set_fact` in a loop whose items read the result of the item before keeps only the last item.

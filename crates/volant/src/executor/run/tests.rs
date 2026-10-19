@@ -1901,10 +1901,12 @@ async fn plugin_item_on<R: Relink<FakeAgent>>(
     let mut stop_broken = false;
     let mut logs = Vec::new();
     let mut batch_id = 0;
+    let link = crate::action_plugins::LinkFacts::default();
     let ran = {
         let mut plugin = crate::action_plugins::start(
             kind,
             crate::action_plugins::Context {
+                link: &link,
                 args: &item.args,
                 args_untrusted: &item.args_untrusted,
                 running_vars: &running,
@@ -2174,6 +2176,45 @@ async fn the_package_manager_is_picked_in_the_reference_s_order_and_words() {
         "Could not detect a package manager. Try using the \"use\" option."
     );
     assert_eq!(batches_sent(&agent).len(), 1, "{:?}", agent.sent);
+}
+
+/// `yum` in any spelling is the `dnf` plugin: with the host's package manager known, it runs the
+/// `dnf` module and nothing else.
+#[tokio::test]
+async fn a_yum_task_runs_the_dnf_module() {
+    let mut stop = watch::channel(false).1;
+    for spelling in ["yum", "ansible.builtin.yum", "ansible.legacy.yum"] {
+        let kind = crate::action_plugins::kind(spelling).expect("yum is an action plugin");
+        let mut agent = FakeAgent::answering(
+            [
+                vec![state("ab", true)],
+                one_result(1, json!({"changed": true, "msg": "installed", "rc": 0})).to_vec(),
+            ]
+            .concat(),
+        );
+        let (ran, _) = plugin_item(
+            kind,
+            json!({"name": "bash", "state": "present"}),
+            json!({"ansible_facts": {"pkg_mgr": "dnf"}}),
+            &mut agent,
+            &python3(),
+            &mut stop,
+        )
+        .await;
+        let sent = batches_sent(&agent);
+        let modules: Vec<&str> = sent.iter().map(|b| b[0].module.as_str()).collect();
+        assert_eq!(modules, ["dnf"], "{spelling}: {:?}", agent.sent);
+        assert_eq!(
+            Value::Object(sent[0][0].args.clone()),
+            json!({"name": "bash", "state": "present"}),
+            "{spelling}"
+        );
+        assert_eq!(
+            Value::Object(ran.expect("the item finished").0),
+            json!({"changed": true, "msg": "installed", "rc": 0}),
+            "{spelling}"
+        );
+    }
 }
 
 /// A dnf task asks setup then runs its backend, or fails in the reference's words without dnf.
@@ -3174,9 +3215,7 @@ async fn copy_attempts<C: AgentChannel>(
     let start = PluginStart {
         kind,
         running_vars: &running,
-        delegated: false,
-        escalated: false,
-        local: false,
+        link: &crate::action_plugins::LinkFacts::default(),
         templar: &templar,
         origin: &origin,
         playbook_dir: Path::new("."),
@@ -5046,27 +5085,30 @@ h1
     let mut store = VarStore::new(&inv, None, tmp.path(), Map::new()).unwrap();
     let ok = |value: Value| vec![(None, TaskResult(value.as_object().unwrap().clone()))];
     let added = json!({"add_host": {"host_name": "n1", "groups": ["g1"], "host_vars": {"x": 1}}});
-    record_inventory_results(&mut store, &task("command"), "h1", &ok(added.clone()));
+    record_inventory_results(&mut store, &task("command"), &[], "h1", &ok(added.clone()));
     assert!(store.take_inventory_changes().is_none());
     let mut failed = added.clone();
     failed["failed"] = json!(true);
-    record_inventory_results(&mut store, &task("add_host"), "h1", &ok(failed));
+    record_inventory_results(&mut store, &task("add_host"), &[], "h1", &ok(failed));
     assert!(store.take_inventory_changes().is_none());
     record_inventory_results(
         &mut store,
         &task("ansible.builtin.add_host"),
+        &[],
         "h1",
         &ok(added),
     );
     record_inventory_results(
         &mut store,
         &task("group_by"),
+        &[],
         "h1",
         &ok(json!({"add_group": "role_web", "parent_groups": ["all_roles"]})),
     );
     record_inventory_results(
         &mut store,
         &task("set_stats"),
+        &[],
         "h1",
         &ok(json!({"ansible_stats": {"data": {"n": 1}, "per_host": true, "aggregate": true}})),
     );
@@ -5079,10 +5121,11 @@ h1
         .into_iter()
         .map(|v| (None, TaskResult(v.as_object().unwrap().clone())))
         .collect();
-    record_inventory_results(&mut store, &task("add_host"), "h1", &looped);
+    record_inventory_results(&mut store, &task("add_host"), &[], "h1", &looped);
     record_inventory_results(
         &mut store,
         &task("group_by"),
+        &[],
         "h1",
         &ok(json!({"add_group": "delegated"})),
     );
@@ -5093,4 +5136,209 @@ h1
     assert_eq!(groups["g1"], ["n1"]);
     assert_eq!(groups["all_roles"], ["h1"]);
     assert_eq!(store.custom_stats().hosts()["h1"]["n"], json!(1));
+}
+
+/// Output of many short lines fails rather than split into millions of strings, `stdout` and
+/// `stderr` together; ordinary lines may pass the bound, one for every 32 bytes.
+#[test]
+fn the_lines_of_output_are_bounded_for_stdout_and_stderr_together() {
+    let max = volant_protocol::shape::MAX_VALUES;
+    let (short, long, longer) = (
+        "
+",
+        format!(
+            "{}
+",
+            "x".repeat(30)
+        ),
+        format!(
+            "{}
+",
+            "x".repeat(31)
+        ),
+    );
+    // (a line of stdout, lines of stdout, lines of stderr, the limit a refusal names)
+    for (line, out, err, refused) in [
+        (short, max, 0, None),
+        (short, max + 1, 0, Some(max)),
+        (short, max / 2, max / 2, None),
+        (short, max / 2, max / 2 + 1, Some(max)),
+        (short, 0, max + 1, Some(max)),
+        (longer.as_str(), 600_000, 0, None),
+        (longer.as_str(), 600_000, 1, Some(600_000)),
+        (long.as_str(), 600_000, 0, Some(581_250)),
+    ] {
+        let mut result = TaskResult(vars(
+            json!({"rc": 0, "stdout": line.repeat(out), "stderr": "
+".repeat(err)}),
+        ));
+        add_output_lines(&mut result);
+        if let Some(limit) = refused {
+            assert!(result.failed(), "{out} and {err} lines");
+            let msg = result.0["msg"].as_str().unwrap();
+            assert!(
+                msg.contains(&format!("more lines than the limit of {limit} ")),
+                "{msg}"
+            );
+            assert!(!result.0.contains_key("stdout"));
+        } else {
+            assert_eq!(result.0["stdout_lines"].as_array().unwrap().len(), out);
+            assert_eq!(result.0["stderr_lines"].as_array().unwrap().len(), err);
+        }
+    }
+}
+
+/// One `add_host` or `group_by` task as `record_inventory_results` sees it.
+struct OriginCase {
+    module: &'static str,
+    /// The arguments of each item whose render read a managed host's text.
+    untrusted: Vec<&'static [&'static str]>,
+    results: Vec<(Option<Value>, TaskResult)>,
+    /// The host and the group that must be data afterwards.
+    host: Option<&'static str>,
+    group: Option<&'static str>,
+}
+
+fn origin_cases() -> Vec<OriginCase> {
+    let added = |name: &str, groups: &[&str]| {
+        (
+            None,
+            result(json!({"add_host": {"host_name": name, "groups": groups, "host_vars": {}}})),
+        )
+    };
+    let grouped = |value: Value| (None, result(value));
+    let case = |module, untrusted, results, host, group| OriginCase {
+        module,
+        untrusted,
+        results,
+        host,
+        group,
+    };
+    vec![
+        case(
+            "add_host",
+            vec![&["name"]],
+            vec![added("A{", &[])],
+            Some("A{"),
+            None,
+        ),
+        case(
+            "add_host",
+            vec![&["hostname"]],
+            vec![added("B", &[])],
+            Some("B"),
+            None,
+        ),
+        case(
+            "add_host",
+            vec![&["host"]],
+            vec![added("C", &[])],
+            Some("C"),
+            None,
+        ),
+        case(
+            "add_host",
+            vec![&["groups"]],
+            vec![added("D", &["G1"])],
+            None,
+            Some("G1"),
+        ),
+        case(
+            "add_host",
+            vec![&["groupname"]],
+            vec![added("E", &["G2"])],
+            None,
+            Some("G2"),
+        ),
+        case(
+            "add_host",
+            vec![&["group"]],
+            vec![added("F", &["G3"])],
+            None,
+            Some("G3"),
+        ),
+        case(
+            "add_host",
+            vec![&[]],
+            vec![added("plain", &["fine"])],
+            None,
+            None,
+        ),
+        case(
+            "add_host",
+            vec![&[], &["name"]],
+            vec![added("first", &[]), added("second", &[])],
+            Some("second"),
+            None,
+        ),
+        case(
+            "group_by",
+            vec![&["key"]],
+            vec![grouped(json!({"add_group": "K1"}))],
+            None,
+            Some("K1"),
+        ),
+        case(
+            "group_by",
+            vec![&["parents"]],
+            vec![grouped(json!({"add_group": "K2", "parent_groups": ["P2"]}))],
+            None,
+            Some("P2"),
+        ),
+        case(
+            "group_by",
+            vec![&[]],
+            vec![grouped(json!({"add_group": "K3"}))],
+            None,
+            None,
+        ),
+    ]
+}
+
+/// A name whose argument read a managed host's text is data whatever it holds, through every
+/// alias, and in a loop only the item that read the text marks its own name.
+#[test]
+fn a_name_from_a_hosts_text_is_data_whatever_it_holds() {
+    let tmp = scratch();
+    let inv = crate::inventory::Inventory::parse_ini("[g]\nh1\n").unwrap();
+    let scope = crate::vars::Scope {
+        play_hosts: vec!["h1".into()],
+        batch_hosts: vec!["h1".into()],
+        all_play_hosts: vec!["h1".into()],
+        ..Default::default()
+    };
+    for case in origin_cases() {
+        let items: Vec<Item> = case
+            .untrusted
+            .iter()
+            .map(|names| {
+                let mut item = local_item(json!({}));
+                item.args_untrusted = names.iter().map(ToString::to_string).collect();
+                item
+            })
+            .collect();
+        let mut store = VarStore::new(&inv, None, tmp.path(), Map::new()).unwrap();
+        record_inventory_results(&mut store, &task(case.module), &items, "h1", &case.results);
+        let hosts = store.untrusted_hosts();
+        for (_, r) in &case.results {
+            let Some(name) = r.0.get("add_host").and_then(|a| a["host_name"].as_str()) else {
+                continue;
+            };
+            assert_eq!(
+                hosts.contains(name),
+                case.host == Some(name),
+                "{} host {name}",
+                case.module
+            );
+        }
+        let data = store.untrusted_of("h1", &scope);
+        assert_eq!(
+            data.contains("groups"),
+            case.host.is_some() || case.group.is_some(),
+            "{} {:?} {:?}",
+            case.module,
+            case.host,
+            case.group
+        );
+    }
 }

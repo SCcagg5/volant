@@ -158,12 +158,12 @@ impl Session {
     }
 
     fn task_vars(&self) -> Map<String, Value> {
-        let mut all = self.vars.map.clone();
+        let mut all = self.vars.own_variables().into_owned();
         for (k, v) in self.vars.facts.iter().chain(self.vars.shared.iter()) {
             all.entry(k.clone()).or_insert_with(|| v.clone());
         }
         all.entry("hostvars".to_string())
-            .or_insert_with(|| Value::Object((*self.vars.hostvars).clone()));
+            .or_insert_with(|| Value::Object(crate::vars::settled_all(&self.vars.hostvars)));
         all
     }
 

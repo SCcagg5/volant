@@ -86,7 +86,7 @@ localhost                  : ok=1    changed=1    unreachable=0    failed=0    s
 | **Structure** | blocks with `rescue` and `always`, `import_*` and `include_*` for tasks, roles and playbooks |
 | **Modules** | `command`, `shell`, `raw`, controller modules such as `debug`, `set_fact` and `assert`, most ansible-core Python modules, native versions of `setup`, `stat`, `file`, `apt`, `systemd`, `lineinfile`, `copy`, `package_facts`, `service_facts`, `user` and `group`, modules from installed collections, and the modules backed by an [action plugin](https://volant.sh/reference/action-plugins/), such as `copy`, `template`, `uri` and `script` |
 | **Hosts** | INI, YAML, TOML, script and plugin inventories, `group_vars` and `host_vars`, the full host-pattern grammar, SSH with keys, `become` through `sudo`, fact gathering with a `jsonfile` cache |
-| **Run modes** | `--check` and `--diff`, vault (`!vault`, vaulted files, `--ask-vault-pass`, `--vault-id`), SSH passwords with `-k` |
+| **Run modes** | `--check` and `--diff`, vault (`!vault`, vaulted files, `--ask-vault-pass`, `--vault-id`), SSH passwords with `-k` or `ansible_password` |
 | **Listings** | `--list-tasks`, `--list-tags`, `--list-hosts` and `--syntax-check`, byte for byte like Ansible |
 
 Not there yet: custom action, callback and vars plugins, the `stdout_callback` setting, the `ansible_password` variable, a few templating features, and every `volant` subcommand except `playbook` and `runtime`. See [Will my playbook run?](https://volant.sh/start/compatibility/) and the [roadmap](https://volant.sh/project/roadmap/).

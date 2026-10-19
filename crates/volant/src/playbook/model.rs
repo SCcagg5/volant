@@ -34,6 +34,12 @@ pub struct Play {
     pub gather_written: bool,
     pub vars: Map<String, Value>,
     pub vars_files: Vec<String>,
+    /// The `when` of the `import_playbook` entries this play came through, outermost first. Every
+    /// task, role and block of the play carries them in front of its own; handlers do not.
+    pub import_when: Vec<String>,
+    /// The `when` of the outermost `import_playbook` entry that had one, which is the one the
+    /// reference puts on the play's `Gathering Facts` task.
+    pub gather_when: Vec<String>,
     pub tasks: Vec<TaskOrBlock>,
     pub pre_tasks: Vec<TaskOrBlock>,
     pub post_tasks: Vec<TaskOrBlock>,

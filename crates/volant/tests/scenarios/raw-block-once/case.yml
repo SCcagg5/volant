@@ -1,0 +1,4 @@
+# What a raw block writes is text: it is rendered once, as an argument, in a variable, in a set_fact
+# value, in a loop, in a template file and in a text a command printed.
+args: [-i, inventory.ini, site.yml]
+needs: ["ansible-core"]

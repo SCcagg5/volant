@@ -159,6 +159,9 @@ pub(super) fn parse(text: &str, base: &Path, origin: &str) -> anyhow::Result<Con
                     config.force_handlers = on;
                 }
             }
+            "localhost_warning" => {
+                config.localhost_warning = boolean("LOCALHOST_WARNING", origin, value.trim())?;
+            }
             "show_custom_stats" => {
                 if let Some(on) = crate::yaml::bool_from_str(value.trim()) {
                     config.show_custom_stats = on;

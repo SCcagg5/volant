@@ -3,7 +3,7 @@
 //! Every builtin module of ansible-core, and where each one runs.
 
 use super::{
-    ACTION_PLUGINS, NATIVE_ENABLED, import_module, include_module, local, native, short_name,
+    ACTION_PLUGINS, NATIVE_ENABLED, import_module, include_module, local, native, resolved_name,
 };
 
 /// Every module `ansible.builtin` ships in ansible-core 2.19.12, as `ansible-doc -l -t module
@@ -93,7 +93,7 @@ pub fn is_builtin(module: &str) -> bool {
     let ours = !module.contains('.')
         || module.starts_with("ansible.builtin.")
         || module.starts_with("ansible.legacy.");
-    ours && BUILTIN_MODULES.contains(&short_name(module))
+    ours && BUILTIN_MODULES.contains(&resolved_name(module))
 }
 
 /// Whether this engine can run the module at all, natively on the agent or on the controller.
@@ -125,7 +125,7 @@ pub fn builtin_route(module: &str) -> Option<Route> {
     if !is_builtin(module) {
         return None;
     }
-    let m = short_name(module);
+    let m = resolved_name(module);
     Some(if native(m).is_some() {
         Route::Agent
     } else if local(m).is_some() {

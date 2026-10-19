@@ -332,7 +332,7 @@ impl Builder<'_> {
         section: Section,
     ) -> anyhow::Result<()> {
         let path = self.search.locate(&entry.name)?;
-        let role = crate::roles::load(&path, &entry.from)?;
+        let role = crate::roles::load(&path, &entry.name, &entry.from)?;
         let key = identity(entry);
         if !role.allow_duplicates && seen.contains(&key) {
             return Ok(());

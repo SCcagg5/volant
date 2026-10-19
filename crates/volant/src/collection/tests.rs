@@ -30,6 +30,16 @@ fn groups() -> BTreeMap<String, Vec<String>> {
     "ansible.legacy.debug",
     json!({"msg": "short"})
 )]
+#[case::dnf_defaults_reach_a_yum_task(
+    json!([{"dnf": {"use_backend": "dnf5"}}]),
+    "ansible.legacy.yum",
+    json!({"use_backend": "dnf5"})
+)]
+#[case::yum_defaults_reach_a_dnf_task(
+    json!([{"ansible.builtin.yum": {"use": "dnf"}}]),
+    "dnf",
+    json!({"use": "dnf"})
+)]
 #[case::another_module_is_left_alone(json!([{"debug": {"msg": "x"}}]), "ping", json!({}))]
 #[case::a_group_applies_under_the_module_s_own_key(
     json!([{"group/testgroup": {"data": "g", "x": 1}}, {"ping": {"data": "own"}}]),

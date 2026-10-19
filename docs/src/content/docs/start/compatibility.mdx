@@ -45,9 +45,9 @@ A file that only a dynamic `include_tasks` or `include_role` names is read when 
 | Blocks | `block`, `rescue`, `always` | |
 | Reuse | roles and dependencies, `import_tasks`, `import_role`, `import_playbook`, `include_tasks`, `include_role`, `include_vars` | `include_vars: dir`, `when` and `tags` on `import_playbook` |
 | Delegation | `delegate_to`, `delegate_facts`, `local_action`, `run_once` | |
-| Modules | `command`, `shell`, `raw`, controller modules, `copy`, `dnf`, `fetch`, `package`, `reboot`, `service`, `template`, `unarchive`, `uri`, `script`, most ansible-core Python modules, modules from installed collections and their action plugins | `yum`, a collection's action plugin that needs Windows or a network device, custom action plugins |
-| Inventories | INI, YAML and TOML files, directories, scripts, `constructed`, `generator` and collection plugins, several `-i`, `group_vars`, `host_vars`, the `jsonfile` fact cache | `hostvars` under `127.0.0.1` and `::1` for the implicit `localhost` |
-| Connections | `ssh` with keys, an ssh-agent or a password (`-k`, needs OpenSSH 8.4 or later), `local` | the `ansible_password` variable, other connection plugins, Windows, network devices |
+| Modules | `command`, `shell`, `raw`, controller modules, `copy`, `dnf`, `yum`, `fetch`, `package`, `reboot`, `service`, `template`, `unarchive`, `uri`, `script`, most ansible-core Python modules, modules from installed collections and their action plugins | a collection's action plugin that needs Windows or a network device, custom action plugins |
+| Inventories | INI, YAML and TOML files, directories, scripts, `constructed`, `generator` and collection plugins, several `-i`, `group_vars`, `host_vars`, the `jsonfile` fact cache | none left |
+| Connections | `ssh` with keys, an ssh-agent or a password (`-k` or `ansible_password`, needs OpenSSH 8.4 or later), `local` | other connection plugins, Windows, network devices |
 | Escalation | `become` through `sudo` or `su`, with or without a password | `doas` and other methods |
 | Templating | Jinja2 with the common Ansible filters, tests and lookups, `!unsafe`, filters and lookups from collections | some filter arguments, Python methods that change a value, `trim_blocks` and `{# #}` comments in a variable |
 | Run modes | normal runs, [`--check` and `--diff`](/playbooks/check-and-diff/), [vault](/variables/vault/), `--start-at-task`, `--step`, the four listing commands | none left |
@@ -56,7 +56,6 @@ A file that only a dynamic `include_tasks` or `include_role` names is read when 
 
 | Not supported yet | Why | What you can do today |
 |---|---|---|
-| `ansible.posix.synchronize` over ssh | The collection's action plugin fails in the Python helper on an ssh connection ([issue 491](https://github.com/lorica-labs/volant/issues/491), [pull request 495](https://github.com/lorica-labs/volant/pull/495)). | Use a local connection, or keep that play under `ansible-playbook`. |
 | An action plugin of your own, in `action_plugins/` | Volant runs the action plugins of ansible-core and of installed collections, not yours. | Write a module, or keep the play under `ansible-playbook`. |
 | A collection that is not installed | Volant does not install one during a run. It asks the controller's ansible-core what is installed, before the first connection. | Run `volant runtime install --collections NAME`, or the `ansible-galaxy collection install` command the error names. See [The managed runtime](/reference/runtime/#collections) and [Modules from collections](/internals/python/#modules-from-collections). |
 | No Python with ansible-core on the controller | Volant installs its own on first need, with `curl` or `wget` and `tar`. | Nothing, or `volant runtime install` ahead of time. Without a network, use `volant runtime pack` and `install --from`. |
