@@ -13,7 +13,7 @@ use crate::template::Templar;
 
 use super::builder::{Builder, Seen};
 use super::include::refuse_public;
-use super::inherit::{extend, layered};
+use super::inherit::{extend, layered, merge};
 use super::model::{Compiled, Handler, Section, Step, StepKind};
 use super::tags::TagSelection;
 /// The check the reference inserts in front of a role that ships `meta/argument_specs.yml`.
@@ -208,6 +208,7 @@ pub(crate) fn compile(
     // path to keep in step with this one.
     let empty = PlayTask {
         tags: play.tags.clone(),
+        when: play.import_when.clone(),
         no_log: play.no_log,
         environment: play.environment.clone(),
         module_defaults: play.module_defaults.clone(),
@@ -230,10 +231,10 @@ pub(crate) fn compile(
     // the pre-flight then reads it, the run builds it a payload with every other module the play
     // names, and its result comes back through the one road a result becomes a variable by.
     //
-    // `always` is what the reference tags it, so `--tags deploy` still gathers and
-    // `--skip-tags always` still does not. The play's own keywords come down through `empty` like
-    // any other task's, except `run_once`: facts are the host's own, and gathering them once for
-    // the batch would write one host's hostname onto every host of it.
+    // `always` is what the reference tags it when the play has no tags of its own, so `--tags
+    // deploy` still gathers and `--skip-tags always` still does not. The play's own keywords come
+    // down through `empty` like any other task's, except `run_once`: facts are the host's own, and
+    // gathering them once for the batch would write one host's hostname onto every host of it.
     //
     // Named `ansible.legacy.setup`, as the reference's `gather_facts` plugin runs it: a
     // `library/setup.py` beside the playbook answers the gathering there, measured on
@@ -242,14 +243,16 @@ pub(crate) fn compile(
         name: "Gathering Facts".to_string(),
         named: true,
         module: "ansible.legacy.setup".to_string(),
-        tags: {
-            let mut tags = empty.tags.clone();
-            tags.push("always".to_string());
-            tags.sort();
-            tags.dedup();
-            tags
+        // Measured on ansible-core 2.19.12: `always` only when the play has no tags. A tagged
+        // play gathers when its own tags are selected, and `--tags always` or `--tags other`
+        // leaves it alone.
+        tags: if empty.tags.is_empty() {
+            vec!["always".to_string()]
+        } else {
+            empty.tags.clone()
         },
         run_once: None,
+        when: play.gather_when.clone(),
         args: gather_args(play),
         origin: play.origin.clone(),
         ..empty.clone()
@@ -293,23 +296,11 @@ pub(crate) fn compile(
     builder.flush_point(mark);
     // The play's own handlers run behind every role's, measured.
     for handler in &play.handlers {
-        // The play's `module_defaults` and `collections` reach a handler as they reach a task.
-        let mut task = handler.task.clone();
-        task.module_defaults = empty
-            .module_defaults
-            .iter()
-            .chain(&handler.task.module_defaults)
-            .cloned()
-            .collect();
-        task.collections = handler
-            .task
-            .collections
-            .clone()
-            .or_else(|| empty.collections.clone());
-        // And the play's check and diff modes, `--check` and `--diff` among them: a handler
-        // that ran for real under `--check` would change the host.
-        task.check_mode = task.check_mode.or_else(|| empty.check_mode.clone());
-        task.diff = task.diff.or_else(|| empty.diff.clone());
+        // Every keyword the play carries in `empty` reaches a handler as it reaches a task,
+        // the way it reaches a handler out of a role: `no_log`, `environment`, `timeout`, the
+        // play's check and diff modes (`--check` and `--diff` among them: a handler that ran for
+        // real under `--check` would change the host) and the rest.
+        let task = merge(&empty, &handler.task);
         builder.handlers.push(Handler {
             task,
             listen: handler.listen.clone(),

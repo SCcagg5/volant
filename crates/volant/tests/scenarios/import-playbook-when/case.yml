@@ -1,0 +1,17 @@
+# The `when` of an `import_playbook` goes in front of the conditions of every task, role and
+# block of the imported plays, and of their fact gathering. It is not evaluated once for the
+# import: a false one still opens each play and prints a skip for each task, on each host.
+runs:
+  - args: [-i, inv.ini, go.yml]
+  - args: [-i, inv.ini, go.yml, -e, go=false]
+  - args: [-i, inv.ini, literal.yml]
+  - args: [-i, inv.ini, host.yml]
+  - args: [-i, inv.ini, hostvars.yml]
+  - args: [-i, inv.ini, list.yml, -e, go=false]
+  - args: [-i, inv.ini, vars.yml]
+  - args: [-i, inv.ini, outer.yml]
+  - args: [-i, inv.ini, outer.yml, -e, outer=false]
+  - args: [-i, inv.ini, outer.yml, -e, inner=false]
+  - args: [-i, inv.ini, mixed.yml, -e, go=false]
+  - args: [-i, inv.ini, go.yml, --check, -e, go=false]
+needs: [ansible-core]

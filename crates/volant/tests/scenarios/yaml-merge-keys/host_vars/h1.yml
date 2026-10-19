@@ -1,0 +1,7 @@
+hv_first: &hv_first {k: first, only_first: 1}
+hv_second: &hv_second {k: second, only_second: 2}
+hv_both:
+  <<: [*hv_first, *hv_second]
+  own: 3
+hv_reversed:
+  <<: [*hv_second, *hv_first]

@@ -347,7 +347,7 @@ impl Server {
         }
         let pid = started(&first)?;
 
-        let deadline = context.timeout.map(|t| Instant::now() + t);
+        let deadline = context.deadline();
         loop {
             if let Some(end) = deadline
                 && Instant::now() >= end

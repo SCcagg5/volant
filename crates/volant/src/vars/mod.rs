@@ -7,9 +7,11 @@ mod host_vars;
 mod layers;
 mod load;
 mod magic;
+mod shared;
 mod store;
 
-pub use host_vars::{HostSettings, HostVars, host_setting, omit_token};
+pub(crate) use host_vars::PENDING_PYTHON;
+pub use host_vars::{HostSettings, HostVars, host_setting, omit_token, settled, settled_all};
 pub use load::{VaultFile, include_vars_paths, load_vars_file, parse_extra_vars};
 pub use magic::ansible_version;
 
@@ -87,6 +89,13 @@ pub struct VarStore {
     /// Of the `set_fact` layer's facts, the names that came from a managed host rather than
     /// from the playbook.
     untrusted: BTreeMap<String, BTreeSet<String>>,
+    /// The host names and group names `add_host` and `group_by` took from text the playbook did
+    /// not write: a name whose argument read a managed host's value, or that still holds a
+    /// template after the task rendered it. Reading one of them back
+    /// through `groups`, `hostvars`, `group_names`, a play's host list or `inventory_hostname`
+    /// taints the render, so the name is shown as it is and never evaluated.
+    data_hosts: BTreeSet<String>,
+    data_groups: BTreeSet<String>,
     extra: Map<String, Value>,
     /// What `ansible_forks` reports, which the reference sets from the run's own `forks`.
     forks: usize,
@@ -119,6 +128,10 @@ pub struct VarStore {
     /// The same view completed with a host the inventory does not carry - an implicit
     /// `localhost` - one map per such host. There is normally at most one of them in a run.
     hostvars_with: BTreeMap<String, Arc<Map<String, Value>>>,
+    /// The spelling the implicit controller host answers to in `hostvars`: the first one a host
+    /// ran under, `localhost` until one has. The reference makes one such host and names it after
+    /// the first spelling asked for.
+    implicit_controller: Option<String>,
     /// The hosts that hold at least one untrusted name, built on demand and dropped by the same
     /// rule as `hostvars`: every write that can change it already goes through `set_fact`.
     untrusted_hosts: Option<Arc<BTreeSet<String>>>,
@@ -163,6 +176,11 @@ pub(crate) fn holds_template(value: &Value) -> bool {
         Value::Object(map) => map.values().any(holds_template),
         _ => false,
     }
+}
+
+/// Whether a host or group name still holds a template, a comment included.
+pub(crate) fn is_data_name(name: &str) -> bool {
+    Templar::is_template(name) || name.contains("{#")
 }
 
 /// The play and batch host lists one `shared` map was built from.

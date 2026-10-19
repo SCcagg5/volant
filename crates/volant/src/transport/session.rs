@@ -11,7 +11,7 @@ use crate::agent::{AgentLink, AgentSource};
 
 use super::bootstrap::{Captured, EXIT_SSH_FAILURE, bootstrap_probe_ran};
 use super::control::{
-    SSH_PROGRAM, STOP_MASTER_TIMEOUT, TIMING_ONLY, config_sets_control, dump_hostname, ssh_dump,
+    STOP_MASTER_TIMEOUT, TIMING_ONLY, config_sets_control, dump_hostname, ssh_dump,
 };
 use super::defaults::{BecomeMethod, ConnectError, Escalation, SshTarget};
 use super::escalation::unreachable_message;
@@ -19,7 +19,6 @@ use super::escalation::{
     RunAs, SudoForm, become_success, escalated_command, preamble, preparing_for,
 };
 use super::escalation::{settle_form, su_command, su_ended, su_exchange};
-use super::shell::shell_word;
 
 impl SshTarget {
     /// Opens a link, through the shared connection unless the operator's own ssh configuration
@@ -123,7 +122,7 @@ impl SshTarget {
             let Some(path) = &target.control_path else {
                 return;
             };
-            let _ = Command::new(SSH_PROGRAM)
+            let _ = Command::new(&target.own.executable)
                 .args(["-O", "exit", "-o"])
                 .arg(format!("ControlPath={}", path.display()))
                 .arg(&target.address)
@@ -166,19 +165,16 @@ impl SshTarget {
         self.bootstrap(agents, RunAs::Direct(escalated), probed)
             .await
             .map_err(|err| preparing_for(err, escalation))?;
-        let agent = shell_word(&self.agent_path());
+        let start = self.exec_command("");
         let remote = match escalated {
-            None => format!("exec {agent}"),
-            Some(_) => format!(
-                "exec {}",
-                escalated_command(escalated, &format!("exec {agent}"))
-            ),
+            None => start,
+            Some(_) => format!("exec {}", escalated_command(escalated, &start)),
         };
         let argv = self.ssh_argv(&remote);
         super::trace::exec(self, &argv);
-        let child = Command::new(SSH_PROGRAM)
+        let child = Command::new(&argv[0])
             .args(&argv[1..])
-            .envs(crate::askpass::environment())
+            .envs(self.askpass_environment()?)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -224,12 +220,11 @@ impl SshTarget {
         // The agent's stderr would land in the stream it answers on, so it goes to a file
         // beside it, which a dead link names. Its hangup at the end of the link is what the
         // agent's own `SIGHUP` handler is for.
-        let agent = shell_word(&self.agent_path());
-        let stderr_file = format!("{}/agent.stderr", self.cache_dir());
+        let stderr_file = format!("{}/agent.stderr", self.dir_hint());
         let success = become_success();
         let mut child = self.spawn_su(
             escalation,
-            &format!("exec {agent} 2>{}", shell_word(&stderr_file)),
+            &self.exec_command(" 2>\"$d/agent.stderr\""),
             &success,
             false,
             Stdio::inherit(),
@@ -296,7 +291,7 @@ impl SshTarget {
         super::trace::exec(self, &argv);
         Command::new(&argv[0])
             .args(&argv[1..])
-            .envs(crate::askpass::environment())
+            .envs(self.askpass_environment()?)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(stderr)

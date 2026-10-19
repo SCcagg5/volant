@@ -2,7 +2,7 @@
 //! The variables one host runs a task with.
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value};
 
@@ -35,6 +35,88 @@ pub(in crate::executor) fn host_vars(
     include_params: Option<&IncludeParams>,
     live: &Progress,
     templar: &Templar,
+    store: &Mutex<VarStore>,
+    origin: &Origin,
+    playbook_dir: &Path,
+) -> HostVars {
+    delegate_host_vars(
+        host,
+        Named::ByTheRun,
+        plan,
+        task_vars,
+        role,
+        include_params,
+        live,
+        templar,
+        store,
+        origin,
+        playbook_dir,
+    )
+}
+
+/// Where the name of a host view came from.
+#[derive(Clone, Copy)]
+pub(super) enum Named {
+    /// The inventory, or the play's own host list.
+    ByTheRun,
+    /// A `delegate_to`. `data` says the render read a value that came from a managed host.
+    ByDelegate { data: bool },
+}
+
+/// `host_vars` for the host a `delegate_to` named. A delegate name is data, and the names derived
+/// from it (`inventory_hostname`, `inventory_hostname_short`) and the `hostvars` entry that
+/// carries it are never rendered, in three cases. The render read a managed host's value. The name
+/// holds a template, wherever it came from: no inventory names a host that way, and the reference
+/// reads it as a host name, prints it and fails to connect to it. Or the host is not in the
+/// inventory the run started from, where `groups` or a variable can hand out text a managed host
+/// returned with nothing in the render to say so.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the driver's whole context, read for one host's variables"
+)]
+pub(in crate::executor) fn delegate_host_vars(
+    host: &str,
+    named: Named,
+    plan: &PlayPlan,
+    task_vars: &Map<String, Value>,
+    role: Option<usize>,
+    include_params: Option<&IncludeParams>,
+    live: &Progress,
+    templar: &Templar,
+    store: &Mutex<VarStore>,
+    origin: &Origin,
+    playbook_dir: &Path,
+) -> HostVars {
+    let merged = merged_vars(
+        host,
+        named,
+        plan,
+        task_vars,
+        role,
+        include_params,
+        live,
+        store,
+        origin,
+        playbook_dir,
+    );
+    resolved(merged, templar)
+}
+
+/// [`delegate_host_vars`] before the variables resolve each other: every layer merged, the names
+/// that came from a managed host marked, and the engine's own search path in place. A looped
+/// `set_fact` keeps this form, because a variable built from a fact it sets has to render again.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the driver's whole context, read for one host's variables"
+)]
+pub(in crate::executor) fn merged_vars(
+    host: &str,
+    named: Named,
+    plan: &PlayPlan,
+    task_vars: &Map<String, Value>,
+    role: Option<usize>,
+    include_params: Option<&IncludeParams>,
+    live: &Progress,
     store: &Mutex<VarStore>,
     origin: &Origin,
     playbook_dir: &Path,
@@ -73,10 +155,22 @@ pub(in crate::executor) fn host_vars(
                 .iter()
                 .flat_map(|p| p.untrusted.iter().cloned()),
         );
-        let untrusted_hosts = store.untrusted_hosts();
+        let mut untrusted_hosts = store.untrusted_hosts();
+        let data = Templar::is_template(host)
+            || match named {
+                Named::ByTheRun => false,
+                Named::ByDelegate { data } => data || store.is_runtime_host(host),
+            };
+        if data {
+            untrusted.extend(["inventory_hostname", "inventory_hostname_short"].map(String::from));
+            let mut hosts = (*untrusted_hosts).clone();
+            hosts.insert(host.to_string());
+            untrusted_hosts = Arc::new(hosts);
+        }
         let layers = store.layered_for_host(host, &scope);
         HostVars {
             map: layers.map,
+            base: Arc::default(),
             hostvars,
             shared: layers.shared,
             facts: layers.facts,
@@ -88,6 +182,11 @@ pub(in crate::executor) fn host_vars(
     // calls (`first_found`, `template`) reads these two names to find its file, and a pass that
     // resolves the task's variables without them first is a pass that lookup cannot complete on.
     insert_search_path(&mut vars, origin, playbook_dir);
+    vars
+}
+
+/// The variables of [`merged_vars`] resolved against each other.
+pub(in crate::executor) fn resolved(mut vars: HostVars, templar: &Templar) -> HostVars {
     // The merged map carries this host's facts, so the names that came from a managed host
     // travel into the resolution below and are left there exactly as they arrived. The set comes
     // back wider than it went in: a `vars:` of the play, of a block or of the task itself built

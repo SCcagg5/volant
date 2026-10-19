@@ -567,6 +567,43 @@ fn unsafe_text_escapes_and_reads_back_whatever_it_holds() {
     }
 }
 
+/// Scalars after multi-byte characters keep the typing their source text gives them.
+#[test]
+fn scalars_after_multibyte_text_are_typed_from_their_own_source() {
+    let docs = load(
+        "# é 😀\nnom: «é»\nflag: yes\nmode: 010\nbig: 1_000\n",
+        "t.yml",
+    )
+    .unwrap();
+    assert_eq!(
+        to_json(&docs[0]).unwrap(),
+        json!({"nom": "«é»", "flag": true, "mode": 8, "big": 1000})
+    );
+}
+
+/// A document of 20000 mappings loads in time that grows with its size. The bound is far above
+/// what a linear load takes, and far below what a quadratic one takes.
+#[test]
+fn a_document_of_twenty_thousand_mappings_loads() {
+    let mut text = String::from("---\n");
+    for i in 0..20_000 {
+        let port = 8000 + i % 1000;
+        writeln!(
+            text,
+            "service_{i}:\n  name: web-{i}\n  port: {port}\n  enabled: yes"
+        )
+        .unwrap();
+        writeln!(text, "  tags: [a, \"b {i}\"]").unwrap();
+    }
+    let started = std::time::Instant::now();
+    let docs = load(&text, "t.yml").unwrap();
+    let took = started.elapsed();
+    let value = to_json(&docs[0]).unwrap();
+    assert_eq!(value.as_object().unwrap().len(), 20_000);
+    assert_eq!(value["service_19999"]["enabled"], json!(true));
+    assert!(took < std::time::Duration::from_secs(60), "took {took:?}");
+}
+
 #[test]
 fn syntax_errors_name_the_source() {
     let err = load("a: [1, 2\n", "broken.yml").unwrap_err();
@@ -578,4 +615,200 @@ fn missing_fields_are_none_not_panics() {
     let docs = load("a: 1\n", "t.yml").unwrap();
     assert!(field(&docs[0], "zzz").is_none());
     assert!(field(&docs[0], "a").is_some());
+}
+
+/// Each row is a document and the JSON ansible-core 2.19.12 loads it as, keys in its order: the
+/// merged pairs first, an explicit key taking the place of the merged key it overrides.
+#[test]
+fn a_merge_key_merges_as_pyyaml_does() {
+    let rows: &[(&str, &str)] = &[
+        (
+            "base: &b {a: 1, b: 2}\nd: {<<: *b, c: 3}\n",
+            r#"{"base":{"a":1,"b":2},"d":{"a":1,"b":2,"c":3}}"#,
+        ),
+        (
+            "base: &b {a: 1, b: 2}\nd: {c: 3, <<: *b}\n",
+            r#"{"base":{"a":1,"b":2},"d":{"a":1,"b":2,"c":3}}"#,
+        ),
+        (
+            "base: &b {a: 1, b: 2}\nd: {a: 9, <<: *b}\n",
+            r#"{"base":{"a":1,"b":2},"d":{"a":9,"b":2}}"#,
+        ),
+        (
+            "base: &b {a: 1, b: 2}\nd: {<<: *b, a: 9}\n",
+            r#"{"base":{"a":1,"b":2},"d":{"a":9,"b":2}}"#,
+        ),
+        (
+            "x: &x {a: 1, k: x}\ny: &y {a: 2, b: 2, k: y}\nd: {<<: [*x, *y], z: 0}\n",
+            r#"{"x":{"a":1,"k":"x"},"y":{"a":2,"b":2,"k":"y"},"d":{"a":1,"b":2,"k":"x","z":0}}"#,
+        ),
+        (
+            "x: &x {a: 1, k: x}\ny: &y {a: 2, b: 2, k: y}\nd: {<<: [*y, *x], z: 0}\n",
+            r#"{"x":{"a":1,"k":"x"},"y":{"a":2,"b":2,"k":"y"},"d":{"a":2,"k":"y","b":2,"z":0}}"#,
+        ),
+        (
+            "a: &a {p: 1}\nb: &b {<<: *a, q: 2}\nd: {<<: *b, r: 3}\n",
+            r#"{"a":{"p":1},"b":{"p":1,"q":2},"d":{"p":1,"q":2,"r":3}}"#,
+        ),
+        (
+            "x: &x {a: 1}\ny: &y {<<: *x, b: 2}\nd: {<<: [*y], c: 1}\n",
+            r#"{"x":{"a":1},"y":{"a":1,"b":2},"d":{"a":1,"b":2,"c":1}}"#,
+        ),
+        // Two merge keys in one mapping: the later one wins.
+        (
+            "x: &x {a: 1}\ny: &y {b: 2}\nd:\n  <<: *x\n  <<: *y\n  c: 3\n",
+            r#"{"x":{"a":1},"y":{"b":2},"d":{"a":1,"b":2,"c":3}}"#,
+        ),
+        (
+            "x: &x {a: 1, b: 2}\nd: {<<: *x, <<: {b: 3, c: 4}}\n",
+            r#"{"x":{"a":1,"b":2},"d":{"a":1,"b":3,"c":4}}"#,
+        ),
+        // A key written twice keeps its last value, also next to a merge key.
+        ("d: {a: 1, a: 2}\n", r#"{"d":{"a":2}}"#),
+        (
+            "x: &x {a: 1}\nd: {a: 5, a: 6, <<: *x}\n",
+            r#"{"x":{"a":1},"d":{"a":6}}"#,
+        ),
+        // The merge source can be written in place, as a block, or as a tagged mapping.
+        (
+            "d: {<<: {a: 1, b: 2}, c: 3}\n",
+            r#"{"d":{"a":1,"b":2,"c":3}}"#,
+        ),
+        ("d:\n  <<:\n    a: 1\n  c: 3\n", r#"{"d":{"a":1,"c":3}}"#),
+        ("d: {<<: !!map {b: 2}}\n", r#"{"d":{"b":2}}"#),
+        (
+            "x: &x [{a: 1}, {b: 2}]\nd: {<<: *x, c: 3}\n",
+            r#"{"x":[{"a":1},{"b":2}],"d":{"b":2,"a":1,"c":3}}"#,
+        ),
+        // Nothing to merge, and a merge key at the top of the document.
+        ("x: &x {}\nd: {<<: *x}\n", r#"{"x":{},"d":{}}"#),
+        ("d: {<<: [], c: 1}\n", r#"{"d":{"c":1}}"#),
+        (
+            "base: &b {a: 1}\n<<: *b\nz: 1\n",
+            r#"{"a":1,"base":{"a":1},"z":1}"#,
+        ),
+        (
+            "- &a {x: 1}\n- {<<: *a, y: 2}\n",
+            r#"[{"x":1},{"x":1,"y":2}]"#,
+        ),
+        // An explicit key, and a tagged one.
+        (
+            "x: &x {a: 1}\nd:\n  ? <<\n  : *x\n",
+            r#"{"x":{"a":1},"d":{"a":1}}"#,
+        ),
+        (
+            "x: &x {a: 1}\nd: {!!merge '<<': *x}\n",
+            r#"{"x":{"a":1},"d":{"a":1}}"#,
+        ),
+        // Quoted, the key is text.
+        (
+            "x: &x {a: 1}\nd: {'<<': *x}\n",
+            r#"{"x":{"a":1},"d":{"<<":{"a":1}}}"#,
+        ),
+        (
+            "x: &x {a: 1}\nd: {\"<<\": *x}\n",
+            r#"{"x":{"a":1},"d":{"<<":{"a":1}}}"#,
+        ),
+        // The characters `<<` elsewhere are no merge key.
+        (
+            "cmd: |\n  cat <<EOF\n  EOF\nb: {k: 1}\n",
+            r#"{"cmd":"cat <<EOF\nEOF\n","b":{"k":1}}"#,
+        ),
+    ];
+    for (text, want) in rows {
+        let docs = load(text, "t.yml").unwrap();
+        let got = serde_json::to_string(&to_json(&docs[0]).unwrap()).unwrap();
+        assert_eq!(&got, want, "{text:?}");
+    }
+}
+
+/// A merge source marked `!unsafe` stays data in the mapping that merges it: ansible-core 2.19.12
+/// does not render `{{ q }}` in `d.a`.
+#[test]
+fn a_merged_unsafe_mapping_stays_data() {
+    let text = "x: &x !unsafe {a: '{{ q }}', n: {m: '{{ q }}'}}\nd: {<<: *x, c: '{{ q }}'}\n";
+    let docs = load(text, "t.yml").unwrap();
+    let d = to_json(&docs[0]).unwrap()["d"].clone();
+    assert_eq!(
+        unsafe_text(d["a"].as_str().unwrap()).as_deref(),
+        Some("{{ q }}")
+    );
+    assert_eq!(
+        unsafe_text(d["n"]["m"].as_str().unwrap()).as_deref(),
+        Some("{{ q }}")
+    );
+    assert_eq!(d["c"], json!("{{ q }}"));
+}
+
+/// A merge key whose value is not a mapping or a list of mappings stops the load with the
+/// message of PyYAML's constructor, naming the mapping and the value.
+#[test]
+fn a_bad_merge_value_is_a_constructor_error() {
+    let rows: &[(&str, &str)] = &[
+        (
+            "d: {<<: 1, c: 2}\n",
+            "while constructing a mapping\n  in \"t.yml\", line 1, column 4\nexpected a mapping or list of mappings for merging, but found scalar\n  in \"t.yml\", line 1, column 9",
+        ),
+        (
+            "d:\n  <<: [1]\n",
+            "while constructing a mapping\n  in \"t.yml\", line 2, column 3\nexpected a mapping for merging, but found scalar\n  in \"t.yml\", line 2, column 8",
+        ),
+        (
+            "x: &x {a: 1}\nd: {<<: [*x, 2]}\n",
+            "while constructing a mapping\n  in \"t.yml\", line 2, column 4\nexpected a mapping for merging, but found scalar\n  in \"t.yml\", line 2, column 14",
+        ),
+        (
+            "d: {<<: [[{a: 1}]]}\n",
+            "while constructing a mapping\n  in \"t.yml\", line 1, column 4\nexpected a mapping for merging, but found sequence\n  in \"t.yml\", line 1, column 10",
+        ),
+        // An alias names the node it points at.
+        (
+            "a: &s foo\nd: {<<: *s}\n",
+            "while constructing a mapping\n  in \"t.yml\", line 2, column 4\nexpected a mapping or list of mappings for merging, but found scalar\n  in \"t.yml\", line 1, column 4",
+        ),
+        (
+            "a: &s\n  - 1\nd: {<<: [*s]}\n",
+            "while constructing a mapping\n  in \"t.yml\", line 3, column 4\nexpected a mapping for merging, but found sequence\n  in \"t.yml\", line 1, column 4",
+        ),
+        // Columns count characters, not bytes.
+        (
+            "é: 1\na: &s foo\nd: {é: 2, <<: *s}\n",
+            "while constructing a mapping\n  in \"t.yml\", line 3, column 4\nexpected a mapping or list of mappings for merging, but found scalar\n  in \"t.yml\", line 2, column 4",
+        ),
+        (
+            "é: 1\nd: {<<: [1, é]}\n",
+            "while constructing a mapping\n  in \"t.yml\", line 2, column 4\nexpected a mapping for merging, but found scalar\n  in \"t.yml\", line 2, column 10",
+        ),
+        // A tag counts as part of the node too.
+        (
+            "d: {<<: !!str foo}\n",
+            "while constructing a mapping\n  in \"t.yml\", line 1, column 4\nexpected a mapping or list of mappings for merging, but found scalar\n  in \"t.yml\", line 1, column 9",
+        ),
+        (
+            "a: !!str &s foo\nd: {<<: *s}\n",
+            "while constructing a mapping\n  in \"t.yml\", line 2, column 4\nexpected a mapping or list of mappings for merging, but found scalar\n  in \"t.yml\", line 1, column 4",
+        ),
+        (
+            "<<: 1\n",
+            "while constructing a mapping\n  in \"t.yml\", line 1, column 1\nexpected a mapping or list of mappings for merging, but found scalar\n  in \"t.yml\", line 1, column 5",
+        ),
+    ];
+    for (text, want) in rows {
+        let err = format!("{:#}", load(text, "t.yml").unwrap_err());
+        assert_eq!(err, format!("t.yml: invalid YAML: {want}"), "{text:?}");
+    }
+}
+
+/// The positions of mappings stay available when a document holds a merge key.
+#[test]
+fn origins_survive_a_merge_key() {
+    let text = "- &a {x: 1}\n- {<<: *a, y: 2}\n";
+    let (docs, origins) = load_with_origins(text, "t.yml").unwrap();
+    let items = docs[0].as_vec().unwrap();
+    let Yaml::Mapping(second) = &items[1] else {
+        panic!("a mapping");
+    };
+    assert_eq!(origins.of(second), Some((2, 3)));
+    let value = field(&items[1], "y").unwrap();
+    assert_eq!(origins.of_value(value), Some((2, 15)));
 }

@@ -1,0 +1,4 @@
+# yum is a redirect to the dnf action: it resolves in every spelling, a false when skips it, and
+# otherwise the dnf plugin runs.
+args: [play.yml]
+needs: [ansible-core]

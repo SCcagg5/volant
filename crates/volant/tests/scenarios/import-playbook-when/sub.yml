@@ -1,0 +1,37 @@
+- name: gathered
+  hosts: all
+  vars:
+    v: from-play
+  tasks:
+    - name: show
+      debug: {msg: "{{ inventory_hostname }} v={{ v }}"}
+    - name: notify
+      debug: {msg: notify}
+      changed_when: true
+      notify: hand
+  handlers:
+    - name: hand
+      debug: {msg: handler}
+- name: structured
+  hosts: h1
+  gather_facts: false
+  roles:
+    - r1
+  pre_tasks:
+    - name: pre
+      debug: {msg: pre}
+  tasks:
+    - name: guarded
+      block:
+        - name: in block
+          debug: {msg: block}
+          failed_when: true
+      rescue:
+        - name: in rescue
+          debug: {msg: rescue}
+      always:
+        - name: in always
+          debug: {msg: always}
+  post_tasks:
+    - name: post
+      debug: {msg: post}

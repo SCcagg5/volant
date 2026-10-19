@@ -14,6 +14,7 @@ use minijinja::{AutoEscape, ErrorKind};
 use serde_json::Value;
 
 use super::bridged;
+use super::context::set_literal;
 use super::env::{attr_call, container_repr, holds_undefined};
 use super::templar::Templar;
 use super::{CONCAT_KEY, ITEM_KEY, QUERY_KEY, TemplateError, UNDEFINED, VAULT_NAME};
@@ -35,7 +36,7 @@ pub(super) fn unwrap_unsafe(value: &mut Value) -> bool {
 }
 
 /// Whether any string inside a value still carries a template marker.
-pub(super) fn holds_template(value: &Value) -> bool {
+pub(crate) fn holds_template(value: &Value) -> bool {
     match value {
         Value::String(s) => Templar::is_template(s),
         Value::Array(items) => items.iter().any(holds_template),
@@ -50,14 +51,15 @@ pub(super) fn holds_template(value: &Value) -> bool {
 pub(super) fn single_expression(text: &str) -> Option<&str> {
     let t = text.trim();
     let inner = t.strip_prefix("{{")?.strip_suffix("}}")?;
-    if inner.contains("{%") || inner.contains("{#") || !closes_only_what_it_opens(inner) {
+    if !closes_only_what_it_opens(inner) {
         return None;
     }
     Some(inner.trim())
 }
 
-/// Whether every bracket `expr` closes outside a string literal is one it opened. minijinja's
-/// own parser cannot be asked: its lexer panics on a `}` with nothing open.
+/// Whether every bracket `expr` closes outside a string literal is one it opened, and no
+/// statement or comment opens there. A `{%` inside a string literal is text. minijinja's own
+/// parser cannot be asked: its lexer panics on a `}` with nothing open.
 fn closes_only_what_it_opens(expr: &str) -> bool {
     let mut depth = 0usize;
     let mut quote = None;
@@ -69,6 +71,7 @@ fn closes_only_what_it_opens(expr: &str) -> bool {
             }
             (Some(q), c) if c == q => quote = None,
             (None, '\'' | '"') => quote = Some(c),
+            (None, '{') if matches!(chars.clone().next(), Some('%' | '#')) => return false,
             (None, '{' | '[' | '(') => depth += 1,
             (None, '}' | ']' | ')') => match depth.checked_sub(1) {
                 Some(d) => depth = d,
@@ -225,4 +228,47 @@ pub(super) fn convert_error(err: minijinja::Error) -> TemplateError {
         return TemplateError(format!("{UNDEFINED} The error was: {text}"));
     }
     TemplateError(text)
+}
+
+/// Notes that a pass left text that must stay as it is, when the result still holds a template
+/// marker and the marker is the text's own:
+///
+/// - the pass read no variable, so no variable's template can be in the result: the text wrote
+///   the marker itself, with a `raw` block or in a string such as `'{{'`;
+/// - or `source` has a `raw` block. `source` is the author's text on the `first` pass. On a
+///   later pass it is a variable's value, and a result that still has a `raw` block is a chain
+///   not read to its end.
+///
+/// The reference renders a result once, so such text is literal. Neither a later pass nor a later
+/// read of the variable that holds it renders it again: see `render_value_tainted`.
+pub(super) fn keep_literal(
+    source: &str,
+    result: &Value,
+    ctx: &minijinja::Value,
+    first: bool,
+    read_none: bool,
+) {
+    if !holds_template(result) {
+        return;
+    }
+    let raw =
+        opens_raw(source) && (first || !matches!(result, Value::String(text) if opens_raw(text)));
+    if read_none || raw {
+        set_literal(ctx, true);
+    }
+}
+
+/// Whether `text` holds a `{% raw %}` tag, with or without whitespace control.
+fn opens_raw(text: &str) -> bool {
+    let mut rest = text;
+    while let Some(at) = rest.find("{%") {
+        rest = &rest[at + 2..];
+        let tag = rest.trim_start_matches(['-', '+']).trim_start();
+        if let Some(after) = tag.strip_prefix("raw")
+            && after.starts_with(|c: char| c.is_whitespace() || matches!(c, '-' | '+' | '%'))
+        {
+            return true;
+        }
+    }
+    false
 }

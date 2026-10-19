@@ -131,6 +131,9 @@ pub(in crate::executor) fn break_after(
         return false;
     }
     let mut vars = item.vars.clone();
+    // The reference evaluates `break_when` against the loop's variables once the item's facts
+    // are in them, `delegate_facts` or not.
+    lay_returned_facts(&mut vars, task, item, result, templar, false);
     if let Some(name) = &task.register {
         // What the host returned: data, never templated again.
         vars.insert_untrusted(name.clone(), Value::Object(result.0.clone()));
@@ -200,31 +203,45 @@ pub(super) fn condition_vars(
     templar: &Templar,
 ) -> HostVars {
     let mut vars = item.vars.clone();
-    if let Some(facts) = result.0.get("ansible_facts").and_then(Value::as_object) {
-        let delegated =
-            task.delegate_to.as_deref().is_some_and(|to| !to.is_empty()) && task.delegates_facts();
-        match short_name(&task.module) {
-            "debug" => {}
-            "set_fact" | "include_vars" if delegated => {}
-            // The trust `record_local_facts` gives the same names once they are written.
-            name @ ("set_fact" | "include_vars") => {
-                let data = set_fact_data(task, item, templar);
-                for (key, value) in facts {
-                    if name == "set_fact" && data.contains(key) {
-                        vars.insert_untrusted(key.clone(), value.clone());
-                    } else {
-                        vars.insert(key.clone(), value.clone());
-                    }
-                }
-            }
-            _ => vars.returned_facts(facts),
-        }
-    }
+    let delegated =
+        task.delegate_to.as_deref().is_some_and(|to| !to.is_empty()) && task.delegates_facts();
+    lay_returned_facts(&mut vars, task, item, result, templar, delegated);
     if let Some(reg) = &task.register {
         vars.insert_untrusted(reg.clone(), Value::Object(result.0.clone()));
     }
     vars.insert_untrusted("result".into(), Value::Object(result.0.clone()));
     vars
+}
+
+/// Lays the `ansible_facts` a result returned over `vars`. `hidden` leaves out the facts of a
+/// `set_fact` or `include_vars` that `delegate_facts` sends to the delegate.
+fn lay_returned_facts(
+    vars: &mut HostVars,
+    task: &PlayTask,
+    item: &Item,
+    result: &TaskResult,
+    templar: &Templar,
+    hidden: bool,
+) {
+    let Some(facts) = result.0.get("ansible_facts").and_then(Value::as_object) else {
+        return;
+    };
+    match short_name(&task.module) {
+        "debug" => {}
+        "set_fact" | "include_vars" if hidden => {}
+        // The trust `record_local_facts` gives the same names once they are written.
+        name @ ("set_fact" | "include_vars") => {
+            let data = set_fact_data(task, item, templar);
+            for (key, value) in facts {
+                if name == "set_fact" && data.contains(key) {
+                    vars.insert_untrusted(key.clone(), value.clone());
+                } else {
+                    vars.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        _ => vars.returned_facts(facts),
+    }
 }
 
 /// What ansible-core's `maybe_raise_on_result` leaves on a failed final result, once the

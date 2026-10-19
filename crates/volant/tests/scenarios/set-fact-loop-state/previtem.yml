@@ -1,0 +1,10 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    x: []
+  tasks:
+    - set_fact:
+        x: "{{ x + [ansible_loop.previtem | default('none')] }}"
+      loop: [1, 2, 3]
+      loop_control: {extended: true}
+    - debug: {var: x}

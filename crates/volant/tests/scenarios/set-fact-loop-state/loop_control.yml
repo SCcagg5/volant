@@ -1,0 +1,10 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    x: []
+  tasks:
+    - set_fact:
+        x: "{{ x + [[item, i, ansible_loop.index, ansible_loop.previtem | default('-'), ansible_loop.allitems | length]] }}"
+      loop: [a, b, c]
+      loop_control: {label: "{{ item }}-{{ x | length }}", index_var: i, extended: true}
+    - debug: {var: x}

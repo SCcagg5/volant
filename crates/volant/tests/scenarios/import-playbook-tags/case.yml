@@ -1,0 +1,32 @@
+# The `tags` of an `import_playbook` are added to every imported play, so every task of the
+# file carries them for `--tags`, `--skip-tags` and the listings. A comma-separated string is
+# a list. A `tags` among the `vars` of the import is taken out of the variables, and adds its names
+# only to a play that has tags of its own.
+runs:
+  - args: [-i, inv.ini, --list-tasks, main.yml]
+  - args: [-i, inv.ini, --list-tags, main.yml]
+  - args: [-i, inv.ini, main.yml]
+  - args: [-i, inv.ini, --tags, packages, main.yml]
+  - args: [-i, inv.ini, --skip-tags, packages, main.yml]
+  - args: [-i, inv.ini, --tags, extra, main.yml]
+  - args: [-i, inv.ini, --tags, always, main.yml]
+  - args: [-i, inv.ini, --tags, never, main.yml]
+  - args: [-i, inv.ini, --tags, debug, main.yml]
+  - args: [-i, inv.ini, --skip-tags, always, main.yml]
+  - args: [-i, inv.ini, --skip-tags, extra, --tags, packages, main.yml]
+  - args: [-i, inv.ini, --start-at-task, extra task, main.yml]
+  - args: [-i, inv.ini, --start-at-task, extra task, --tags, packages, main.yml]
+  - args: [-i, inv.ini, --tags, other, two.yml]
+  - args: [-i, inv.ini, --skip-tags, other, two.yml]
+  - args: [-i, inv.ini, --tags, fromvars, viavars.yml]
+  - args: [-i, inv.ini, --list-tags, viavars.yml]
+  - args: [-i, inv.ini, --tags, fromvars, viavars-own.yml]
+  - args: [-i, inv.ini, --skip-tags, fromvars, viavars-own.yml]
+  - args: [-i, inv.ini, --tags, outer, nested.yml]
+  - args: [-i, inv.ini, --tags, packages, nested.yml]
+  - args: [-i, inv.ini, --skip-tags, outer, nested.yml]
+  - args: [-i, inv.ini, --skip-tags, packages, nested.yml]
+  - args: [-i, inv.ini, --tags, packages, gathered.yml]
+  - args: [-i, inv.ini, --skip-tags, packages, gathered.yml]
+  - args: [-i, inv.ini, --skip-tags, always, gathered.yml]
+needs: [ansible-core]

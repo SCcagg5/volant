@@ -8,6 +8,7 @@ mod hosts;
 mod passwords;
 mod run;
 mod runtime;
+mod signals;
 
 pub use args::PlaybookArgs;
 pub use run::run;

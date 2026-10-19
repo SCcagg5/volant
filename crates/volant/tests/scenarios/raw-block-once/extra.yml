@@ -1,0 +1,2 @@
+fv: "{% raw %}{{ x }}{% endraw %}"
+fw: "{{ fv }}"
