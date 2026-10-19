@@ -5,6 +5,7 @@ import json
 import os
 import struct
 import sys
+import time
 
 inp, out = sys.stdin.buffer, sys.stdout.buffer
 frame, n = os.environ["FRAME"], int(os.environ["N"])
@@ -35,6 +36,16 @@ def result(batch, body):
 def hostile(batch):
     if frame == "values":
         result(batch, b'{"changed":false,"x":[' + b"0," * (n - 1) + b"0]}")
+    elif frame in ("nobatch", "noindex", "neither", "wrongbatch", "wrongindex"):
+        # A result over the bound that names no task the controller waits for, then silence: no
+        # batch_done follows, as from an agent that is stuck.
+        head = b'{"type":"task_result",'
+        if frame not in ("nobatch", "neither"):
+            head += b'"batch":%d,' % (batch + (1000 if frame == "wrongbatch" else 0))
+        if frame not in ("noindex", "neither"):
+            head += b'"index":%d,' % (7 if frame == "wrongindex" else 0)
+        write(head + b'"result":{"changed":false,"x":[' + b"0," * (n - 1) + b"0]}}")
+        time.sleep(30)
     elif frame == "lines":
         result(batch, b'{"changed":false,"rc":0,"stdout":"' + b"\\n" * n + b'","stderr":""}')
     elif frame == "depth":

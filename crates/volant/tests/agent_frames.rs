@@ -24,6 +24,7 @@ struct Run {
     code: Option<i32>,
     text: String,
     peak_mb: u64,
+    secs: u64,
 }
 
 fn run(name: &str, frame: &str, n: u64, tasks: &str, hosts: &str) -> Run {
@@ -47,6 +48,7 @@ fn run(name: &str, frame: &str, n: u64, tasks: &str, hosts: &str) -> Run {
         format!("- hosts: all\n  gather_facts: false\n  tasks:\n{tasks}"),
     )
     .unwrap();
+    let started_at = Instant::now();
     let child = Command::new(env!("CARGO_BIN_EXE_volant"))
         .args(["playbook", "-i"])
         .arg(dir.join("inv.ini"))
@@ -82,6 +84,13 @@ fn run(name: &str, frame: &str, n: u64, tasks: &str, hosts: &str) -> Run {
         }
         peak_kb / 1024
     });
+    // A run that waits for ever is a failure of the test, not a hang of the suite.
+    let pid = libc::pid_t::try_from(child.id()).expect("a pid fits a pid_t");
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(25));
+        // SAFETY: kill(2) takes plain integers; a process that is gone makes it fail harmlessly.
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+    });
     let out = child.wait_with_output().expect("volant ends");
     let peak_mb = sampler.join().unwrap();
     let text = format!(
@@ -95,6 +104,7 @@ fn run(name: &str, frame: &str, n: u64, tasks: &str, hosts: &str) -> Run {
         code: out.status.code(),
         text,
         peak_mb,
+        secs: started_at.elapsed().as_secs(),
     }
 }
 
@@ -162,4 +172,26 @@ fn a_large_result_within_the_limits_arrives_whole(
 ) {
     let run = run(frame, frame, n, tasks, "only");
     assert_eq!(run.code, Some(0), "{}", run.text);
+}
+
+/// A result over a bound is answered as a failed task only when a task waits for it. One that
+/// names no batch or task, or one nobody waits for, ends its host, and the agent that then goes
+/// silent does not hold the run: the other host finishes.
+#[rstest]
+#[case::no_batch("nobatch")]
+#[case::no_index("noindex")]
+#[case::neither("neither")]
+#[case::a_batch_nobody_waits_for("wrongbatch")]
+#[case::a_task_nobody_waits_for("wrongindex")]
+fn a_result_nobody_waits_for_ends_its_host(#[case] frame: &str) {
+    let run = run(frame, frame, 30_000_000, BAD_TASK, "bad good");
+    assert_eq!(run.code, Some(4), "{}", run.text);
+    assert!(run.secs < 20, "{} s: {}", run.secs, run.text);
+    assert!(
+        run.text.contains("over the limit of 500000"),
+        "{}",
+        run.text
+    );
+    assert!(run.text.contains("changed: [good]"), "{}", run.text);
+    assert!(run.peak_mb < REFUSED_PEAK_MB, "peak {} MB", run.peak_mb);
 }
