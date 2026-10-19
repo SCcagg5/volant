@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The Jinja globals that build a value: `dict`.
+//! The Jinja globals that build a value: `dict`, `cycler`, `joiner` and `undef`.
 //!
 //! minijinja's `dict` takes a mapping and keywords only. Python's `dict`, which Jinja hands to
 //! templates unchanged, also takes any iterable of pairs, and Ansible roles rely on it
 //! (`dict(items)`, `dict(keys | zip(values))`). Its failures are worded as CPython words them.
 
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-use minijinja::value::{Rest, ValueKind};
-use minijinja::{Error, ErrorKind, Value};
+use minijinja::value::{Object, Rest, ValueKind, from_args};
+use minijinja::{Error, ErrorKind, State, Value};
 
 use super::type_name;
 
@@ -155,4 +157,63 @@ fn pair(at: usize, element: &Value) -> Result<(Value, Value), Error> {
         ))
     })?;
     Ok((key, value))
+}
+
+/// Jinja's `cycler`: `next()` answers the current item and moves on, `current` reads it,
+/// `reset()` starts over, and the items repeat for ever.
+#[derive(Debug)]
+struct Cycler {
+    items: Vec<Value>,
+    pos: AtomicUsize,
+}
+
+impl Object for Cycler {
+    fn get_value(self: &Arc<Self>, key: &Value) -> Option<Value> {
+        match key.as_str()? {
+            "current" => Some(self.items[self.pos.load(Ordering::Relaxed)].clone()),
+            "pos" => Some(Value::from(self.pos.load(Ordering::Relaxed))),
+            "items" => Some(Value::from(self.items.clone())),
+            _ => None,
+        }
+    }
+
+    fn call_method(
+        self: &Arc<Self>,
+        _state: &State<'_, '_>,
+        method: &str,
+        args: &[Value],
+    ) -> Result<Value, Error> {
+        let () = from_args(args)?;
+        let at = self.pos.load(Ordering::Relaxed);
+        match method {
+            "next" => {
+                self.pos
+                    .store((at + 1) % self.items.len(), Ordering::Relaxed);
+                Ok(self.items[at].clone())
+            }
+            "reset" => {
+                self.pos.store(0, Ordering::Relaxed);
+                Ok(Value::from(()))
+            }
+            _ => Err(Error::from(ErrorKind::UnknownMethod)),
+        }
+    }
+}
+
+/// `cycler(*items)`. At least one item is needed, as in Jinja.
+pub(super) fn cycler(items: Rest<Value>) -> Result<Value, Error> {
+    if items.is_empty() {
+        return Err(invalid("at least one item has to be provided".into()));
+    }
+    Ok(Value::from_object(Cycler {
+        items: items.0,
+        pos: AtomicUsize::new(0),
+    }))
+}
+
+/// `undef(hint=none, name=none)`: a value that is undefined, so that reading it fails and
+/// `default` and `is defined` see it as missing. The hint is not kept: the failure it causes
+/// reads as any other undefined variable.
+pub(super) fn undef(_args: Rest<Value>) -> Value {
+    Value::UNDEFINED
 }
