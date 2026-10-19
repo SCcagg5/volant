@@ -1,0 +1,42 @@
+[
+  {
+    "code": 0,
+    "stdout": "\nplaybook: listed.yml\n\n  play #1 (o1): o1\tTAGS: []\n    pattern: ['o1']\n    hosts (1):\n      o1\n\n  play #2 (o1): Named\tTAGS: []\n    pattern: ['o1']\n    hosts (1):\n      o1\n\n  play #3 (o1): ['o1']\tTAGS: []\n    pattern: ['o1']\n    hosts (1):\n      o1\n\n  play #4 (o1): o1\tTAGS: []\n    pattern: ['o1']\n    hosts (1):\n      o1\n\n  play #5 (o1,o1): {{ groups['one'] | first }},{{ 'o1' }}\tTAGS: []\n    pattern: ['o1', 'o1']\n    hosts (1):\n      o1\n"
+  },
+  {
+    "code": 0,
+    "stdout": "\nplaybook: listed.yml\n\n  play #1 (o1): o1\tTAGS: []\n    tasks:\n      debug\tTAGS: []\n\n  play #2 (o1): Named\tTAGS: []\n    tasks:\n      debug\tTAGS: []\n\n  play #3 (o1): ['o1']\tTAGS: []\n    tasks:\n      debug\tTAGS: []\n\n  play #4 (o1): o1\tTAGS: []\n    tasks:\n      debug\tTAGS: []\n\n  play #5 (o1,o1): {{ groups['one'] | first }},{{ 'o1' }}\tTAGS: []\n    tasks:\n      debug\tTAGS: []\n"
+  },
+  {
+    "code": 0,
+    "stdout": "\nplaybook: listed.yml\n\n  play #1 (o1): o1\tTAGS: []\n    pattern: ['o1']\n    hosts (1):\n      o1\n\n  play #2 (s1): Named\tTAGS: []\n    pattern: ['s1']\n    hosts (1):\n      s1\n\n  play #3 (o1): ['o1']\tTAGS: []\n    pattern: ['o1']\n    hosts (1):\n      o1\n\n  play #4 (o1): o1\tTAGS: []\n    pattern: ['o1']\n    hosts (1):\n      o1\n\n  play #5 (o1,o1): {{ groups['one'] | first }},{{ 'o1' }}\tTAGS: []\n    pattern: ['o1', 'o1']\n    hosts (1):\n      o1\n"
+  },
+  {
+    "code": 1,
+    "stdout": ""
+  },
+  {
+    "code": 0,
+    "stdout": "\nplaybook: empty.yml\n\n  play #1 (): []\tTAGS: []\n    pattern: []\n    hosts (0):\n"
+  },
+  {
+    "code": 4,
+    "stdout": ""
+  },
+  {
+    "code": 4,
+    "stdout": ""
+  },
+  {
+    "code": 4,
+    "stdout": ""
+  },
+  {
+    "code": 0,
+    "stdout": "\nplaybook: listed.yml\n"
+  },
+  {
+    "code": 0,
+    "stdout": "\nplaybook: imported.yml\n\n  play #1 (o1): Inner\tTAGS: []\n    pattern: ['o1']\n    hosts (1):\n      o1\n"
+  }
+]
