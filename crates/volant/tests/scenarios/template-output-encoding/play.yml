@@ -1,0 +1,118 @@
+- hosts: all
+  gather_facts: false
+  vars:
+    T: "{{ playbook_dir }}/t"
+    x: val
+    y: café
+    items: [1, 2]
+  tasks:
+    - name: Set up
+      shell: |
+        mkdir -p {{ T }}
+        printf 'old\n' > {{ T }}/latin1
+        printf 'old\n' > {{ T }}/latin1_alias
+        printf 'old\n' > {{ T }}/latin1_delims
+        printf 'old\n' > {{ T }}/latin1_crlf
+        printf 'old\n' > {{ T }}/latin1_plain
+        printf 'old\n' > {{ T }}/ascii
+        printf 'old\n' > {{ T }}/utf8
+        printf 'old\n' > {{ T }}/utf8_sig
+        printf 'old\n' > {{ T }}/utf16
+        printf 'old\n' > {{ T }}/utf16_le
+        printf 'old\n' > {{ T }}/utf16_be_crlf
+        printf 'old\n' > {{ T }}/utf32
+        printf 'old\n' > {{ T }}/cp1252
+        printf 'old\n' > {{ T }}/latin9
+        printf 'old\n' > {{ T }}/empty_means_utf8
+      check_mode: false
+    - name: latin1
+      template:
+        src: latin1.j2
+        dest: "{{ T }}/latin1"
+        output_encoding: latin-1
+    - name: latin1_alias
+      template:
+        src: latin1_alias.j2
+        dest: "{{ T }}/latin1_alias"
+        output_encoding: ISO_8859-1
+    - name: latin1_delims
+      template:
+        src: latin1_delims.j2
+        dest: "{{ T }}/latin1_delims"
+        output_encoding: latin-1
+        variable_start_string: '[['
+        variable_end_string: ']]'
+    - name: latin1_crlf
+      template:
+        src: latin1_crlf.j2
+        dest: "{{ T }}/latin1_crlf"
+        output_encoding: latin-1
+        newline_sequence: '\r\n'
+    - name: latin1_plain
+      template:
+        src: latin1_plain.j2
+        dest: "{{ T }}/latin1_plain"
+        output_encoding: latin-1
+    - name: ascii
+      template:
+        src: ascii.j2
+        dest: "{{ T }}/ascii"
+        output_encoding: ascii
+    - name: utf8
+      template:
+        src: utf8.j2
+        dest: "{{ T }}/utf8"
+        output_encoding: UTF8
+    - name: utf8_sig
+      template:
+        src: utf8_sig.j2
+        dest: "{{ T }}/utf8_sig"
+        output_encoding: utf-8-sig
+    - name: utf16
+      template:
+        src: utf16.j2
+        dest: "{{ T }}/utf16"
+        output_encoding: utf-16
+    - name: utf16_le
+      template:
+        src: utf16_le.j2
+        dest: "{{ T }}/utf16_le"
+        output_encoding: utf-16-le
+    - name: utf16_be_crlf
+      template:
+        src: utf16_be_crlf.j2
+        dest: "{{ T }}/utf16_be_crlf"
+        output_encoding: UTF_16_BE
+        newline_sequence: '\r\n'
+    - name: utf32
+      template:
+        src: utf32.j2
+        dest: "{{ T }}/utf32"
+        output_encoding: utf-32
+    - name: cp1252
+      template:
+        src: cp1252.j2
+        dest: "{{ T }}/cp1252"
+        output_encoding: cp1252
+    - name: latin9
+      template:
+        src: latin9.j2
+        dest: "{{ T }}/latin9"
+        output_encoding: iso-8859-15
+    - name: empty_means_utf8
+      template:
+        src: empty_means_utf8.j2
+        dest: "{{ T }}/empty_means_utf8"
+        output_encoding: ''
+    - name: Read back
+      slurp:
+        src: "{{ T }}/{{ item }}"
+      loop: [latin1, latin1_alias, latin1_delims, latin1_crlf, latin1_plain, ascii, utf8, utf8_sig, utf16, utf16_le, utf16_be_crlf, utf32, cp1252, latin9, empty_means_utf8]
+      register: back
+      when: not ansible_check_mode
+    - name: Show
+      debug:
+        msg: "{{ item.item }}: {{ item.content }}"
+      loop: "{{ back.results }}"
+      loop_control: {label: "{{ item.item }}"}
+      when: not ansible_check_mode

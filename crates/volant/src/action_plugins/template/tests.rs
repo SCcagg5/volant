@@ -213,34 +213,50 @@ fn the_options_and_variables_are_the_reference_s() {
     }
 }
 
-/// The delimiters of a task reach the file, each row as `ansible-playbook` of ansible-core
-/// 2.19.12 wrote it.
+/// The delimiters and the encoding of a task reach the file, each row as `ansible-playbook`
+/// of ansible-core 2.19.12 wrote it.
 #[test]
-fn the_delimiters_reach_the_file() {
+fn the_delimiters_and_the_encoding_reach_the_file() {
     let dir = with_template(
         "d.j2",
-        "[[ template_path ]] {{ one }} <% if 1 %>b<% endif %>\nx\n",
+        "[[ template_path ]] {{ one }} <% if 1 %>b<% endif %>\ncaf\u{e9}\n",
     );
     let at = |extra: Value| {
         let mut args = map(json!({"src": "d.j2", "dest": "/tmp/d"}));
         args.extend(map(extra));
         let mut plugin = start_plain(&dir, Value::Object(args));
-        staged(&sent(plugin.as_mut()))
+        staged_bytes(&sent(plugin.as_mut()))
     };
     let vs = json!({"variable_start_string": "[[", "variable_end_string": "]]"});
-    assert_eq!(at(vs.clone()), "d.j2 {{ one }} <% if 1 %>b<% endif %>\nx\n");
-    let mut both = map(vs);
+    assert_eq!(
+        at(vs.clone()),
+        "d.j2 {{ one }} <% if 1 %>b<% endif %>\ncaf\u{e9}\n".as_bytes()
+    );
+    let mut both = map(vs.clone());
     both.extend(map(
         json!({"block_start_string": "<%", "block_end_string": "%>"}),
     ));
-    assert_eq!(at(Value::Object(both)), "d.j2 {{ one }} bx\n");
-    // A text with none of the start strings is written as it is.
+    assert_eq!(
+        at(Value::Object(both.clone())),
+        "d.j2 {{ one }} bcaf\u{e9}\n".as_bytes()
+    );
+    both.insert("output_encoding".into(), json!("latin-1"));
+    assert_eq!(
+        at(Value::Object(both.clone())),
+        b"d.j2 {{ one }} bcaf\xe9\n"
+    );
+    both.insert("output_encoding".into(), json!("utf-16-le"));
+    let utf16: Vec<u8> = "d.j2 {{ one }} bcaf\u{e9}\n"
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    assert_eq!(at(Value::Object(both)), utf16);
+    // A text with none of the start strings is written as it is, even with an encoding.
     assert_eq!(
         at(
-            json!({"variable_start_string": "@@", "block_start_string": "@%",
-                  "comment_start_string": "@#"})
+            json!({"variable_start_string": "@@", "block_start_string": "@%", "comment_start_string": "@#"})
         ),
-        "[[ template_path ]] {{ one }} <% if 1 %>b<% endif %>\nx\n"
+        "[[ template_path ]] {{ one }} <% if 1 %>b<% endif %>\ncaf\u{e9}\n".as_bytes()
     );
 }
 
@@ -312,8 +328,8 @@ fn what_cannot_be_rendered_is_refused_before_the_host_is_asked() {
             "newline_sequence needs to be one of: \n, \r or \r\n".into(),
         ),
         (
-            json!({"src": "t.j2", "dest": "/x", "output_encoding": "latin-1"}),
-            "output_encoding 'latin-1' is not supported yet on 'template': only utf-8 is".into(),
+            json!({"src": "t.j2", "dest": "/x", "output_encoding": "koi8-r"}),
+            "output_encoding 'koi8-r' is not supported yet on 'template': only utf-8, utf-8-sig, latin-1, ascii, cp1252, iso-8859-15, utf-16 and utf-32 are".into(),
         ),
         (
             json!({"src": "nope.j2", "dest": "/x"}),

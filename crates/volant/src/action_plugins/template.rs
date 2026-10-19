@@ -20,6 +20,9 @@ use crate::executor::as_bool_value;
 use crate::template::{FileRender, Syntax, Vars};
 use crate::vars::HostVars;
 
+mod encoding;
+use encoding::encode;
+
 /// The `Syntax` field one delimiter option sets.
 type Field = fn(&mut Syntax) -> &mut String;
 
@@ -156,16 +159,7 @@ fn rendered(ctx: &Context<'_>) -> Result<CopyOf, String> {
         Some(_) => return Err("newline_sequence needs to be one of: \n, \r or \r\n".into()),
     };
     let syntax = syntax_of(args)?;
-    if let Some(encoding) = string_arg(args, "output_encoding").filter(|e| !e.is_empty())
-        && !matches!(
-            encoding.to_ascii_lowercase().replace('_', "-").as_str(),
-            "utf-8" | "utf8"
-        )
-    {
-        return Err(format!(
-            "output_encoding '{encoding}' is not supported yet on 'template': only utf-8 is"
-        ));
-    }
+    let encoding = string_arg(args, "output_encoding").filter(|e| !e.is_empty());
     refuse_host_named(ctx.args_untrusted, "src")?;
     let searched = search_paths(ctx.origin, ctx.playbook_dir, "templates", &src);
     let Some(found) = searched.iter().find(|p| p.exists()) else {
@@ -199,6 +193,7 @@ fn rendered(ctx: &Context<'_>) -> Result<CopyOf, String> {
         .templar
         .render_file(&text, Vars::from(&vars), &options)
         .map_err(|err| format!("could not render {src}: {err}"))?;
+    let bytes = encode(&out, encoding.as_deref().unwrap_or("utf-8"))?;
 
     let mut args: Map<String, Value> = args
         .iter()
@@ -209,7 +204,7 @@ fn rendered(ctx: &Context<'_>) -> Result<CopyOf, String> {
         args.insert("mode".into(), Value::String(local_mode(found)?));
     }
     Ok(CopyOf {
-        bytes: out.into_bytes(),
+        bytes,
         basename: found
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
