@@ -157,12 +157,12 @@ pub(super) fn concat(
 /// instruction and a two-argument call take the same two operands off the stack in the same
 /// order, and a call keeps its own, so every jump target stays where it was.
 ///
-/// Says whether the code opens a capture (`{% set x %}...{% endset %}`, `{% filter %}`), whose
-/// `{{ }}` print into a buffer, not into the output.
-///
 /// `mutating` is true when the template calls a method that changes a list or mapping in place
 /// (see [`mutates`]). Each variable, attribute and item it reads then goes through a function that
 /// hands back the mutable form of a plain list or mapping.
+///
+/// Says whether the code opens a capture (`{% set x %}...{% endset %}`, `{% filter %}`), whose
+/// `{{ }}` print into a buffer, not into the output.
 pub(super) fn route_calls(instructions: &mut Instructions<'_>, mutating: bool) -> bool {
     let mut captures = false;
     // A macro or a `set` that takes the name `q` or `query` shadows the lookup shorthand.
