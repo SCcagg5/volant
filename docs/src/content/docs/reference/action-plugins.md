@@ -175,7 +175,7 @@ Under `contained`, the directories that count are the `files` and `templates` di
 - A name that starts with `~`, or `~user`, is refused. ansible-core's own plugins expand it to a home directory, which the text of the name does not show.
 - A name with a `..` component is refused, even one that folds back inside. The file system follows a link before it folds `..`, so the folded path is not the one that would be opened.
 - An absolute name must lie under one of those directories and must not hold a `$`, which ansible-core expands in an absolute name. `with_first_found` hands over an absolute name of this kind.
-- A relative name is looked up as the plugin looks it up. The first file that exists is the one read, and it must lie under one of those directories. A file with that name beside the playbook, outside `files`, is refused when it exists. As a result the refusal tells a host that such a file exists; the answer for any other name is the usual "could not find".
+- A relative name is looked up as the plugin looks it up. The first file that exists is the one read, and it must lie under one of those directories. A file with that name beside the playbook, outside `files`, is refused when it exists. As a result the refusal tells a host that such a file exists. This is limited to a file at `<playbook>/<name>`, `<role>/<name>`, `<role>/tasks/<name>` or `<parent role>/<name>`; the answer for any other name is the usual "could not find".
 
 The check reads the text of the path. A link that you placed inside those directories is your own file and is followed. A source on the host, such as `remote_src: true` for `copy` and `unarchive`, or `assemble` when `remote_src` is not set to false, is not a controller file and is not checked. For `script`, the file is the first word of the line, or of `cmd`. For `uri`, `src` and the `filename` of each field of a multipart `body` count.
 
@@ -194,6 +194,8 @@ files or templates directories of the playbook or the role (host_named_paths = c
 ```
 
 The argument is `_raw_params` or `cmd` for a `script`. Any other word for the setting stops the run at start with exit code 5 and names the key, the three words and the value found.
+
+The setting covers the tasks listed above. It does not cover `include_vars`, `vars_files` or a lookup such as `file` whose path a host named. Nor does it cover a `copy` with `remote_src` or a `slurp` delegated to `localhost` that reads a controller path a host named. These behave as in ansible-core, and the same way on every earlier version of Volant.
 
 The mode changes which file is read, never how the text of a template is trusted. When the `src` of a `template` was named by a host, `template_path` and `template_fullpath` are that host's values in the render, the way `template_destpath` is for a `dest`.
 
