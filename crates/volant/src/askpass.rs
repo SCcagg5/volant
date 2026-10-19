@@ -9,7 +9,8 @@
 //! mode 0700, named after the process. The run removes the directory when it ends, when it
 //! unwinds from a panic and when it stops on SIGINT, SIGTERM or SIGHUP. A kill by SIGKILL, or by
 //! the out-of-memory killer, cannot run any code: the directory stays, and the next run of the
-//! same user removes it, because the process in its name is gone.
+//! same user removes it, because the process in its name is gone and no run holds the lock
+//! that the directory's owner took on it.
 
 use std::ffi::OsString;
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
@@ -24,9 +25,11 @@ const DIR_PREFIX: &str = "volant-askpass-";
 
 static FILE: OnceLock<PathBuf> = OnceLock::new();
 
-/// Keeps the password directory and the file in it alive. Both are removed when this is dropped.
+/// Keeps the password directory, the lock on it and the file in it alive. The directory and the
+/// file are removed when this is dropped.
 pub struct Installed(
     #[expect(dead_code, reason = "held for its Drop")] tempfile::TempDir,
+    #[expect(dead_code, reason = "held for its lock")] std::fs::File,
     #[expect(dead_code, reason = "held for its Drop")] tempfile::NamedTempFile,
 );
 
@@ -34,7 +37,7 @@ pub struct Installed(
 /// the run starts ask this program for it.
 pub fn install(password: &str) -> std::io::Result<Installed> {
     use std::io::Write as _;
-    let dir = private_dir()?;
+    let (dir, lock) = private_dir()?;
     let mut file = tempfile::Builder::new()
         .prefix("password-")
         .tempfile_in(dir.path())?;
@@ -42,7 +45,7 @@ pub fn install(password: &str) -> std::io::Result<Installed> {
     file.flush()?;
     FILE.set(file.path().to_path_buf())
         .map_err(|_| std::io::Error::other("a connection password is already installed"))?;
-    Ok(Installed(dir, file))
+    Ok(Installed(dir, lock, file))
 }
 
 /// The directories a run's own directory can sit in: the user's runtime directory when it is
@@ -64,8 +67,10 @@ fn effective_uid() -> u32 {
     unsafe { libc::geteuid() }
 }
 
-/// A new directory, mode 0700 and named after this process, in the first base that takes it.
-fn private_dir() -> std::io::Result<tempfile::TempDir> {
+/// A new directory, mode 0700 and named after this process, in the first base that takes it, and
+/// the open descriptor that holds an exclusive lock on it. The kernel drops the lock when the
+/// process ends, whatever ended it, so a directory nobody locks has no run behind it.
+fn private_dir() -> std::io::Result<(tempfile::TempDir, std::fs::File)> {
     let prefix = format!("{DIR_PREFIX}{}-", std::process::id());
     let mut last = std::io::Error::other("no directory to keep the password file in");
     for base in bases() {
@@ -75,7 +80,12 @@ fn private_dir() -> std::io::Result<tempfile::TempDir> {
             .permissions(std::fs::Permissions::from_mode(0o700))
             .tempdir_in(base);
         match made {
-            Ok(dir) => return Ok(dir),
+            Ok(dir) => {
+                let lock = std::fs::File::open(dir.path())?;
+                // A file system with no locks leaves the sweep to the process number alone.
+                let _ = lock.try_lock();
+                return Ok((dir, lock));
+            }
             Err(err) => last = err,
         }
     }
@@ -91,8 +101,10 @@ pub fn remove_stale() {
     }
 }
 
-/// [`remove_stale`] in one directory. Only a real directory, owned by `uid`, with mode 0700
-/// goes: a symlink, a file, another user's directory or a directory of another mode stays.
+/// [`remove_stale`] in one directory. Only a real directory, owned by `uid`, with mode 0700,
+/// that no run holds the lock of goes: a symlink, a file, another user's directory, a directory
+/// of another mode or a directory of a live run stays. The lock is what tells a live run, since
+/// a process number means nothing to a run in another PID namespace on the same directory.
 fn remove_stale_in(base: &Path, uid: u32) {
     let Ok(entries) = std::fs::read_dir(base) else {
         return;
@@ -103,12 +115,26 @@ fn remove_stale_in(base: &Path, uid: u32) {
             continue;
         }
         let path = entry.path();
-        let stale = std::fs::symlink_metadata(&path)
-            .is_ok_and(|m| m.is_dir() && m.uid() == uid && m.mode() & 0o7777 == 0o700);
-        if stale {
+        if is_stale(&path, uid) {
             let _ = std::fs::remove_dir_all(&path);
         }
     }
+}
+
+/// Whether `path` is a real directory of `uid`, mode 0700, that no run holds the lock of. It is
+/// opened without following a link, and judged by what the descriptor says.
+fn is_stale(path: &Path, uid: u32) -> bool {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let Ok(dir) = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
+        .open(path)
+    else {
+        return false;
+    };
+    dir.metadata()
+        .is_ok_and(|m| m.is_dir() && m.uid() == uid && m.mode() & 0o7777 == 0o700)
+        && !matches!(dir.try_lock(), Err(std::fs::TryLockError::WouldBlock))
 }
 
 /// The process number in the name of a run's directory.
