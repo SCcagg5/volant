@@ -66,11 +66,22 @@ sequenceDiagram
 
 The agent is a single static executable of a few hundred kilobytes. Volant uploads it once per host and reuses it on every later run.
 
-It lives at `<remote_tmp>/volant-agent-<version>/volant-agent`, so with the default `remote_tmp` it sits under `~/.ansible/tmp/` in a home directory. The version in the path is the controller's own, which is how an upgraded controller avoids running an older agent.
+It lives at `<remote_tmp>/volant-agent-<version>-<uid>/volant-agent`, so with the default `remote_tmp` it sits under `~/.ansible/tmp/` in a home directory. The version in the path is the controller's own, which is how an upgraded controller avoids running an older agent. The uid is the numeric id of the account that runs the agent, so the login account and a `become` account that share one `remote_tmp` each get their own directory.
 
 Whose home directory depends on who runs the agent. A task that does not escalate runs it as the account you log in as, and caches it there. A task that escalates runs it as the `become_user` and caches it in that user's home, written through `sudo`. This is what makes a `become_user` other than `root` work: home directories are often mode 0700, so an agent cached under your login account would be out of reach for the user you become. A host therefore holds one cache per account the run acts as, each owned by that account.
 
 The agent travels through `ssh -C`, so OpenSSH compresses it on the wire and nothing has to be unpacked on the host.
+
+Volant runs the cached agent only from a directory that no other account can change. It checks this on the probe, after an upload and again just before the start:
+
+- The directory and the program are not symbolic links. The account that runs the agent owns both, and neither has a group or other write bit.
+- `remote_tmp` belongs to that account, to root or, under `sudo`, to the account that ran `sudo`. Group and other cannot write to it, or it has the sticky bit, as `/tmp` has.
+
+Any other state stops the host with an `UNREACHABLE` error that names the path, its permissions and its owner. An upload made by Volant is created with `umask 077`. If the directory is yours but too open, the upload empties it of Volant's files and makes it again. If another account owns it, Volant leaves it alone and reports it. Only the directories of other versions that the same account owns are removed.
+
+A `remote_tmp` that does not exist is created by the first account that needs it, with mode 0700, and then belongs to that account. Create it first when several accounts share it. The default `~/.ansible/tmp` needs nothing.
+
+The checks use `ls -ldn`, so they need no `stat` option. Volant does not check the directories above `remote_tmp`. An account that can replace one of them can still swap the path in the short time between the last check and the start of the agent.
 
 Before every connection, Volant asks the cached agent for its version. A version mismatch, a missing file or a file that will not start all lead to a fresh upload. A broken cache, such as a copy truncated by an interrupted run, gets repaired instead of reported.
 

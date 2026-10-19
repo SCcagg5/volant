@@ -24,6 +24,9 @@ pub(super) const EXIT_NO_SPACE: i32 = 43;
 pub(super) const EXIT_SHORT_WRITE: i32 = 44;
 pub(super) const EXIT_AGENT_UNRUNNABLE: i32 = 45;
 pub(super) const EXIT_UNAME_FAILED: i32 = 46;
+/// The agent's directory, or the `remote_tmp` above it, is one that another user could change, so
+/// nothing in it is run. The reason is on the command's stderr, with the path.
+pub(super) const EXIT_AGENT_DIR_UNSAFE: i32 = 47;
 /// `ssh` reports its own failures with this, whatever the remote command would have returned.
 pub(super) const EXIT_SSH_FAILURE: i32 = 255;
 
@@ -35,7 +38,12 @@ pub(super) const EXIT_SSH_FAILURE: i32 = 255;
 pub(super) fn bootstrap_probe_ran(probe: &Captured) -> bool {
     matches!(
         probe.code,
-        Some(0 | EXIT_AGENT_MISSING | EXIT_AGENT_UNRUNNABLE | EXIT_UNAME_FAILED)
+        Some(
+            0 | EXIT_AGENT_MISSING
+                | EXIT_AGENT_UNRUNNABLE
+                | EXIT_UNAME_FAILED
+                | EXIT_AGENT_DIR_UNSAFE
+        )
     )
 }
 
@@ -95,8 +103,9 @@ impl SshTarget {
                     .await?
             }
         };
-        // Exits 0, 42 and 45 all come after the probe printed the architecture on its first
-        // line. A cached agent that cannot run (45) takes the same path as a cached build other
+        // Exits 0, 42, 45 and 47 all come after the probe printed the architecture on its first
+        // line. A directory that another user could change (47) is not a cached agent to reuse:
+        // the upload below either repairs it, when it is this user's own, or refuses it. A cached agent that cannot run (45) takes the same path as a cached build other
         // than this controller's: this controller wrote that file with a verified byte count
         // and an atomic rename, but a truncated or `ENOEXEC` file it left behind before that
         // check existed, or after a hard-killed run, wears the same symptom, and it used to heal
@@ -105,7 +114,7 @@ impl SshTarget {
         // is a remote shell that failed outright, so its stdout cannot be read as an
         // architecture. Ask the machine again, separately.
         let arch = match probe.code {
-            Some(0 | EXIT_AGENT_MISSING | EXIT_AGENT_UNRUNNABLE) => {
+            Some(0 | EXIT_AGENT_MISSING | EXIT_AGENT_UNRUNNABLE | EXIT_AGENT_DIR_UNSAFE) => {
                 probe.stdout.lines().next().unwrap_or("").trim().to_string()
             }
             Some(EXIT_UNAME_FAILED) => {
@@ -179,6 +188,9 @@ impl SshTarget {
                     "uploading the agent failed: the transfer was cut short".to_string(),
                 ));
             }
+            Some(EXIT_AGENT_DIR_UNSAFE) => {
+                return Err(ConnectError::Unreachable(self.unsafe_dir(&upload)));
+            }
             _ => {
                 return Err(ConnectError::Unreachable(format!(
                     "uploading the agent failed: {}",
@@ -194,10 +206,12 @@ impl SshTarget {
         let check = self
             .run_bootstrap(run_as, &self.probe_command(), None)
             .await?;
+        if check.code == Some(EXIT_AGENT_DIR_UNSAFE) {
+            return Err(ConnectError::Unreachable(self.unsafe_dir(&check)));
+        }
         if check.code == Some(EXIT_AGENT_UNRUNNABLE) {
             return Err(ConnectError::Unreachable(format!(
-                "the cached agent {} cannot be run: {}",
-                self.agent_path(),
+                "the cached agent cannot be run: {}",
                 first_words(&check.stderr, "it failed without a message")
             )));
         }
@@ -208,6 +222,17 @@ impl SshTarget {
             )));
         }
         Ok(())
+    }
+
+    /// Why a directory that holds, or would hold, the agent was refused. The command said which
+    /// path and what is wrong with it, on stderr, or on stdout when `su` gave it a terminal.
+    fn unsafe_dir(&self, answer: &Captured) -> String {
+        let said = first_words(&answer.stderr, &answer.stdout);
+        format!(
+            "the agent directory on {} is not safe to run from, so nothing was run: {}",
+            self.address,
+            first_words(&said, "the host did not say why")
+        )
     }
 
     /// Runs one remote command to completion, feeding `stdin` if given, and returns its

@@ -61,7 +61,8 @@ impl Remote {
     }
 
     fn dir(&self) -> PathBuf {
-        self.shared().join(format!("volant-agent-{VERSION}"))
+        self.shared()
+            .join(format!("volant-agent-{VERSION}-{}", effective_uid()))
     }
 
     fn agent(&self) -> PathBuf {
@@ -386,4 +387,48 @@ fn the_default_remote_tmp_under_home_works() {
         "{:?}",
         captured(&probe)
     );
+}
+
+/// The start command checks again, so a directory swapped after the probe is not run, and the
+/// stderr file of a link through `su` lands in the directory it was checked in.
+#[test]
+fn the_start_command_checks_the_directory_again() {
+    let remote = Remote::new();
+    let script = format!(
+        "#!/bin/sh\necho started >> '{}'\necho oops >&2\n",
+        remote.marker().display()
+    );
+    assert_eq!(remote.upload(script.as_bytes()).status.code(), Some(0));
+
+    let started = Remote::sh(
+        &remote.target.exec_command(" 2>\"$d/agent.stderr\""),
+        b"",
+        None,
+    );
+    assert_eq!(started.status.code(), Some(0), "{:?}", captured(&started));
+    assert_eq!(
+        std::fs::read_to_string(remote.marker()).unwrap(),
+        "started\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(remote.dir().join("agent.stderr")).unwrap(),
+        "oops\n"
+    );
+
+    // Somebody opens the directory after the probe, and swaps the program.
+    std::fs::set_permissions(remote.dir(), std::fs::Permissions::from_mode(0o777)).unwrap();
+    std::fs::remove_file(remote.marker()).unwrap();
+    let refused = Remote::sh(&remote.target.exec_command(""), b"", None);
+    assert_eq!(
+        refused.status.code(),
+        Some(EXIT_UNSAFE),
+        "{:?}",
+        captured(&refused)
+    );
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains(remote.dir().to_str().unwrap()),
+        "{:?}",
+        captured(&refused)
+    );
+    assert!(!remote.marker().exists(), "the program did not start");
 }
