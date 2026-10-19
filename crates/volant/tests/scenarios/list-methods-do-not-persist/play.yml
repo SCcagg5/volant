@@ -1,0 +1,36 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    x: [1]
+    d: {a: 1}
+    tpl: "{{ x.append(9) }}tpl"
+  tasks:
+    - set_fact:
+        first: "{{ x.append(2) }}"
+        second: "{{ x }}"
+    - debug:
+        msg: ["{{ x.append(3) }}", "{{ x }}"]
+    - debug:
+        msg: "{{ x }} {{ second }}"
+    - debug:
+        msg: "{{ tpl }}|{{ x }}"
+    - debug:
+        msg: "{{ x }}"
+      loop: [1, 2]
+      when: "x.append(5) is none or true"
+    - set_fact:
+        z: "{{ x }}"
+    - set_fact:
+        y: "{{ z.append(7) }}"
+    - debug:
+        msg: "{{ z }} {{ x }} {{ y }}"
+    - debug:
+        msg: "{{ d.update({'q': 1}) }}{{ d }}"
+    - debug:
+        msg: "{{ d }}"
+    - debug:
+        msg: ">{% set alias = x %}{% set _ = alias.append(8) %}{{ x }} {{ alias }}"
+    - debug:
+        msg: "{{ x }}"
+    - debug:
+        msg: ">{% set acc = [] %}{% for h in groups['all'] %}{% set _ = acc.append(h) %}{% endfor %}{{ acc }}"
