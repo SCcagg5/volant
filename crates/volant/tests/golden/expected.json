@@ -3972,5 +3972,98 @@
       "template": "{{ dict(a=nope) }}"
     },
     "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': 'nope' is undefined"
+  },
+  {
+    "case": {
+      "template": "{% set c = cycler('a', 'b') %}{{ c.next() }}{{ c.next() }}{{ c.next() }}"
+    },
+    "result": "aba"
+  },
+  {
+    "case": {
+      "template": "{% set c = cycler('a', 'b') %}{{ c.current }}{{ c.next() }}{{ c.current }}"
+    },
+    "result": "aab"
+  },
+  {
+    "case": {
+      "template": "{% set c = cycler(1, 2, 3) %}{{ c.next() }}{{ c.next() }}{{ c.reset() }}{{ c.next() }}"
+    },
+    "result": "121"
+  },
+  {
+    "case": {
+      "template": "{% set c = cycler(*items) %}{% for i in range(5) %}{{ c.next() }}{% endfor %}",
+      "vars": {
+        "items": [
+          "x",
+          "y"
+        ]
+      }
+    },
+    "result": "xyxyx"
+  },
+  {
+    "case": {
+      "template": "{% set c = cycler('a', 'b') %}{% for i in range(4) %}{{ c.next() }}{% endfor %}"
+    },
+    "result": "abab"
+  },
+  {
+    "case": {
+      "template": "{{ cycler() }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: at least one item has to be provided"
+  },
+  {
+    "case": {
+      "template": "{% set j = joiner(',') %}{{ j() }}a{{ j() }}b{{ j() }}c"
+    },
+    "result": "a,b,c"
+  },
+  {
+    "case": {
+      "template": "{% set j = joiner() %}{{ j() }}a{{ j() }}b"
+    },
+    "result": "a, b"
+  },
+  {
+    "case": {
+      "template": "{% set j = joiner(' | ') %}{% for i in range(3) %}{{ j() }}{{ i }}{% endfor %}"
+    },
+    "result": "0 | 1 | 2"
+  },
+  {
+    "case": {
+      "template": "{{ undef() }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Mandatory variable has not been overridden"
+  },
+  {
+    "case": {
+      "template": "{{ undef(hint='x is needed') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': x is needed"
+  },
+  {
+    "case": {
+      "template": "{{ undef() | default('d') }}"
+    },
+    "result": "d"
+  },
+  {
+    "case": {
+      "template": "{{ undef() is defined }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ x }}",
+      "vars": {
+        "x": "{{ undef(hint='x is needed') }}"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': x is needed"
   }
 ]

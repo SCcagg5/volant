@@ -567,3 +567,20 @@
 - template: "{{ dict(1, 2) }}"
 - template: "{{ dict(nope) }}"
 - template: "{{ dict(a=nope) }}"
+# `cycler`, `joiner` and `undef`, the Jinja globals a template may call.
+- template: "{% set c = cycler('a', 'b') %}{{ c.next() }}{{ c.next() }}{{ c.next() }}"
+- template: "{% set c = cycler('a', 'b') %}{{ c.current }}{{ c.next() }}{{ c.current }}"
+- template: "{% set c = cycler(1, 2, 3) %}{{ c.next() }}{{ c.next() }}{{ c.reset() }}{{ c.next() }}"
+- template: "{% set c = cycler(*items) %}{% for i in range(5) %}{{ c.next() }}{% endfor %}"
+  vars: {items: [x, y]}
+- template: "{% set c = cycler('a', 'b') %}{% for i in range(4) %}{{ c.next() }}{% endfor %}"
+- template: "{{ cycler() }}"
+- template: "{% set j = joiner(',') %}{{ j() }}a{{ j() }}b{{ j() }}c"
+- template: "{% set j = joiner() %}{{ j() }}a{{ j() }}b"
+- template: "{% set j = joiner(' | ') %}{% for i in range(3) %}{{ j() }}{{ i }}{% endfor %}"
+- template: "{{ undef() }}"
+- template: "{{ undef(hint='x is needed') }}"
+- template: "{{ undef() | default('d') }}"
+- template: "{{ undef() is defined }}"
+- template: "{{ x }}"
+  vars: {x: "{{ undef(hint='x is needed') }}"}
