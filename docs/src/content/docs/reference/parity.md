@@ -458,7 +458,7 @@ Each row is a keyword, option or plugin that ansible-core 2.19.12 ships, or a mo
 | `replace` | <span class="kw kw-partial">partial</span> | the count argument is not supported |
 | `reverse` | <span class="kw kw-runs">runs</span> |  |
 | `root` | <span class="kw kw-runs">runs</span> | through the Python helper; needs the plugin's Python libraries |
-| `round` | <span class="kw kw-partial">partial</span> | the precision and method arguments are not supported |
+| `round` | <span class="kw kw-partial">partial</span> | the method argument is not supported |
 | `safe` | <span class="kw kw-runs">runs</span> |  |
 | `select` | <span class="kw kw-runs">runs</span> |  |
 | `selectattr` | <span class="kw kw-runs">runs</span> |  |

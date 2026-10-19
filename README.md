@@ -89,7 +89,7 @@ localhost                  : ok=1    changed=1    unreachable=0    failed=0    s
 | **Run modes** | `--check` and `--diff`, vault (`!vault`, vaulted files, `--ask-vault-pass`, `--vault-id`), SSH passwords with `-k` or `ansible_password` |
 | **Listings** | `--list-tasks`, `--list-tags`, `--list-hosts` and `--syntax-check`, byte for byte like Ansible |
 
-Not there yet: custom action, callback and vars plugins, the `stdout_callback` setting, the `ansible_password` variable, a few templating features, and every `volant` subcommand except `playbook` and `runtime`. See [Will my playbook run?](https://volant.sh/start/compatibility/) and the [roadmap](https://volant.sh/project/roadmap/).
+Not there yet: custom action, callback and vars plugins, the `stdout_callback` setting, a few templating features, and every `volant` subcommand except `playbook` and `runtime`. See [Will my playbook run?](https://volant.sh/start/compatibility/) and the [roadmap](https://volant.sh/project/roadmap/).
 
 ## Promises
 

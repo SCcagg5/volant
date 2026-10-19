@@ -43,7 +43,7 @@ A file that only a dynamic `include_tasks` or `include_role` names is read when 
 | Plays | `pre_tasks`, roles, `tasks`, `post_tasks`, handlers, `serial`, `strategy` (`linear`, `free`, `host_pinned`, `debug`), `order`, `throttle`, `timeout`, `debugger`, `any_errors_fatal`, `max_fail_percentage`, `ignore_errors`, `ignore_unreachable` | `hosts:` written as a template |
 | Tasks | `when`, `loop`, the `with_*` forms, `register`, `until`, `retries`, `changed_when`, `failed_when`, `ignore_errors`, `ignore_unreachable`, `any_errors_fatal`, `no_log`, `environment`, `timeout`, `tags`, `async`, `poll`, `module_defaults` | `with_flattened`, `with_cartesian`, `with_filetree` |
 | Blocks | `block`, `rescue`, `always` | |
-| Reuse | roles and dependencies, `import_tasks`, `import_role`, `import_playbook`, `include_tasks`, `include_role`, `include_vars` | `include_vars: dir`, `when` and `tags` on `import_playbook` |
+| Reuse | roles and dependencies, `import_tasks`, `import_role`, `import_playbook`, `include_tasks`, `include_role`, `include_vars` | `include_vars: dir` |
 | Delegation | `delegate_to`, `delegate_facts`, `local_action`, `run_once` | |
 | Modules | `command`, `shell`, `raw`, controller modules, `copy`, `dnf`, `yum`, `fetch`, `package`, `reboot`, `service`, `template`, `unarchive`, `uri`, `script`, most ansible-core Python modules, modules from installed collections and their action plugins | a collection's action plugin that needs Windows or a network device, custom action plugins |
 | Inventories | INI, YAML and TOML files, directories, scripts, `constructed`, `generator` and collection plugins, several `-i`, `group_vars`, `host_vars`, the `jsonfile` fact cache | none left |
@@ -69,20 +69,13 @@ These differ from `ansible-playbook` without a message before the run, or with a
 | What | What happens |
 |---|---|
 | A variable that reads another templated variable through a filter or an operator | Wrong data: `b: "{{ c }}"` then `s: "{{ b \| int + 1 }}"` does not give `c + 1` ([issue 466](https://github.com/lorica-labs/volant/issues/466), [pull request 483](https://github.com/lorica-labs/volant/pull/483)). |
-| `set_fact` in a loop that reads its own result: `acc: "{{ acc + [item] }}"` | Only the last item stays. No error. |
 | `hosts:` written as a template | The pattern is not rendered. The run prints `Could not match supplied host pattern`, runs nothing and exits 0. |
-| `when` and `tags` on `import_playbook` | Ignored. The imported plays always run, and `--tags` and `--skip-tags` do not select them. |
 | A `{% ... %}` block in a variable or a task argument | It renders, but `trim_blocks` does not apply, a `{# ... #}` comment stays in the text, and a value made only of a block is a string, not a number. A template file is not affected. |
-| Python methods such as `append`, `update`, `index`, `rsplit`, and `dict()` of a list of pairs | The task fails with `method <name> is not available yet` or `invalid operation` ([issue 520](https://github.com/lorica-labs/volant/issues/520) for `dict()`). |
+| Python methods such as `append`, `update`, `index` and `rsplit`, and `%` formatting of a string | The task fails with `method <name> is not available yet` or `invalid operation`. |
 | `callback_plugins/`, `vars_plugins/`, `stdout_callback`, `callbacks_enabled`, `result_format` | Ignored. The output is the default one. |
-| The `ansible_password` variable and the legacy `ansible_ssh_host`, `ansible_ssh_port`, `ansible_ssh_user` | Ignored. `-k` and `--connection-password-file` work ([issue 464](https://github.com/lorica-labs/volant/issues/464), [pull request 469](https://github.com/lorica-labs/volant/pull/469)). |
 | `include_vars` with `dir` and its related options | Refused when the playbook loads ([issue 477](https://github.com/lorica-labs/volant/issues/477), [pull request 480](https://github.com/lorica-labs/volant/pull/480)). |
 | `template` with custom delimiters, a `#jinja2:` line or `output_encoding` | Fails when the task runs ([issue 492](https://github.com/lorica-labs/volant/issues/492), [pull request 497](https://github.com/lorica-labs/volant/pull/497)). |
 | `no_log`, `become`, `run_once` and other boolean or integer keywords written as a template | Refused when the playbook loads ([issue 472](https://github.com/lorica-labs/volant/issues/472), [pull request 473](https://github.com/lorica-labs/volant/pull/473)). |
-| `yum` in any spelling | Refused when the playbook loads. `ansible-playbook` runs it as `dnf` ([issue 459](https://github.com/lorica-labs/volant/issues/459), [pull request 462](https://github.com/lorica-labs/volant/pull/462)). |
-| `command` and `shell` with `creates=`, `removes=` or `chdir=` written in the command line | The text goes to the program and the guard is ignored ([issue 458](https://github.com/lorica-labs/volant/issues/458), [pull request 463](https://github.com/lorica-labs/volant/pull/463)). |
-| A YAML merge key `<<` | Not merged: the key stays in the mapping ([issue 465](https://github.com/lorica-labs/volant/issues/465), [pull request 481](https://github.com/lorica-labs/volant/pull/481)). |
-| `hostvars['127.0.0.1']` and `hostvars['::1']` when the inventory has no host of that name | Missing: `ansible-playbook` answers them with the implicit localhost ([issue 487](https://github.com/lorica-labs/volant/issues/487), [pull request 489](https://github.com/lorica-labs/volant/pull/489)). |
 | `volant check`, `inventory`, `vault`, `doc`, `config`, `galaxy` and ad-hoc commands | They do not exist. `volant` has `playbook` and `runtime`. |
 
 [Templating](/variables/templating/#not-there-yet) lists the filters and arguments that fail. The [parity page](/reference/parity/) marks a filter `partial` when one of its arguments fails.

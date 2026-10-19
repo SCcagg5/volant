@@ -7,7 +7,7 @@ Volant is in pre-alpha. This page lists what comes next, roughly in order. It de
 
 ## Next: the modules real roles use
 
-- The [known gaps](/start/compatibility/#known-gaps) that stop real roles, such as a variable that reads another templated variable through a filter, `set_fact` in a loop that reads its own result, and a `hosts:` pattern written as a template. Every module backed by an action plugin already runs, `uri` and `script` included, and so do modules from installed collections.
+- The [known gaps](/start/compatibility/#known-gaps) that stop real roles, such as a variable that reads another templated variable through a filter, and a `hosts:` pattern written as a template. Every module backed by an action plugin already runs, `uri` and `script` included, and so do modules from installed collections.
 - The Jinja2 filters, tests and lookups that popular Galaxy roles still miss.
 
 The goal is to run well-known Galaxy roles end to end and produce the same recap as `ansible-playbook`. Four already do, as published: [decision record 0007](/decisions/0007-action-plugins/#results) has the runs.

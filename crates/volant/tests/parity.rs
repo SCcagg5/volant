@@ -164,11 +164,7 @@ const LATER: &[(&str, &str, &str)] = &[
 /// Filters and tests the engine knows by name whose arguments fail in part. Decided here, from
 /// probes against ansible-core 2.19.12; a row that is fixed leaves the list in the same change.
 const ARGUMENT_GAPS: &[(&str, &str, &str)] = &[
-    (
-        "filter",
-        "round",
-        "the precision and method arguments are not supported",
-    ),
+    ("filter", "round", "the method argument is not supported"),
     (
         "filter",
         "sum",
