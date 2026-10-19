@@ -8,10 +8,16 @@ use minijinja::{Error, Value};
 
 use super::args::{Call, bound, clamp, index, iterate, raise, type_of};
 use super::format::repr;
+use super::limits::check_items;
 use super::mutable::{MutList, snapshot};
 
 fn none() -> Result<Value, Error> {
     Ok(Value::from(()))
+}
+
+/// `Ok` when `me` can take `extra` more items.
+fn room(me: &MutList, extra: usize) -> Result<(), Error> {
+    check_items(me.read(Vec::len) as u128 + extra as u128)
 }
 
 /// Runs a method of `list` on `list`. `None` when `name` is no method of a list.
@@ -19,17 +25,21 @@ pub(super) fn call(me: &MutList, name: &str, args: &[Value]) -> Option<Result<Va
     let call = Call::of("list", args);
     Some(match name {
         "append" => call.one(name).and_then(|v| {
+            room(me, 1)?;
             let item = snapshot(v);
             me.with(|items| items.push(item));
             none()
         }),
         "extend" => call.one(name).and_then(|v| {
-            let more: Vec<Value> = iterate(v)?.iter().map(snapshot).collect();
+            let more = iterate(v)?;
+            room(me, more.len())?;
+            let more: Vec<Value> = more.iter().map(snapshot).collect();
             me.with(|items| items.extend(more));
             none()
         }),
         "insert" => call.between(name, 2, 2).and_then(|a| {
             let at = index(&a[0])?;
+            room(me, 1)?;
             let item = snapshot(&a[1]);
             me.with(|items| {
                 let len = i64::try_from(items.len()).unwrap_or(i64::MAX);
@@ -124,23 +134,46 @@ fn sort(me: &MutList, call: &Call<'_>) -> Result<Value, Error> {
             }
         }
     }
-    let mut items = me.items().to_vec();
-    let mut failure = None;
-    items.sort_by(|a, b| {
-        compare(a, b).unwrap_or_else(|e| {
-            failure.get_or_insert(e);
-            Ordering::Equal
-        })
-    });
-    if let Some(e) = failure {
-        return Err(e);
-    }
-    if reverse {
-        // Python's reverse sort keeps equal items in their first order.
-        items.sort_by(|a, b| compare(b, a).unwrap_or(Ordering::Equal));
-    }
+    // Python's reverse sort keeps equal items in their first order, so the comparison is swapped
+    // and the sort stays stable.
+    let items = merge_sort(me.items().to_vec(), &|a, b| {
+        if reverse {
+            compare(b, a)
+        } else {
+            compare(a, b)
+        }
+    })?;
     me.with(|current| *current = items);
     none()
+}
+
+/// A stable sort by a comparison that can fail. `slice::sort_by` may panic when the comparison
+/// is not a total order, and a list of mixed types is not one.
+fn merge_sort(
+    items: Vec<Value>,
+    cmp: &dyn Fn(&Value, &Value) -> Result<Ordering, Error>,
+) -> Result<Vec<Value>, Error> {
+    if items.len() < 2 {
+        return Ok(items);
+    }
+    let mut right = items;
+    let left = right.drain(..right.len() / 2).collect::<Vec<_>>();
+    let (left, right) = (merge_sort(left, cmp)?, merge_sort(right, cmp)?);
+    let mut out = Vec::with_capacity(left.len() + right.len());
+    let (mut l, mut r) = (left.into_iter().peekable(), right.into_iter().peekable());
+    while let (Some(a), Some(b)) = (l.peek(), r.peek()) {
+        // The right item goes first only when it is strictly smaller, which keeps equal items in
+        // their order.
+        let next = if cmp(b, a)? == Ordering::Less {
+            &mut r
+        } else {
+            &mut l
+        };
+        out.extend(next.next());
+    }
+    out.extend(l);
+    out.extend(r);
+    Ok(out)
 }
 
 /// Python's `<` between two values, for those that can be ordered.

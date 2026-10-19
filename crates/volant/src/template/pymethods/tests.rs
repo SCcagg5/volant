@@ -4,9 +4,8 @@ use serde_json::{Map, Value as Json, json};
 
 use super::mutable::{identity, is_literal, mutable, plain_list, plain_map, snapshot};
 
-/// The mutable objects stand in for the plain lists and mappings minijinja builds, which this
-/// module finds by the Rust type behind them. An upgrade of minijinja that changes those types
-/// fails here, not in a template.
+/// The mutable objects stand in for the plain lists and mappings minijinja builds, found by
+/// their Rust type. An upgrade that changes those types fails here, not in a template.
 #[test]
 fn plain_lists_and_mappings_are_told_from_other_objects() {
     assert!(plain_list(&Value::from_serialize(json!([1, 2]))).is_some());
@@ -100,6 +99,38 @@ fn copying_a_list_that_holds_copies_of_itself_is_linear() {
         "{% set l = [1] %}{% for i in range(60) %}{% set _ = l.append(l.copy()) %}{% endfor %}{{ l | length }}",
     );
     assert_eq!(out, Ok(json!(61)));
+}
+
+/// A list of mixed types is no total order: sorting it is an error and never a panic, for any
+/// length and order of the items.
+#[test]
+fn sorting_mixed_types_fails_without_a_panic() {
+    for template in [
+        "{% set l = [3, 'a', 2, 'b', 1, 'c', 0, 'd', 9, 'e', 8, 'f', 7, 'g', 6, 'h', 5] %}{{ l.sort() }}",
+        "{% set l = ['b', 1, 'a'] %}{{ l.sort() }}",
+        "{% set l = [[1, 'a'], [1, 2], [0, 'b'], [1, 3]] %}{{ l.sort() }}",
+    ] {
+        let out = render(template);
+        assert!(out.is_err(), "{template}: {out:?}");
+    }
+}
+
+#[test]
+fn a_reverse_sort_is_stable_and_orders_the_items() {
+    assert_eq!(
+        render(
+            "{% set l = [[1, 'a'], [2, 'b'], [1, 'c']] %}{% set _ = l.sort(reverse=True) %}{{ l }}"
+        ),
+        Ok(json!([[2, "b"], [1, "c"], [1, "a"]]))
+    );
+}
+
+/// `l.extend(l)` in a loop doubles a list; it stops at the limit and does not run out of memory.
+#[test]
+fn a_list_stops_growing_at_the_limit() {
+    let out =
+        render("{% set l = [1] %}{% for i in range(60) %}{% set _ = l.extend(l) %}{% endfor %}");
+    assert!(out.is_err(), "{out:?}");
 }
 
 /// A width, a precision or a `*` of `%` that a host supplies is bounded like the other methods:

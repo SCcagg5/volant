@@ -13,6 +13,21 @@ use super::args::{Call, raise};
 /// The most characters one method may build: 256 MiB of text. Real templates are far below it.
 pub(crate) const MAX_CHARS: u128 = 256 * 1024 * 1024;
 
+/// The most items one list may hold: the same 256 MiB, at 16 bytes an item. `l.extend(l)` in a
+/// loop doubles a list for as long as it runs.
+pub(crate) const MAX_ITEMS: u128 = MAX_CHARS / 16;
+
+/// `Ok` when a list of `items` items is within the limit.
+pub(crate) fn check_items(items: u128) -> Result<(), Error> {
+    if items <= MAX_ITEMS {
+        Ok(())
+    } else {
+        Err(raise(format!(
+            "the list would hold {items} items: Volant builds at most {MAX_ITEMS}"
+        )))
+    }
+}
+
 /// `Ok` when a result of `chars` characters is within the limit.
 pub(crate) fn check(chars: u128) -> Result<usize, Error> {
     match usize::try_from(chars) {

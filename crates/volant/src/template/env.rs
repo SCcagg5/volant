@@ -13,6 +13,7 @@ use serde_json::Value;
 
 use crate::bridge::Bridge;
 
+use super::clock::DateTime;
 use super::context::Context;
 use super::filters;
 use super::globals;
@@ -59,6 +60,8 @@ pub(super) fn environment(base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) -> En
     env.add_function("cycler", globals::cycler);
     env.add_function("joiner", minijinja_contrib::globals::joiner);
     env.add_function("undef", globals::undef);
+    env.add_function("now", super::clock::now);
+    env.add_function("lipsum", super::lipsum::lipsum);
     env.add_function(ITEM_KEY, chained_item);
     env.add_function(MITEM_KEY, mutable_item);
     env.add_function(MKLIST_KEY, |items: Rest<minijinja::Value>| {
@@ -83,8 +86,12 @@ pub(super) fn environment(base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) -> En
     env
 }
 
-/// Python's `repr` of a list or mapping, `None` for any other value.
+/// Python's `repr` of a list or mapping, and `str` of a `datetime`, which has two forms; `None`
+/// for any other value.
 pub(super) fn container_repr(value: &minijinja::Value) -> Option<String> {
+    if let Some(moment) = value.downcast_object_ref::<DateTime>() {
+        return Some(moment.python_str());
+    }
     if let Some(range) = value.downcast_object_ref::<Range>() {
         return Some(range.to_string());
     }
