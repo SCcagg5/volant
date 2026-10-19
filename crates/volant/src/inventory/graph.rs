@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use serde_json::Value;
 
-use super::{Group, Host, Inventory};
+use super::{Group, Host, Inventory, implicit_localhost};
 
 impl Inventory {
     /// Adds `host` to `group`, creating the group: what `add_host` and `group_by` do mid-run.
@@ -181,6 +181,49 @@ impl Inventory {
         hosts
     }
 
+    /// `host_with_vars` for each of `names`, in the order given, and the implicit local host for a
+    /// name the inventory does not hold. One walk over the groups serves every name, where asking
+    /// for each name separately walks them all again for each: a pattern over a large inventory
+    /// then costs the square of its size.
+    pub(super) fn hosts_with_vars(&self, names: &[String]) -> Vec<Host> {
+        let depth = self.group_depths();
+        let mut known: HashMap<&str, &Host> = HashMap::new();
+        for host in &self.hosts {
+            known.entry(host.name.as_str()).or_insert(host);
+        }
+        let mut membership: HashMap<String, Vec<&Group>> = HashMap::new();
+        for group in &self.groups {
+            for host in self.group_hosts(group) {
+                membership.entry(host).or_default().push(group);
+            }
+        }
+        names
+            .iter()
+            .map(|name| {
+                let Some(host) = known.get(name.as_str()) else {
+                    return implicit_localhost(name);
+                };
+                let mut groups = membership.get(name).cloned().unwrap_or_default();
+                groups.sort_by_key(|g| {
+                    (
+                        depth.get(&g.name).copied().unwrap_or(1),
+                        g.priority.unwrap_or(1),
+                        g.name.clone(),
+                    )
+                });
+                let mut vars = BTreeMap::new();
+                for group in groups {
+                    vars.extend(group.vars.clone());
+                }
+                vars.extend(host.vars.clone());
+                Host {
+                    name: host.name.clone(),
+                    vars,
+                }
+            })
+            .collect()
+    }
+
     /// The groups holding `host`, `all` included, in the order the reference layers their
     /// variables (`sort_groups`): shallower first, then lower `ansible_group_priority`, then by
     /// name, so the last one wins.
@@ -212,7 +255,7 @@ impl Inventory {
 
     /// Distance from the top: `all` sits at depth 0 and is not an implicit parent of anything,
     /// so every other group nobody lists as a child still sits at depth 1, their children at 2.
-    fn group_depths(&self) -> HashMap<String, usize> {
+    pub(super) fn group_depths(&self) -> HashMap<String, usize> {
         let children: HashSet<&str> = self
             .groups
             .iter()

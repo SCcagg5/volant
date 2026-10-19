@@ -1,0 +1,2 @@
+# What a managed host returned stays data when include_vars merges a mapping over it.
+args: [-i, inv.ini, play.yml]

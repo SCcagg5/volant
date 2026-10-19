@@ -1154,3 +1154,69 @@ fn public_is_refused_by_value_and_not_by_presence() {
     // refused rather than guessed at.
     assert!(asked(json!("{{ maybe }}")).is_err());
 }
+
+/// A templatable keyword comes down as the layer nearest the task wrote it, in either form, and
+/// a layer that wrote nothing is looked through: play, block and task in each of three states.
+#[rstest]
+#[case::escalation("become", "true")]
+#[case::no_log("no_log", "true")]
+#[case::run_once("run_once", "true")]
+#[case::any_errors_fatal("any_errors_fatal", "true")]
+#[case::ignore_unreachable("ignore_unreachable", "true")]
+#[case::delegate_facts("delegate_facts", "true")]
+#[case::timeout("timeout", "3")]
+fn the_layer_nearest_the_task_wins_in_either_form(#[case] key: &str, #[case] literal: &str) {
+    let typed = |task: &PlayTask| match key {
+        "become" => json!(task.r#become),
+        "no_log" => json!(task.no_log),
+        "run_once" => json!(task.run_once),
+        "any_errors_fatal" => json!(task.any_errors_fatal),
+        "ignore_unreachable" => json!(task.ignore_unreachable),
+        "delegate_facts" => json!(task.delegate_facts),
+        _ => json!(task.timeout),
+    };
+    let waiting = |task: &PlayTask| match key {
+        "become" => task.deferred.r#become.clone(),
+        "no_log" => task.deferred.no_log.clone(),
+        "run_once" => task.deferred.run_once.clone(),
+        "any_errors_fatal" => task.deferred.any_errors_fatal.clone(),
+        "ignore_unreachable" => task.deferred.ignore_unreachable.clone(),
+        "delegate_facts" => task.deferred.delegate_facts.clone(),
+        _ => task.deferred.timeout.clone(),
+    };
+    // `None` writes nothing, `Some(true)` a template and `Some(false)` a literal.
+    let line = |layer: Option<bool>| match layer {
+        None => String::new(),
+        Some(true) => format!("{key}: \"{{{{ v }}}}\""),
+        Some(false) => format!("{key}: {literal}"),
+    };
+    let states = [None, Some(true), Some(false)];
+    for play in states {
+        // A play has no `delegate_facts`, nor a `become` the merge reads: the executor reads it.
+        if matches!(key, "delegate_facts" | "become") && play.is_some() {
+            continue;
+        }
+        for block in states {
+            for task in states {
+                let text = format!(
+                    "- hosts: all\n  gather_facts: false\n  {}\n  tasks:\n    - block:\n        - command: echo\n          {}\n      {}\n",
+                    line(play),
+                    line(task),
+                    line(block)
+                );
+                let step = &compiled(&text).steps[0];
+                let (want_typed, want_waiting) = match task.or(block).or(play) {
+                    None => (Value::Null, None),
+                    Some(true) => (Value::Null, Some("{{ v }}".to_string())),
+                    Some(false) if key == "timeout" => (json!(3), None),
+                    Some(false) => (json!(true), None),
+                };
+                assert_eq!(
+                    (typed(&step.task), waiting(&step.task)),
+                    (want_typed, want_waiting),
+                    "{key}: play {play:?}, block {block:?}, task {task:?}"
+                );
+            }
+        }
+    }
+}

@@ -1,0 +1,6 @@
+inv_v: include_vars
+play_v: include_vars
+file_v: include_vars
+role_v: include_vars
+defaults_v: include_vars
+task_v: include_vars

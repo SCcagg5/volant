@@ -8,6 +8,7 @@ use crate::template::{Templar, TemplateError};
 use crate::transport::{BecomeMethod, ConnectionDefaults, Escalation, first_set, secret_text};
 use crate::vars::{HostVars, host_setting, omit_token};
 
+use super::late::keyword_bool;
 use super::plan::PlayPlan;
 use crate::executor::as_bool_value;
 
@@ -50,10 +51,31 @@ pub(super) fn become_for(
     defaults: &ConnectionDefaults,
     templar: &Templar,
 ) -> Result<Option<Escalation>, TemplateError> {
+    // The keyword is rendered for every task that carries it, a host variable that decides first
+    // or not: the reference validates the task's keywords all together. The layer closest to the
+    // task is the only one read, so the play's template is left alone when the task has its own.
+    let written = keyword_bool(
+        "become",
+        task.r#become,
+        task.deferred.r#become.as_deref(),
+        vars,
+        templar,
+    )?;
+    let from_play = if written.is_none() {
+        keyword_bool(
+            "become",
+            play.r#become.0,
+            play.r#become.1.as_deref(),
+            vars,
+            templar,
+        )?
+    } else {
+        None
+    };
     let on = host_setting(vars, "ansible_become")
         .and_then(as_bool_value)
-        .or(task.r#become)
-        .or(play.r#become)
+        .or(written)
+        .or(from_play)
         .unwrap_or(defaults.r#become);
     if !on {
         return Ok(None);

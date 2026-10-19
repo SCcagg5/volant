@@ -1,0 +1,3 @@
+# include_vars reports a bad directory or file in the reference's own shape and words.
+args: [-i, inv.ini, play.yml]
+modes: [check]

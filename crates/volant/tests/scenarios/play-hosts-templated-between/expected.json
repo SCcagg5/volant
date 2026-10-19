@@ -1,0 +1,22 @@
+[
+  {
+    "code": 0,
+    "stdout": "\nPLAY [s1] **********************************************************************\n\nTASK [set_fact] ****************************************************************\nok: [s1]\n\nTASK [set_fact] ****************************************************************\nok: [s1]\n\nPLAY [A fact of the first play] ************************************************\n\nTASK [debug] *******************************************************************\nok: [w2] => {\n    \"msg\": \"w2\"\n}\n\nPLAY [A fact through a filter] *************************************************\n\nTASK [debug] *******************************************************************\nok: [w1] => {\n    \"msg\": \"w1\"\n}\n\nPLAY RECAP *********************************************************************\ns1                         : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   \nw1                         : ok=1    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   \nw2                         : ok=1    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   \n\n"
+  },
+  {
+    "code": 0,
+    "stdout": "\nPLAY [s1] **********************************************************************\n\nTASK [shell] *******************************************************************\nchanged: [s1]\n\nTASK [meta] ********************************************************************\n\nPLAY [After the refresh] *******************************************************\n\nTASK [debug] *******************************************************************\nok: [fr1] => {\n    \"msg\": \"fr1 ['fr1']\"\n}\n\nPLAY RECAP *********************************************************************\nfr1                        : ok=1    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   \ns1                         : ok=1    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   \n\n"
+  },
+  {
+    "code": 0,
+    "stdout": "\nPLAY [s1] **********************************************************************\n\nTASK [shell] *******************************************************************\nchanged: [s1]\n\nPLAY [No refresh happened] *****************************************************\nskipping: no hosts matched\n\nPLAY RECAP *********************************************************************\ns1                         : ok=1    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   \n\n"
+  },
+  {
+    "code": 0,
+    "stdout": "\nPLAY [s1] **********************************************************************\n\nTASK [shell] *******************************************************************\nchanged: [s1]\n\nTASK [shell] *******************************************************************\nchanged: [s1]\n\nTASK [set_fact] ****************************************************************\nok: [s1]\n\nPLAY [A registered result that is a name] **************************************\n\nTASK [debug] *******************************************************************\nok: [w2] => {\n    \"msg\": \"w2\"\n}\n\nPLAY [A registered result that holds a template] *******************************\nskipping: no hosts matched\n\nPLAY [The same text copied by a fact] ******************************************\nskipping: no hosts matched\n\nPLAY RECAP *********************************************************************\ns1                         : ok=3    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   \nw2                         : ok=1    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   \n\n"
+  },
+  {
+    "code": 0,
+    "stdout": "\nPLAY [s1] **********************************************************************\n\nTASK [shell] *******************************************************************\nchanged: [s1]\n\nPLAY [Host text inside a list] *************************************************\nskipping: no hosts matched\n\nPLAY [Host text inside a mapping's values] *************************************\nskipping: no hosts matched\n\nPLAY RECAP *********************************************************************\ns1                         : ok=1    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   \n\n"
+  }
+]

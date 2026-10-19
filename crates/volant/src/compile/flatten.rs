@@ -223,6 +223,14 @@ pub(crate) fn compile(
         ignore_errors: play.ignore_errors.clone(),
         ignore_unreachable: play.ignore_unreachable,
         connect: play.connect.clone(),
+        // The templates a play wrote for the same keywords. Its `become` stays out, like the
+        // literal one, and `gather_facts` and `force_handlers` are read when the play starts.
+        deferred: crate::playbook::Deferred {
+            r#become: None,
+            gather_facts: None,
+            force_handlers: None,
+            ..play.deferred.clone()
+        },
         ..PlayTask::empty()
     };
     // `gather_facts` is the play's own first task and nothing else: the reference's `setup`
@@ -253,6 +261,10 @@ pub(crate) fn compile(
         },
         run_once: None,
         when: play.gather_when.clone(),
+        deferred: crate::playbook::Deferred {
+            run_once: None,
+            ..empty.deferred.clone()
+        },
         args: gather_args(play),
         origin: play.origin.clone(),
         ..empty.clone()
