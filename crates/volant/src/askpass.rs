@@ -20,14 +20,24 @@ static FILE: OnceLock<PathBuf> = OnceLock::new();
 /// first time an `ssh` call needs it and is removed with [`Installed`].
 static OWN: Mutex<Option<HashMap<String, tempfile::TempPath>>> = Mutex::new(None);
 
-/// Which password an `ssh` call offers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Which password an `ssh` call offers. `Debug` is written by hand so a `{:?}` of a value that
+/// holds the password prints a placeholder.
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Source<'a> {
     /// The one the command line gave, if it gave one.
     Run,
     /// The one a host variable gave. An empty one offers nothing, as in the reference: the
     /// variable is set, so no other password is tried in its place.
     Variable(&'a str),
+}
+
+impl std::fmt::Debug for Source<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Source::Run => f.write_str("Run"),
+            Source::Variable(_) => f.write_str("Variable(<redacted>)"),
+        }
+    }
 }
 
 /// Keeps the password files alive. They are removed when this is dropped.
