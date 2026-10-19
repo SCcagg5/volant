@@ -222,3 +222,21 @@ fn failed(host: &str) -> Event {
         error: None,
     }
 }
+
+/// A failure forgiven by a clear that was read after it stays forgiven, and one read after the
+/// clear counts again: the exit code follows the order the events arrive in.
+#[test]
+fn the_exit_code_follows_the_order_the_failures_arrive_in() {
+    let mut stats = Stats::default();
+    let mut out = Renderer::with_writer(Box::new(std::io::sink()), false, 79, 0);
+    let early = super::display::arrived(failed("h2"), &mut stats);
+    stats.clear_errors("h2", false);
+    let late = super::display::arrived(failed("h3"), &mut stats);
+    for event in [early, late] {
+        super::display::report_result(event, &mut stats, &mut out);
+    }
+    assert_eq!(stats.host("h2").failed + stats.host("h3").failed, 2);
+    assert_eq!(exit_code(&stats), 2, "h3 failed after the clear");
+    stats.clear_errors("h3", false);
+    assert_eq!(exit_code(&stats), 0, "and h2 stayed forgiven");
+}
