@@ -104,7 +104,7 @@ fn a_result_over_a_bound_becomes_a_failed_task(#[case] body: String, #[case] say
         array(2_000_000)
     )
     .into_bytes(),
-    Some("with 2000011 values, over the limit of 1000000")
+    Some("it has 2000011 values, over the limit of 1000000")
 )]
 fn a_message_that_is_not_a_result_is_cut_short(
     #[case] frame: Vec<u8>,
