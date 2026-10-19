@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use tokio::sync::watch;
 
 use crate::agent::AgentLink;
-use crate::compile::Step;
+use crate::compile::{IncludeKind, Step, StepKind};
 use crate::template::Templar;
 use crate::vars::VarStore;
 
@@ -247,6 +247,10 @@ pub(super) fn take_links(
 /// Measured on ansible-core 2.19.12: a task of a role shows as `TASK [base : base task]`, and an
 /// unnamed one shows the module name behind the same prefix (`TASK [inner : debug]`).
 ///
+/// An `include_role` that carries no name of its own shows the role it names behind its action,
+/// as the statement wrote both: `TASK [include_role : base]`, and `TASK [include_role : {{ item }}]`
+/// for a name that is a template, which the banner never renders.
+///
 /// A templated name comes from `spoken`, the name `host`'s driver rendered when it reached the
 /// step (`Event::Named`), whenever there is one. Rendering it here instead reads the host's
 /// variables as they stand when the banner prints, and a host that has run ahead of the others
@@ -263,6 +267,18 @@ pub(super) fn task_name(
     let name = match spoken {
         Some(name) => name.clone(),
         None => render_name(step, host, plan, live, &state.templar, &state.vars),
+    };
+    let name = match (&step.kind, step.task.named) {
+        (StepKind::Include(IncludeKind::Role), false) => {
+            let role = ["name", "role"]
+                .iter()
+                .find_map(|key| step.task.args.get(*key).and_then(|v| v.as_str()));
+            match role {
+                Some(role) => format!("{name} : {role}"),
+                None => name,
+            }
+        }
+        _ => name,
     };
     match step.role.and_then(|i| plan.steps().roles.get(i).cloned()) {
         Some(role) => format!("{} : {name}", role.name),

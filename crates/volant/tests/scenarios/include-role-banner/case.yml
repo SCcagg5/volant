@@ -1,0 +1,3 @@
+# An include_role with no name shows the role behind its action, as written.
+runs:
+  - args: [-i, inv.ini, banner.yml]
