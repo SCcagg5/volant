@@ -272,3 +272,137 @@ fn fromkeys_refuses_in_the_words_of_python() {
     }
     assert!(render("{{ dict.fromkeys(nope) }}").is_err());
 }
+
+/// `encode` and the bytes it makes refuse a call in CPython's words, and fail by name for what
+/// this engine does not run. The golden rows only record that the reference failed.
+#[test]
+fn encode_and_bytes_refuse_in_the_words_of_python() {
+    for (template, want) in [
+        (
+            "{{ 'é'.encode('ascii') }}",
+            "'ascii' codec can't encode character '\\xe9' in position 0: ordinal not in range(128)",
+        ),
+        (
+            "{{ 'a€€b'.encode('latin-1') }}",
+            "'latin-1' codec can't encode characters in position 1-2: ordinal not in range(256)",
+        ),
+        (
+            "{{ 'é'.encode('ascii', 'nope') }}",
+            "unknown error handler name 'nope'",
+        ),
+        ("{{ 'a'.encode('nope') }}", "unknown encoding: nope"),
+        (
+            "{{ 'a'.encode(1) }}",
+            "encode() argument 'encoding' must be str, not int",
+        ),
+        (
+            "{{ 'a'.encode(none) }}",
+            "encode() argument 'encoding' must be str, not None",
+        ),
+        (
+            "{{ 'a'.encode('utf-8', 'strict', 3) }}",
+            "encode() takes at most 2 arguments (3 given)",
+        ),
+        (
+            "{{ 'a'.encode(foo=1) }}",
+            "encode() got an unexpected keyword argument 'foo'",
+        ),
+        (
+            "{{ 'é'.encode().decode('ascii') }}",
+            "'ascii' codec can't decode byte 0xc3 in position 0: ordinal not in range(128)",
+        ),
+        (
+            "{{ 'é'.encode('latin-1').decode() }}",
+            "'utf-8' codec can't decode byte 0xe9 in position 0: unexpected end of data",
+        ),
+        (
+            "{{ 'é'.encode('utf-16').decode('utf-8') }}",
+            "'utf-8' codec can't decode byte 0xff in position 0: invalid start byte",
+        ),
+        (
+            "{{ 'abc'.encode().decode('utf-8', 'x', 3) }}",
+            "decode() takes at most 2 arguments (3 given)",
+        ),
+        ("{{ 'a'.encode().hex('--') }}", "sep must be length 1."),
+        (
+            "{{ 'a'.encode().nope() }}",
+            "object of type 'bytes' has no attribute 'nope'",
+        ),
+        (
+            "{{ 'a'.encode().upper() }}",
+            "method upper is not available yet",
+        ),
+    ] {
+        let err = render(template).unwrap_err();
+        assert!(err.contains(want), "{template}: {err}");
+    }
+}
+
+/// What a template can ask for and this engine does not run fails with a message that names it.
+#[test]
+fn what_bytes_lack_is_refused_by_name() {
+    for (template, want) in [
+        (
+            "{{ 'a'.encode('cp1252') }}",
+            "the encoding 'cp1252' is not supported",
+        ),
+        (
+            "{{ 'é'.encode('ascii', 'namereplace') }}",
+            "the error handler 'namereplace' is not supported",
+        ),
+        (
+            "{{ 'é'.encode('latin-1').decode('utf-8', 'surrogateescape') }}",
+            "the error handler 'surrogateescape' is not supported",
+        ),
+        (
+            "{{ 'a'.encode('utf-16').decode('utf-16') }}",
+            "decoding with 'utf-16' is not supported",
+        ),
+        (
+            "{{ 'é'.encode('latin-1') }}",
+            "bytes that are not UTF-8 cannot be a result",
+        ),
+        (
+            "x {{ 'é'.encode('latin-1') }}",
+            "bytes that are not UTF-8 cannot be a result",
+        ),
+        (
+            "{{ ['é'.encode('latin-1')] }}",
+            "bytes that are not UTF-8 cannot be a result",
+        ),
+        (
+            "{{ 'a'.encode() | to_json }}",
+            "Object of type 'bytes' is not JSON serializable",
+        ),
+        (
+            "{{ {'k': 'a'.encode()} | to_nice_json }}",
+            "Object of type 'bytes' is not JSON serializable",
+        ),
+        (
+            "{{ 'a'.encode() | to_yaml }}",
+            "to_yaml does not write bytes yet",
+        ),
+        (
+            "{{ {'k': 'a'.encode()} | dict2items }}",
+            "this filter does not take bytes yet",
+        ),
+    ] {
+        let err = render(template).unwrap_err();
+        assert!(err.contains(want), "{template}: {err}");
+    }
+}
+
+/// A bytes value counts, indexes and prints as Python does, and a result that holds one shows
+/// its text; the rows of the golden corpus hold the reference's answers to the same templates.
+#[test]
+fn bytes_inside_a_result_show_their_text() {
+    assert_eq!(
+        render("{{ ['abc'.encode(), {'k': 'é'.encode()}] }}"),
+        Ok(json!(["abc", {"k": "é"}]))
+    );
+    assert_eq!(render("{{ ['abc'.encode()] ~ '' }}"), Ok(json!("[b'abc']")));
+    assert_eq!(
+        render("{{ 'a\"b\\'c'.encode() ~ '' }}"),
+        Ok(json!("b'a\"b\\'c'"))
+    );
+}

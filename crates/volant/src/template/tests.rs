@@ -922,6 +922,13 @@ fn an_undefined_value_given_to_a_missing_filter_fails_as_unknown() {
     ),
     0
 )]
+#[case::bytes_are_refused(
+    "{{ 'v'.encode() | community.general.dict_kv('k') }}",
+    Err(
+        "filter 'community.general.dict_kv' was given bytes, which cannot be sent to the Python helper"
+    ),
+    0
+)]
 #[case::a_filter(
     "{{ 'v' | community.general.dict_kv('k') }}",
     Err(
