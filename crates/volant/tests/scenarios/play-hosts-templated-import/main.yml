@@ -1,0 +1,12 @@
+- import_playbook: imports/inner.yml
+  vars:
+    pick: s1
+- import_playbook: imports/inner.yml
+  vars:
+    pick: k3s_servers
+- import_playbook: imports/own.yml
+- hosts: s1
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: outer

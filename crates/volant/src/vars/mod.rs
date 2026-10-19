@@ -8,6 +8,7 @@ mod include_dir;
 mod layers;
 mod load;
 mod magic;
+mod play_view;
 mod shared;
 mod store;
 
@@ -18,6 +19,7 @@ pub use load::{
     VaultFile, include_vars_paths, load_vars_file, parse_extra_vars, read_vars_document,
 };
 pub use magic::ansible_version;
+pub(crate) use play_view::PlayView;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;

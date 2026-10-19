@@ -1,0 +1,9 @@
+# A play's `hosts` is rendered when the play starts, against the groups, the extra variables, the
+# play's own variables and its `vars_files`, and `--limit` narrows what it found. The banner of a
+# play with no name is the rendered pattern.
+runs:
+  - args: [-i, inventory.ini, site.yml]
+  - args: [-i, inventory.ini, site.yml, -e, target=web]
+  - args: [-i, inventory.ini, site.yml, -e, '{"target": ["w1", "k1"]}']
+  - args: [-i, inventory.ini, site.yml, --limit, 's2,w1']
+  - args: [-i, inventory.ini, site.yml, --limit, nosuch]

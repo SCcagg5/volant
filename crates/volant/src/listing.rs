@@ -63,7 +63,7 @@ impl Listing {
 
 /// One play as the listing sees it.
 pub(crate) struct PlayEntry<'a> {
-    pub play: &'a Play,
+    pub play: std::borrow::Cow<'a, Play>,
     pub compiled: &'a Compiled,
     /// The hosts the play would run on, in inventory order, with `--limit` applied.
     pub hosts: Vec<String>,
@@ -98,7 +98,7 @@ pub(crate) fn render(entries: &[PlaybookEntry], mode: Listing) -> String {
             continue;
         }
         for (index, entry) in entry.plays.iter().enumerate() {
-            let play = entry.play;
+            let play = &*entry.play;
             let mut msg = format!(
                 "\n  play #{} ({}): {}\tTAGS: [{}]",
                 index + 1,
@@ -161,7 +161,7 @@ pub(crate) fn render(entries: &[PlaybookEntry], mode: Listing) -> String {
 /// Measured on ansible-core 2.19.12: `hosts: a,b` prints `['a,b']` - one pattern - while
 /// `hosts: [a, b]` prints `['a', 'b']`, so the two cannot be told apart from the joined string
 /// the rest of the engine uses and the written entries are kept beside it.
-fn patterns(written: &[String]) -> String {
+pub(crate) fn patterns(written: &[String]) -> String {
     if written.is_empty() {
         return "[]".to_string();
     }

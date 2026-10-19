@@ -1,0 +1,7 @@
+- hosts: "{{ role_target }}"
+  gather_facts: false
+  roles:
+    - role: rt
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ ansible_play_hosts }}"

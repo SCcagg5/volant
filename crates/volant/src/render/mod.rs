@@ -134,6 +134,16 @@ impl Renderer {
         self.banner(&format!("PLAY [{name}]"));
     }
 
+    /// The banner of `play`: its name, or no name at all for a play whose `hosts` rendered to
+    /// `none`, which the reference prints without brackets.
+    pub fn play_of(&mut self, play: &crate::playbook::Play) {
+        if play.nameless {
+            self.banner("PLAY");
+        } else {
+            self.play(&play.name);
+        }
+    }
+
     pub fn task(&mut self, name: &str) {
         self.banner(&format!("TASK [{name}]"));
     }
