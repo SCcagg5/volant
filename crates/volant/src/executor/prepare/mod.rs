@@ -31,7 +31,7 @@ pub(in crate::executor) use item::{
     FINALIZING, Item, NOTIFY_FAILED, Prepared, failed_result, failure_text, pause_of,
     undefined_name,
 };
-pub(in crate::executor) use late::{resolve, strategy_reads_as_true};
+pub(in crate::executor) use late::{hide_after_failure, resolve, strategy_reads_as_true};
 pub(in crate::executor) use plan::{Gate, PlayPlan, Strategy};
 pub(in crate::executor) use vars::host_vars;
 use vars::{Named, delegate_host_vars, merged_vars, resolved};

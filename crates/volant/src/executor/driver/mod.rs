@@ -43,6 +43,7 @@ use notified::{announce_notified, saved_lines};
 mod boundaries;
 mod messages;
 mod notified;
+mod pinned;
 mod plugin;
 mod redo;
 mod rendered;
@@ -54,6 +55,7 @@ mod waits;
 pub(in crate::executor) use boundaries::{Definitions, mark_boundaries};
 use boundaries::{calls_lookup, meets, strict, writes_facts};
 pub(crate) use boundaries::{expressions, strings, task_strings};
+use pinned::Turn;
 use plugin::{PluginBatch, plugin_step};
 use rendered::{Rendered, render_keywords, step_at};
 pub(in crate::executor) use throttle::Turn as ThrottleTurn;
@@ -930,8 +932,16 @@ pub(super) async fn drive_host(
                 break 'run;
             };
             // The keywords written as templates, rendered for this host now that its `when` held.
-            let prepared =
-                render_keywords(step, pos, &name, prepared, &mut rendered, &templar, &tx).await;
+            let prepared = render_keywords(
+                step,
+                pos,
+                &name,
+                prepared,
+                &mut rendered,
+                (&plan, &live, &store),
+                (&templar, &tx),
+            )
+            .await;
             let step = step_at(&c, &rendered, pos);
             let task = &step.task;
             match prepared {
@@ -2553,30 +2563,6 @@ impl Driver<'_> {
     /// Whether the run has been interrupted.
     fn stopped(&self) -> bool {
         *self.stop.borrow()
-    }
-}
-
-/// A `host_pinned` host's place in the queue for forks. Dropping it hands the place to the next
-/// host, so a host that leaves before it queued - interrupted, or panicked - holds nobody up.
-struct Turn<'a> {
-    gate: &'a watch::Sender<usize>,
-    mine: usize,
-    passed: bool,
-}
-
-impl Turn<'_> {
-    fn pass(&mut self) {
-        if !std::mem::replace(&mut self.passed, true) {
-            let next = self.mine + 1;
-            self.gate
-                .send_modify(|reached| *reached = (*reached).max(next));
-        }
-    }
-}
-
-impl Drop for Turn<'_> {
-    fn drop(&mut self) {
-        self.pass();
     }
 }
 

@@ -7,15 +7,19 @@
 //! `Task failed: Error processing keyword '<name>': The value <value> could not be converted to
 //! '<type>'.` A keyword written as a literal is read at load and never comes here.
 
+use std::sync::Mutex;
+
 use serde_json::Value;
 
 use crate::compile::Step;
+use crate::executor::coordinator::Progress;
 use crate::playbook::{Deferred, PlayTask, python_repr};
 use crate::template::{Templar, TemplateError};
-use crate::vars::HostVars;
+use crate::vars::{HostVars, VarStore};
 
 use super::item::{boolean_keyword, undefined_name};
 use super::plan::PlayPlan;
+use super::vars::host_vars;
 
 /// The longest `timeout` the reference accepts, in seconds.
 const TIMEOUT_CEILING: i64 = 100_000_000;
@@ -81,6 +85,42 @@ pub(super) fn check_become(
         )?;
     }
     Ok(())
+}
+
+/// The step of a task whose preparation failed, with a templated `no_log` read first: a failed
+/// task hides its result as a task that ran does. The keyword is rendered with the variables the
+/// host has, and a value that cannot be read, or is no boolean, hides the result. `None` when the
+/// task wrote no such template.
+pub(in crate::executor) fn hide_after_failure(
+    step: &Step,
+    host: &str,
+    plan: &PlayPlan,
+    live: &Progress,
+    templar: &Templar,
+    store: &Mutex<VarStore>,
+) -> Option<Box<Step>> {
+    let raw = step.task.deferred.no_log.as_deref()?;
+    let playbook_dir = store
+        .lock()
+        .expect("vars lock")
+        .playbook_dir()
+        .to_path_buf();
+    let vars = host_vars(
+        host,
+        plan,
+        &step.task.vars,
+        step.role,
+        step.include_params.as_deref(),
+        live,
+        templar,
+        store,
+        &step.origin,
+        &playbook_dir,
+    );
+    let hidden = boolean_keyword("no_log", raw, &vars, templar).unwrap_or(true);
+    let mut copy = step.clone();
+    copy.task.no_log = Some(hidden);
+    Some(Box::new(copy))
 }
 
 /// The reference's prefix on the message of a task that dies before it runs.

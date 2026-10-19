@@ -2,14 +2,16 @@
 //! The steps of a batch as one host runs them, with the keywords written as templates rendered.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use tokio::sync::mpsc;
 
 use crate::compile::{Compiled, Step};
 use crate::template::{Templar, TemplateError};
+use crate::vars::VarStore;
 
-use super::super::coordinator::Event;
-use super::super::prepare::{Prepared, resolve};
+use super::super::coordinator::{Event, Progress};
+use super::super::prepare::{PlayPlan, Prepared, hide_after_failure, resolve};
 
 /// The steps of the batch in hand whose keywords were rendered for this host, by position. A
 /// step with nothing to render is not in it.
@@ -32,14 +34,18 @@ pub(super) async fn render_keywords(
     host: &str,
     prepared: Result<Prepared, TemplateError>,
     rendered: &mut Rendered,
-    templar: &Templar,
-    tx: &mpsc::Sender<Event>,
+    (plan, live, store): (&PlayPlan, &Progress, &Mutex<VarStore>),
+    (templar, tx): (&Templar, &mpsc::Sender<Event>),
 ) -> Result<Prepared, TemplateError> {
     if !step.task.deferred.any() {
         return prepared;
     }
     rendered.remove(&index);
     let Ok(ready) = &prepared else {
+        // The task failed before its keywords could be read. Its `no_log` still applies.
+        if let Some(copy) = hide_after_failure(step, host, plan, live, templar, store) {
+            rendered.insert(index, *copy);
+        }
         return prepared;
     };
     if matches!(ready, Prepared::Skipped(_)) {

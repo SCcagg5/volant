@@ -16,7 +16,7 @@ use crate::transport::ConnectionDefaults;
 use crate::vars::VarStore;
 
 use super::coordinator::{Event, Progress};
-use super::prepare::{Item, PlayPlan, Prepared, pause_of, prepare, resolve};
+use super::prepare::{Item, PlayPlan, Prepared, hide_after_failure, pause_of, prepare, resolve};
 use super::run::{break_after, classify, empty_loop_result, loops, registered_value};
 
 /// One expansion a host asked for at an include step.
@@ -90,7 +90,7 @@ pub(super) fn resolve_include(
                     ignored: None,
                 }],
                 std::time::Duration::ZERO,
-                None,
+                hide_after_failure(step, host, plan, live, templar, store),
             );
         }
     };
