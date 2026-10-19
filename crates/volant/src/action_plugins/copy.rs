@@ -130,6 +130,7 @@ fn source(ctx: &Context<'_>) -> Result<Option<CopyOf>, String> {
         ctx.args_untrusted,
         "src",
         src,
+        "files",
         ctx.origin,
         ctx.playbook_dir,
     )?;

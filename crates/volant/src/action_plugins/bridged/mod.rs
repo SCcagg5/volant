@@ -22,6 +22,7 @@ use volant_protocol::TaskResult;
 use super::files::check_host_named;
 use super::{Context, Plugin, Step, Sub, lost};
 use crate::bridge::{Ask, BridgeError, Reply};
+use crate::executor::as_bool_value;
 
 mod asks;
 mod helpers;
@@ -116,6 +117,75 @@ fn flat_vars(vars: &crate::vars::HostVars) -> Map<String, Value> {
     flat
 }
 
+/// The controller files the arguments of ansible-core's plugin `name` name, held to
+/// `host_named_paths` when a managed host named them.
+///
+/// Read off the plugins of ansible-core 2.19.12, the arguments that take a controller path are
+/// `src` of `copy`, `template`, `unarchive`, `assemble` and `uri` (and of a collection's plugin
+/// that reads one), unless `remote_src` says the source is on the host; the first word of
+/// `_raw_params` or of `cmd` for `script`; and the `filename` of each field of a `uri`
+/// `body` in `form-multipart`. `assemble` takes its source from the host unless `remote_src` is
+/// false.
+fn check_sources(name: &str, ctx: &Context<'_>) -> Result<(), String> {
+    let subdir = if matches!(name, "template" | "win_template") {
+        "templates"
+    } else {
+        "files"
+    };
+    let check = |arg: &str, named: &str| {
+        check_host_named(
+            ctx.host_named_paths,
+            ctx.args_untrusted,
+            arg,
+            named,
+            subdir,
+            ctx.origin,
+            ctx.playbook_dir,
+        )
+    };
+    let text = |arg: &str| {
+        ctx.args
+            .get(arg)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    };
+    let remote = match ctx.args.get("remote_src") {
+        Some(value) => as_bool_value(value).unwrap_or(false),
+        None => name == "assemble",
+    };
+    if !remote {
+        check("src", text("src"))?;
+        if let Some(Value::Object(fields)) = ctx.args.get("body") {
+            for field in fields.values().filter_map(Value::as_object) {
+                let file = field.get("filename").and_then(Value::as_str);
+                if let Some(file) = file.filter(|_| field.get("content").is_none_or(is_empty)) {
+                    check("body", file)?;
+                }
+            }
+        }
+    }
+    for arg in ["_raw_params", "cmd"] {
+        // A script's file is the first word of its line.
+        let first = shlex::split(text(arg))
+            .and_then(|words| words.into_iter().next())
+            .unwrap_or_default();
+        check(arg, &first)?;
+    }
+    Ok(())
+}
+
+/// Whether a `content` value is what Python reads as false.
+fn is_empty(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Bool(b) => !b,
+        Value::String(s) => s.is_empty(),
+        Value::Array(a) => a.is_empty(),
+        Value::Object(o) => o.is_empty(),
+        Value::Number(n) => n.as_f64() == Some(0.0),
+    }
+}
+
 /// ansible-core's plugin `name`, which may run `modules` and no other module.
 #[expect(clippy::too_many_lines)]
 pub(super) fn start(
@@ -125,30 +195,9 @@ pub(super) fn start(
 ) -> Box<dyn Plugin> {
     // `find_needle` lets ansible-core's plugins read any controller file a `src` or a script's
     // line names, and put it on the host: a name a managed host chose is followed as far as
-    // `host_named_paths` allows. A script's file is the first word of its line.
-    for arg in ["src", "_raw_params"] {
-        let text = ctx
-            .args
-            .get(arg)
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let named = if arg == "src" {
-            text.to_string()
-        } else {
-            shlex::split(text)
-                .and_then(|words| words.into_iter().next())
-                .unwrap_or_default()
-        };
-        if let Err(msg) = check_host_named(
-            ctx.host_named_paths,
-            ctx.args_untrusted,
-            arg,
-            &named,
-            ctx.origin,
-            ctx.playbook_dir,
-        ) {
-            return super::copy::failing(msg);
-        }
+    // `host_named_paths` allows.
+    if let Err(msg) = check_sources(name, &ctx) {
+        return super::copy::failing(msg);
     }
     let Some(bridge) = ctx.templar.bridge().cloned() else {
         return super::copy::failing(format!(

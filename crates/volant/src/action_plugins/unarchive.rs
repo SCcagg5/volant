@@ -133,6 +133,7 @@ impl Unarchive {
             &self.untrusted,
             "src",
             src,
+            "files",
             &self.origin,
             &self.playbook_dir,
         ) {

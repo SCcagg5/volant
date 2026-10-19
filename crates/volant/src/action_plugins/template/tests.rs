@@ -253,7 +253,7 @@ fn a_template_a_host_named_outside_the_directories_is_refused_when_contained() {
         assert_eq!(
             refused(plugin.as_mut()),
             format!(
-                "the 'src' of this task was named by a managed host, and '{src}' is not inside the directories of the playbook or the role (host_named_paths = contained)"
+                "the 'src' of this task was named by a managed host, and '{src}' is not inside the files or templates directories of the playbook or the role (host_named_paths = contained)"
             )
         );
     }

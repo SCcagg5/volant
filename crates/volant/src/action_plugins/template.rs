@@ -137,6 +137,7 @@ fn rendered(ctx: &Context<'_>) -> Result<CopyOf, String> {
         ctx.args_untrusted,
         "src",
         &src,
+        "templates",
         ctx.origin,
         ctx.playbook_dir,
     )?;

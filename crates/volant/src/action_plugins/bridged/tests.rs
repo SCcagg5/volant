@@ -34,16 +34,18 @@ fn a_temporary_directory_is_one_plain_absolute_path(#[case] path: &str, #[case] 
     assert_eq!(plain_path(path), ok);
 }
 
-/// Starts the plugin `name` with `arg` set to `text`, the whole of it named by a managed host.
+/// Starts the plugin `name` with `args`, of which the ones in `named` were named by a managed
+/// host, under the mode `mode` and in a playbook at `/pb`.
 fn start_naming(
     mode: HostNamedPaths,
     name: &'static str,
-    arg: &str,
-    text: &str,
+    args: Value,
+    named: &[&str],
 ) -> Box<dyn Plugin> {
-    let mut args = Map::new();
-    args.insert(arg.into(), json!(text));
-    let untrusted = std::iter::once(arg.to_string()).collect();
+    let Value::Object(args) = args else {
+        unreachable!()
+    };
+    let untrusted = named.iter().map(ToString::to_string).collect();
     let running = crate::vars::HostVars::default();
     let templar = crate::template::Templar::new(std::path::PathBuf::from("."));
     let origin = crate::compile::Origin::default();
@@ -83,72 +85,55 @@ fn failure(mut plugin: Box<dyn Plugin>) -> String {
     result.0["msg"].as_str().unwrap().to_string()
 }
 
-/// The arguments of a free-form `script` and an `assemble` source are never a controller file
-/// a managed host named under `refuse`: the item fails before the helper is asked for anything.
+/// The arguments of a free-form `script`, its `cmd`, and an `assemble` source are never a
+/// controller file a managed host named under `refuse`: the item fails before the helper is
+/// asked for anything.
 #[rstest::rstest]
-#[case::script("script", "_raw_params")]
-#[case::assemble("assemble", "src")]
-fn a_host_named_controller_file_is_refused(#[case] name: &'static str, #[case] arg: &str) {
-    let msg = failure(start_naming(
-        HostNamedPaths::Refuse,
-        name,
-        arg,
-        "/etc/passwd",
-    ));
+#[case::script("script", json!({"_raw_params": "/etc/passwd"}), "_raw_params")]
+#[case::script_cmd("script", json!({"cmd": "/etc/passwd"}), "cmd")]
+#[case::assemble("assemble", json!({"src": "/etc/passwd", "remote_src": false}), "src")]
+#[case::uri("uri", json!({"src": "/etc/passwd"}), "src")]
+fn a_host_named_controller_file_is_refused(
+    #[case] name: &'static str,
+    #[case] args: Value,
+    #[case] arg: &str,
+) {
+    let msg = failure(start_naming(HostNamedPaths::Refuse, name, args, &[arg]));
     assert!(msg.contains(&format!(
         "the '{arg}' of this task was named by a managed host"
     )));
 }
 
 /// Under `allow` and `contained` the name goes on to the plugin, which here fails for want of
-/// the helper; `contained` stops a name that leaves the task's directories, and for a script
-/// reads the first word of the line.
+/// the helper. `contained` stops a name outside the files and templates directories, reads the
+/// first word of a script's line, and leaves a source on the host alone.
 #[rstest::rstest]
-#[case::script_allowed(
-    HostNamedPaths::Allow,
-    "script",
-    "_raw_params",
-    "/etc/passwd --flag",
-    None
-)]
-#[case::script_inside(
-    HostNamedPaths::Contained,
-    "script",
-    "_raw_params",
-    "tool.sh --flag ../x",
-    None
-)]
-#[case::script_outside(
-    HostNamedPaths::Contained,
-    "script",
-    "_raw_params",
-    "/etc/passwd --flag",
-    Some("'/etc/passwd' is not inside")
-)]
-#[case::script_quoted(
-    HostNamedPaths::Contained,
-    "script",
-    "_raw_params",
-    "'../up.sh' arg",
-    Some("'../up.sh' is not inside")
-)]
-#[case::assemble_allowed(HostNamedPaths::Allow, "assemble", "src", "../parts", None)]
-#[case::assemble_inside(HostNamedPaths::Contained, "assemble", "src", "parts", None)]
-#[case::assemble_outside(
-    HostNamedPaths::Contained,
-    "assemble",
-    "src",
-    "../parts",
-    Some("'../parts' is not inside")
-)]
+#[case::script_allowed("allow", "script", json!({"_raw_params": "/etc/passwd --flag"}), "_raw_params", None)]
+#[case::script_inside("contained", "script", json!({"_raw_params": "tool.sh --flag ../x"}), "_raw_params", None)]
+#[case::script_outside("contained", "script", json!({"_raw_params": "/etc/passwd --flag"}), "_raw_params", Some("'/etc/passwd' is not inside"))]
+#[case::script_quoted("contained", "script", json!({"_raw_params": "'../up.sh' arg"}), "_raw_params", Some("'../up.sh' is not inside"))]
+#[case::script_tilde("contained", "script", json!({"_raw_params": "~/hs.sh"}), "_raw_params", Some("'~/hs.sh' is not inside"))]
+#[case::script_cmd_outside("contained", "script", json!({"cmd": "/etc/passwd"}), "cmd", Some("'/etc/passwd' is not inside"))]
+#[case::script_cmd_inside("contained", "script", json!({"cmd": "tool.sh"}), "cmd", None)]
+#[case::assemble_local("contained", "assemble", json!({"src": "../parts", "remote_src": false}), "src", Some("'../parts' is not inside"))]
+#[case::assemble_local_tilde("contained", "assemble", json!({"src": "~/.ssh", "remote_src": "no"}), "src", Some("'~/.ssh' is not inside"))]
+#[case::assemble_on_the_host("contained", "assemble", json!({"src": "/etc/parts"}), "src", None)]
+#[case::assemble_on_the_host_said("contained", "assemble", json!({"src": "/etc/parts", "remote_src": "yes"}), "src", None)]
+#[case::copy_on_the_host("contained", "copy", json!({"src": "/etc/hosts", "remote_src": true}), "src", None)]
+#[case::copy_local("contained", "copy", json!({"src": "/etc/hosts", "remote_src": false}), "src", Some("'/etc/hosts' is not inside"))]
+#[case::template_tilde("contained", "template", json!({"src": "~/t.j2"}), "src", Some("'~/t.j2' is not inside"))]
+#[case::uri_body("contained", "uri", json!({"body_format": "form-multipart", "body": {"f": {"filename": "~/.ssh/id_rsa"}}}), "body", Some("'~/.ssh/id_rsa' is not inside"))]
+#[case::uri_body_content("contained", "uri", json!({"body_format": "form-multipart", "body": {"f": {"filename": "~/x", "content": "text"}}}), "body", None)]
+#[case::uri_body_inside("contained", "uri", json!({"body_format": "form-multipart", "body": {"f": {"filename": "up.bin"}}}), "body", None)]
 fn a_host_named_controller_file_is_read_as_the_mode_says(
-    #[case] mode: HostNamedPaths,
+    #[case] mode: &str,
     #[case] name: &'static str,
+    #[case] args: Value,
     #[case] arg: &str,
-    #[case] text: &str,
     #[case] refused: Option<&str>,
 ) {
-    let msg = failure(start_naming(mode, name, arg, text));
+    let mode = HostNamedPaths::parse(mode).unwrap();
+    let msg = failure(start_naming(mode, name, args, &[arg]));
     match refused {
         Some(says) => assert!(
             msg.contains("named by a managed host") && msg.contains(says),
