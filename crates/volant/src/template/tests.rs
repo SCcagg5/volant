@@ -1007,9 +1007,8 @@ fn text_prints_containers_none_and_chained_undefined_as_the_reference_does() {
     assert!(t.render("x {{ d.no.sub }}", &v).is_err());
 }
 
-/// What `dict` says when it refuses, in CPython's words. The golden rows only record that
-/// ansible-core 2.19.12 failed; the texts here are the ones it printed after "Error rendering
-/// template:".
+/// What `dict` says when it refuses, in CPython's words. The golden rows only record that the
+/// reference failed; these are the texts it printed.
 #[rstest::rstest]
 #[case::too_long(
     "{{ dict([['a', 1, 2]]) }}",
