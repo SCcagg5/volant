@@ -66,11 +66,7 @@ impl Import {
             None | Some(Yaml::Value(Scalar::Null)) => Vec::new(),
             Some(_) => conditions(entry, "when", "")?,
         };
-        if when.iter().any(|w| w.contains("{{") || w.contains("{%")) {
-            bail!(
-                "'when' of an 'import_playbook' holds a template, which this release does not read when it loads the playbook"
-            );
-        }
+        refuse_template("when", &when)?;
         let mut vars = match field(entry, "vars") {
             None | Some(Yaml::Value(Scalar::Null)) => Map::new(),
             Some(node @ Yaml::Mapping(_)) => match to_json(node).context("'vars'")? {
@@ -80,7 +76,13 @@ impl Import {
             Some(_) => bail!("Vars in a PlaybookInclude must be specified as a dictionary."),
         };
         let names = match field(entry, "tags") {
-            None | Some(Yaml::Value(Scalar::Null | Scalar::String(_)) | Yaml::Sequence(_)) => {
+            None => Vec::new(),
+            Some(node @ (Yaml::Value(Scalar::String(_)) | Yaml::Sequence(_))) => {
+                if let Yaml::Sequence(items) = node {
+                    for item in items {
+                        refuse_item(item)?;
+                    }
+                }
                 tags(entry, "")?
             }
             // Exit 1, not the 4 of a refused attribute, as the reference ends it.
@@ -91,6 +93,7 @@ impl Import {
                 ));
             }
         };
+        refuse_template("tags", &names)?;
         let var_tags = match vars.remove("tags") {
             None => Vec::new(),
             Some(Value::String(text)) => text.split(',').map(str::to_string).collect(),
@@ -98,6 +101,7 @@ impl Import {
                 bail!("'tags' among the vars of an 'import_playbook' must be a string");
             }
         };
+        refuse_template("tags", &var_tags)?;
         Ok(Import {
             when,
             tags: names,
@@ -130,4 +134,31 @@ impl Import {
             play.gather_when.clone_from(&self.when);
         }
     }
+}
+
+/// An entry of a `tags` list that is not text or a number, in the reference's words.
+fn refuse_item(item: &Yaml) -> anyhow::Result<()> {
+    let kind = match item {
+        Yaml::Sequence(_) => "list",
+        Yaml::Mapping(_) => "dict",
+        _ => return Ok(()),
+    };
+    bail!(
+        "Error processing keyword 'tags': Keyword 'tags' items must be of type 'str' or 'int', not '{kind}'."
+    )
+}
+
+/// Refuses a keyword that holds a template. The reference renders `when` and `tags` of the entry
+/// with the run's variables as it loads the playbook; this release has none at that point, and
+/// reading the text as it stands would, for `tags`, select the wrong tasks without a word.
+fn refuse_template(keyword: &str, values: &[String]) -> anyhow::Result<()> {
+    if values
+        .iter()
+        .any(|v| v.contains("{{") || v.contains("{%") || v.contains("{#"))
+    {
+        bail!(
+            "'{keyword}' of an 'import_playbook' holds a template, which this release does not read when it loads the playbook"
+        );
+    }
+    Ok(())
 }
