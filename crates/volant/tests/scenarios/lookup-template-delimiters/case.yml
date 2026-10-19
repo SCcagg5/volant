@@ -1,0 +1,3 @@
+# `lookup('template')` with the delimiter and `trim_blocks` options and a `#jinja2:` first line.
+args: [-i, inv.ini, play.yml]
+needs: [ansible-core]

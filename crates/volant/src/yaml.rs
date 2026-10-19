@@ -252,7 +252,7 @@ pub(crate) fn unsafe_data(mut value: Value) -> Value {
     let mut open = vec![&mut value];
     while let Some(node) = open.pop() {
         match node {
-            Value::String(s) if s.contains("{{") || s.contains("{%") => {
+            Value::String(s) if crate::template::Templar::is_template(s) => {
                 *s = wrap(s, "volant_unsafe");
             }
             Value::Array(items) => open.extend(items.iter_mut()),

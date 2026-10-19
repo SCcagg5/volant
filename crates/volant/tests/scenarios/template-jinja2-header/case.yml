@@ -1,0 +1,5 @@
+# The `#jinja2:` first line of a template file: delimiters, whitespace options and the newline
+# sequence it sets, what it wins over, and the first lines that are not one.
+args: [-i, inv.ini, play.yml]
+modes: [check-diff, diff]
+needs: [ansible-core]

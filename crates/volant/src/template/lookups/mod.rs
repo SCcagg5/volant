@@ -15,9 +15,10 @@ mod template;
 use basic::{inventory_hostnames, varnames};
 use fileglob::fileglob;
 use first_found::{first_found, relative_stack};
-use template::{find_template, render_template};
+use template::{find_template, options as template_options, render_template};
 
 use crate::bridge::{Bridge, PluginKind};
+use crate::template::FileRender;
 
 pub fn register(env: &mut Environment<'static>, base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) {
     let bridge = bridge.cloned();
@@ -151,6 +152,9 @@ fn lookup(
         return varnames(state, terms);
     }
     let default_value: Option<Value> = kwargs.get::<Option<Value>>("default")?;
+    let render_options = matches!(name, "template" | "ansible.builtin.template")
+        .then(|| template_options(&kwargs))
+        .transpose()?;
     kwargs.assert_all_used()?;
     // Whatever a lookup read at run time is data: a file's text, a command's output, an
     // environment variable. Measured on ansible-core 2.19.12, all three come back carrying the
@@ -238,7 +242,15 @@ fn lookup(
                 let text = std::fs::read_to_string(&path)
                     .map_err(|e| invalid(format!("template lookup: {}: {e}", path.display())))?;
                 taint();
-                render_template(state, &term_text, &path, &text, base_dir, bridge)?
+                render_template(
+                    state,
+                    &term_text,
+                    &path,
+                    &text,
+                    base_dir,
+                    bridge,
+                    render_options.as_ref().unwrap_or(&FileRender::default()),
+                )?
             }
             _ => unreachable!("supported() admitted {name}"),
         };

@@ -1,0 +1,5 @@
+# `output_encoding`: the bytes written for UTF-8, Latin-1, ASCII, a Windows and an ISO code page,
+# UTF-16 and UTF-32, with a custom delimiter and a newline sequence, shown as base64.
+args: [-i, inv.ini, play.yml]
+modes: [check]
+needs: [ansible-core]

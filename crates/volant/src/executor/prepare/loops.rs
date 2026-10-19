@@ -90,6 +90,8 @@ pub(super) fn loop_list(
     let (rendered, tainted) = templar.render_value_tainted(raw, vars)?;
     let list = match rendered {
         Value::Array(items) => items,
+        // `with_items` takes anything that is not a list as a list of one.
+        other if task.with_items => vec![other],
         other => {
             return Err(TemplateError(format!(
                 "Invalid data passed to 'loop', it requires a list, got this instead: {other}"
