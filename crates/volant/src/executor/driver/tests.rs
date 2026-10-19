@@ -101,6 +101,8 @@ fn a_keyword_declares_a_barrier_the_text_does_not(
 #[case("hostname", true)]
 #[case("gather_facts", true)]
 #[case("dnf", true)]
+#[case("yum", true)]
+#[case("ansible.builtin.yum", true)]
 #[case("mount_facts", true)]
 #[case("package_facts", true)]
 #[case("ansible.builtin.service_facts", true)]

@@ -28,6 +28,34 @@ fn every_builtin_module_resolves_under_both_prefixes() {
     assert!(!is_builtin("ansible.legacy.nosuchmodule"));
 }
 
+/// `yum` is ansible-core's redirect to `dnf`: one builtin in every spelling, with no module of
+/// its own, and `yum_repository` and a collection's `yum` are not it.
+#[test]
+fn yum_is_a_builtin_that_runs_the_dnf_action() {
+    for spelling in ["yum", "ansible.builtin.yum", "ansible.legacy.yum"] {
+        assert!(is_builtin(spelling), "{spelling}");
+        assert!(!is_known(spelling), "{spelling}");
+        assert_eq!(resolved_name(spelling), "dnf", "{spelling}");
+        assert_eq!(builtin_route(spelling), Some(Route::ActionPlugin));
+        assert_eq!(short_name(spelling), "yum");
+    }
+    assert!(
+        !BUILTIN_MODULES.contains(&"yum"),
+        "ansible-doc lists no yum"
+    );
+    for (name, target) in BUILTIN_REDIRECTS {
+        assert!(BUILTIN_MODULES.contains(target), "{name} -> {target}");
+        assert!(!BUILTIN_MODULES.contains(name), "{name}");
+    }
+    assert_eq!(resolved_name("yum_repository"), "yum_repository");
+    assert_eq!(resolved_name("ansible.builtin.copy"), "copy");
+    assert_eq!(
+        resolved_name("community.general.yum"),
+        "community.general.yum"
+    );
+    assert!(!is_builtin("community.general.yum"));
+}
+
 #[test]
 fn native_lookup_uses_the_short_name() {
     assert_eq!(native("ansible.builtin.raw").map(|m| m.name), Some("raw"));
