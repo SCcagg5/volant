@@ -1253,3 +1253,29 @@ fn a_very_long_broken_line_is_an_error_not_a_panic() {
         }
     }
 }
+
+/// Text an expression made, stored as a variable, is read back as it was: a `{#` at its end is
+/// not an open comment to cut once more. A complete comment in a variable is still rendered.
+#[test]
+fn a_stored_string_ending_in_an_open_comment_is_kept() {
+    let t = templar();
+    let stored = vars(json!({"a": "x{#", "b": "{#", "c": "y{#-", "d": "z{#+", "e": "{# c #}w"}));
+    let (resolved, _) = t.resolve_vars_tainted(&stored);
+    assert_eq!(
+        Value::Object(resolved),
+        json!({"a": "x{#", "b": "{#", "c": "y{#-", "d": "z{#+", "e": "w"})
+    );
+    assert_eq!(t.render("{{ a }}", &stored).unwrap(), json!("x{#"));
+}
+
+/// A comment that opens at the end of a very long line is still an open comment, not a failure
+/// of the panic guard.
+#[test]
+fn an_open_comment_ends_a_very_long_line() {
+    let t = templar();
+    let text = format!("{}{{#", "a".repeat(70_000));
+    assert_eq!(
+        t.render(&text, &Map::new()).unwrap(),
+        json!("a".repeat(70_000))
+    );
+}
