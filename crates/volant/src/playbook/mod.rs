@@ -2,6 +2,7 @@
 //! Playbook loading: plays and tasks, with the keywords this release supports.
 
 mod fields;
+mod import;
 mod keywords;
 mod load;
 mod model;

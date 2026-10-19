@@ -5073,6 +5073,39 @@ fn import_playbook_written_as_a_task_is_refused_by_its_own_name() {
     std::fs::remove_dir_all(&dir).expect("the probe directory is removed");
 }
 
+/// A templated `tags` on an `import_playbook` is refused, so that `--skip-tags` cannot run what the
+/// reference would skip: it would otherwise be a literal tag named `{{ pkgtag }}`.
+#[test]
+fn templated_import_tags_are_refused_whatever_the_tag_selection() {
+    let dir = probe_dir("import-templated-tags");
+    std::fs::write(
+        dir.join("sub.yml"),
+        "- hosts: localhost\n  gather_facts: false\n  tasks:\n    - debug: {msg: ran}\n",
+    )
+    .expect("the imported playbook is written");
+    std::fs::write(
+        dir.join("site.yml"),
+        "- import_playbook: sub.yml\n  tags: ['{{ pkgtag }}']\n",
+    )
+    .expect("the probe playbook is written");
+    let path = dir.join("site.yml").display().to_string();
+    for selection in [
+        &["--skip-tags", "packages"][..],
+        &["--tags", "packages"][..],
+    ] {
+        let mut args = vec!["playbook", "-e", "pkgtag=packages"];
+        args.extend_from_slice(selection);
+        args.push(&path);
+        let out = volant(&args);
+        let text = String::from_utf8_lossy(&out.stdout).to_string();
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        assert_eq!(out.status.code(), Some(4), "{text}{err}");
+        assert!(err.contains("holds a template"), "{err}");
+        assert!(!text.contains("TASK"), "{text}");
+    }
+    std::fs::remove_dir_all(&dir).expect("the probe directory is removed");
+}
+
 /// A `run_once` runner nothing can reach ends the play for the hosts waiting on it, and the exit
 /// code stays the unreachable one.
 #[test]

@@ -1,0 +1,8 @@
+- import_playbook: sub.yml
+  tags: [packages]
+- name: after
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: after task
+      debug: {msg: after}
