@@ -27,8 +27,8 @@ pub(in crate::executor) use item::{
     FINALIZING, Item, NOTIFY_FAILED, Prepared, failure_text, pause_of, undefined_name,
 };
 pub(in crate::executor) use plan::{Gate, PlayPlan, Strategy};
-use vars::delegate_host_vars;
 pub(in crate::executor) use vars::host_vars;
+use vars::{Named, delegate_host_vars};
 
 use connect::{connect_for, delegate_for};
 use escalation::{become_for, remove_omit};
@@ -346,7 +346,7 @@ pub(super) fn prepare(
     let delegate = delegate.map(|(name, data)| {
         let vars = delegate_host_vars(
             &name,
-            data,
+            Named::ByDelegate { data },
             plan,
             &task.vars,
             step.role,

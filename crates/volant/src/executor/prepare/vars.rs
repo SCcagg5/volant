@@ -41,7 +41,7 @@ pub(in crate::executor) fn host_vars(
 ) -> HostVars {
     delegate_host_vars(
         host,
-        false,
+        Named::ByTheRun,
         plan,
         task_vars,
         role,
@@ -54,19 +54,29 @@ pub(in crate::executor) fn host_vars(
     )
 }
 
-/// `host_vars` for the host a `delegate_to` named. `name_is_data` says the name came out of a
-/// render that read a managed host's value: the name is then data whatever it holds, so the
-/// names derived from it (`inventory_hostname`, `inventory_hostname_short`) and the `hostvars`
-/// entry that carries it are never rendered. A name that holds a template is data too, wherever
-/// it came from: no inventory names a host that way, and the reference reads it as a host name,
-/// prints it and fails to connect to it.
+/// Where the name of a host view came from.
+#[derive(Clone, Copy)]
+pub(super) enum Named {
+    /// The inventory, or the play's own host list.
+    ByTheRun,
+    /// A `delegate_to`. `data` says the render read a value that came from a managed host.
+    ByDelegate { data: bool },
+}
+
+/// `host_vars` for the host a `delegate_to` named. A delegate name is data, and the names derived
+/// from it (`inventory_hostname`, `inventory_hostname_short`) and the `hostvars` entry that
+/// carries it are never rendered, in three cases. The render read a managed host's value. The name
+/// holds a template, wherever it came from: no inventory names a host that way, and the reference
+/// reads it as a host name, prints it and fails to connect to it. Or the host is not in the
+/// inventory the run started from, where `groups` or a variable can hand out text a managed host
+/// returned with nothing in the render to say so.
 #[expect(
     clippy::too_many_arguments,
     reason = "the driver's whole context, read for one host's variables"
 )]
 pub(in crate::executor) fn delegate_host_vars(
     host: &str,
-    name_is_data: bool,
+    named: Named,
     plan: &PlayPlan,
     task_vars: &Map<String, Value>,
     role: Option<usize>,
@@ -112,7 +122,12 @@ pub(in crate::executor) fn delegate_host_vars(
                 .flat_map(|p| p.untrusted.iter().cloned()),
         );
         let mut untrusted_hosts = store.untrusted_hosts();
-        if name_is_data || Templar::is_template(host) {
+        let data = Templar::is_template(host)
+            || match named {
+                Named::ByTheRun => false,
+                Named::ByDelegate { data } => data || store.is_runtime_host(host),
+            };
+        if data {
             untrusted.extend(["inventory_hostname", "inventory_hostname_short"].map(String::from));
             let mut hosts = (*untrusted_hosts).clone();
             hosts.insert(host.to_string());
