@@ -112,3 +112,11 @@ fn a_codec_not_written_yet_is_refused_by_name() {
         "'rot13' is not a text encoding; use codecs.encode() to handle arbitrary codecs"
     );
 }
+
+/// A name is echoed in the error up to 64 characters.
+#[test]
+fn a_long_name_is_cut_in_the_error() {
+    let err = encode("x", &"z".repeat(1_000_000)).unwrap_err();
+    assert!(err.starts_with(&format!("output_encoding '{}...' is not", "z".repeat(64))));
+    assert!(err.len() < 300, "{}", err.len());
+}

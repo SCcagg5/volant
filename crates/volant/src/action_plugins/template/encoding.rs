@@ -137,8 +137,15 @@ pub(super) fn encode(text: &str, name: &str) -> Result<Vec<u8>, String> {
                 "'{norm}' is not a text encoding; use codecs.encode() to handle arbitrary codecs"
             )
         } else {
+            // A name is echoed up to 64 characters, so a long one does not fill the message.
+            let shown: String = name.chars().take(64).collect();
+            let shown = if shown.len() < name.len() {
+                format!("{shown}...")
+            } else {
+                shown
+            };
             format!(
-                "output_encoding '{name}' is not supported yet on 'template': only utf-8, \
+                "output_encoding '{shown}' is not supported yet on 'template': only utf-8, \
                  utf-8-sig, latin-1, ascii, cp1252, iso-8859-15, utf-16 and utf-32 are"
             )
         });
