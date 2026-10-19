@@ -3381,5 +3381,94 @@
       "template": "{{ lookup('varnames', '[', wantlist=True) }}"
     },
     "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The lookup plugin 'varnames' failed: Unable to use \"[\" as a search parameter: unterminated character set at position 0"
+  },
+  {
+    "case": {
+      "template": "{% raw %}{{ x }}{% endraw %}",
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": "{{ x }}"
+  },
+  {
+    "case": {
+      "template": "a{% raw %}{{ x }}{% endraw %}b{{ x }}",
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": "a{{ x }}b5"
+  },
+  {
+    "case": {
+      "template": "{%- raw -%} {{ x }} {%- endraw -%}",
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": "{{ x }}"
+  },
+  {
+    "case": {
+      "template": "{% raw %}{% if x %}{% endraw %}",
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": "{% if x %}"
+  },
+  {
+    "case": {
+      "template": "{{ y }}",
+      "vars": {
+        "x": 5,
+        "y": "{% raw %}{{ x }}{% endraw %}"
+      }
+    },
+    "result": "{{ x }}"
+  },
+  {
+    "case": {
+      "template": "{{ z }}",
+      "vars": {
+        "x": 5,
+        "y": "{% raw %}{{ x }}{% endraw %}",
+        "z": "{{ y }}"
+      }
+    },
+    "result": "{{ x }}"
+  },
+  {
+    "case": {
+      "template": "{{ '{{' }} x {{ '}}' }}",
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": "{{ x }}"
+  },
+  {
+    "case": {
+      "template": "{{ ['{% raw %}{{ x }}{% endraw %}'] }}",
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": [
+      "{% raw %}{{ x }}{% endraw %}"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ r }}|{% raw %}{{ r }}{% endraw %}",
+      "untrusted": {
+        "r": "{% raw %}{{ x }}{% endraw %}{{ x }}"
+      },
+      "vars": {
+        "x": 5
+      }
+    },
+    "result": "{% raw %}{{ x }}{% endraw %}{{ x }}|{{ r }}"
   }
 ]
