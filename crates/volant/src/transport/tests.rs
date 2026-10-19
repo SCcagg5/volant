@@ -734,7 +734,7 @@ fn a_remote_tmp_with_a_space_survives_the_shell() {
     use std::process::{Command as SyncCommand, Stdio};
 
     let guard = scratch();
-    let base = guard.path().join("volant quoting");
+    let base = guard.path().join("volant quoting [*] it's");
     std::fs::create_dir_all(&base).unwrap();
     let Transport::Ssh(target) = Transport::for_host(
         &host(json!({ "ansible_remote_tmp": base.to_str().unwrap() })),

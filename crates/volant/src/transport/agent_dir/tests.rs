@@ -230,7 +230,15 @@ fn a_planted_agent_directory_is_never_run(
                 return;
             }
         }
-        Plant::OpenDir => remote.plant(0o777, 0o755),
+        Plant::OpenDir => {
+            remote.plant(0o777, 0o755);
+            // What a link through `su` writes its stderr to, aimed at a file of the user's.
+            symlink(
+                remote.root.path().join("victim"),
+                remote.dir().join("agent.stderr"),
+            )
+            .unwrap();
+        }
         Plant::OpenAgent => remote.plant(0o700, 0o777),
         Plant::SymlinkedDir => {
             std::fs::create_dir(&elsewhere).unwrap();
@@ -298,6 +306,10 @@ fn a_planted_agent_directory_is_never_run(
             mode(&remote.dir()) & 0o077,
             0,
             "the directory is private again"
+        );
+        assert!(
+            std::fs::symlink_metadata(remote.dir().join("agent.stderr")).is_err(),
+            "what was planted in the open directory is gone"
         );
         assert!(!remote.marker().exists());
     } else if let Plant::OpenParent = plant {
