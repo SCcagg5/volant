@@ -20,6 +20,7 @@ fn run_command(args: &Map<String, Value>, ctx: &Context, cancelled: &dyn Fn() ->
     execute(args, false, ctx, cancelled)
 }
 
+mod argv;
 mod execute;
 mod expand;
 mod spawn;
