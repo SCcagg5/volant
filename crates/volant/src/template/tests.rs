@@ -942,6 +942,26 @@ fn text_prints_containers_none_and_chained_undefined_as_the_reference_does() {
 #[case::float("{{ dict(1.5) }}", "'float' object is not iterable")]
 #[case::boolean("{{ dict(true) }}", "'bool' object is not iterable")]
 #[case::none("{{ dict(none) }}", "'NoneType' object is not iterable")]
+#[case::none_key(
+    "{{ dict([[none, 1]]) | to_json }}",
+    "a dict key of type 'NoneType' is not supported"
+)]
+#[case::fractional_key(
+    "{{ dict([[1.5, 1]]) }}",
+    "a dict key of type 'float' is not supported"
+)]
+#[case::infinite_key(
+    "{{ dict([[1e400, 1]]) }}",
+    "a dict key of type 'float' is not supported"
+)]
+#[case::endless_iterable(
+    "{{ dict(range(1000000000000)) }}",
+    "cannot convert dictionary update sequence element #0 to a sequence"
+)]
+#[case::endless_element(
+    "{{ dict([range(1000000000000)]) }}",
+    "dictionary update sequence element #0 has length 1000000000000; 2 is required"
+)]
 #[case::two_arguments("{{ dict([], []) }}", "dict expected at most 1 argument, got 2")]
 fn dict_refuses_in_the_words_of_python(#[case] text: &str, #[case] want: &str) {
     let err = templar().render(text, &Map::new()).unwrap_err();
@@ -960,5 +980,25 @@ fn dict_of_an_undefined_value_is_an_undefined_read() {
         t.render("{{ dict([nope]) }}", &Map::new())
             .unwrap_err()
             .is_undefined()
+    );
+}
+
+/// Integers beyond 64 bits are separate keys, and one that is the same number as another spelled
+/// differently is not: `1`, `1.0` and `true` are one key.
+#[test]
+fn dict_keeps_integer_keys_beyond_64_bits_apart() {
+    let t = templar();
+    let length = |text: &str| t.render(text, &Map::new()).unwrap();
+    assert_eq!(
+        length("{{ dict([[18446744073709551616, 'a'], [18446744073709551617, 'b']]) | length }}"),
+        json!(2)
+    );
+    assert_eq!(
+        length("{{ dict([[18446744073709551616, 'a'], [18446744073709551616, 'b']]) | length }}"),
+        json!(1)
+    );
+    assert_eq!(
+        length("{{ dict([[1, 'a'], [1.0, 'b'], [true, 'c']]) | length }}"),
+        json!(1)
     );
 }

@@ -584,3 +584,9 @@
 - template: "{{ undef() is defined }}"
 - template: "{{ x }}"
   vars: {x: "{{ undef(hint='x is needed') }}"}
+# Integers beyond 64 bits stay apart as keys; a mapping read through `dict` is still the mapping.
+- template: "{{ dict([[9223372036854775808, 'a'], [9223372036854775809, 'b']]) | length }}"
+- template: "{{ dict([[18446744073709551616, 'a'], [18446744073709551617, 'b']]) | length }}"
+- template: "{{ dict([[1, 'a'], [1.0, 'b'], [true, 'c'], [9223372036854775808, 'd']]) | length }}"
+- template: "{{ dict(vars) | length }}"
+  vars: {bad: "{{ nope }}"}
