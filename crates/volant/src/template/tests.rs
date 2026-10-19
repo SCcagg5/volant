@@ -931,3 +931,109 @@ fn text_prints_containers_none_and_chained_undefined_as_the_reference_does() {
     assert!(t.render("{{ nope.a }}", &v).is_err());
     assert!(t.render("x {{ d.no.sub }}", &v).is_err());
 }
+
+/// A `raw` block or a string constant writes text the reference renders once. Rows of
+/// `(template, result)`, rendered as written and then as the value of a variable.
+#[test]
+fn a_raw_block_is_emitted_once() {
+    let x = json!({"x": "val"});
+    let rows = [
+        ("{% raw %}{{ x }}{% endraw %}", "{{ x }}"),
+        ("a{% raw %}{{ x }}{% endraw %}b{{ x }}", "a{{ x }}bval"),
+        ("{%- raw -%} {{ x }} {%- endraw -%}", "{{ x }}"),
+        ("{% raw %}{% if x %}{% endraw %}", "{% if x %}"),
+        ("{% raw %}{# c #}{% endraw %}", "{# c #}"),
+        ("{{ '{{ x }}' }}", "{{ x }}"),
+        ("{{ '{{' }} x {{ '}}' }}", "{{ x }}"),
+    ];
+    for (text, want) in rows {
+        let t = templar();
+        let map = vars(x.clone());
+        assert_eq!(t.render(text, &map), Ok(json!(want)), "{text}");
+        assert_eq!(
+            t.render_value(&json!({"k": [text]}), &map),
+            Ok(json!({"k": [want]})),
+            "{text} in a mapping"
+        );
+        // A variable holding it, resolved once and then again, as every task and every loop item
+        // does with the map it is given.
+        let mut map = vars(json!({"x": "val", "v": text, "w": "{{ v }}"}));
+        let mut data = BTreeSet::new();
+        for pass in 0..3 {
+            let (resolved, untrusted) = t.resolve_vars_tainted(Vars {
+                untrusted: Some(&data),
+                ..Vars::from(&map)
+            });
+            map = resolved;
+            data = untrusted;
+            assert_eq!(map["v"], json!(want), "{text}, resolution {pass}");
+            assert_eq!(
+                t.render(
+                    "{{ v }}",
+                    Vars {
+                        untrusted: Some(&data),
+                        ..Vars::from(&map)
+                    }
+                ),
+                Ok(json!(want)),
+                "{text} read through a variable, resolution {pass}"
+            );
+        }
+        assert_eq!(map["w"], json!(want), "{text} read by another variable");
+    }
+    // A tag a string constant writes is text too, which a chain of variables cannot tell apart.
+    let t = templar();
+    let map = vars(json!({"x": "val"}));
+    assert_eq!(
+        t.render("{{ '{% raw %}' }}{{ x }}{{ '{% endraw %}' }}", &map),
+        Ok(json!("{% raw %}val{% endraw %}"))
+    );
+    // A list an expression builds keeps the text of its members.
+    let none = Map::new();
+    let list = "{{ ['{% raw %}{{ x }}{% endraw %}'] }}";
+    let (items, data) = t.render_value_tainted(&json!(list), &none).unwrap();
+    assert_eq!(items, json!(["{% raw %}{{ x }}{% endraw %}"]));
+    assert!(data, "the items are not rendered again");
+    // A variable that chains to a variable holding it is still read to its end.
+    let map = vars(json!({"x": "val", "a": "{{ b }}", "b": "{% raw %}{{ x }}{% endraw %}"}));
+    assert_eq!(t.render("{{ a }}", &map), Ok(json!("{{ x }}")));
+}
+
+/// A raw block does not make text from a managed host evaluate: a name that holds text from a
+/// host is read as it is, wrapped in a raw block or not, and its text is never rendered.
+#[test]
+fn a_raw_block_in_text_from_a_host_is_never_rendered() {
+    let t = templar();
+    let payload = "{% raw %}{{ lookup('pipe', 'false') }}{% endraw %}{{ lookup('pipe', 'false') }}";
+    let map = vars(json!({"r": payload, "x": "val"}));
+    let host = BTreeSet::from(["r".to_string()]);
+    let with = Vars {
+        untrusted: Some(&host),
+        ..Vars::from(&map)
+    };
+    for text in [
+        "{{ r }}",
+        "{% raw %}{{ r }}{% endraw %}{{ r }}",
+        "{{ '{% raw %}' }}{{ r }}",
+    ] {
+        let want = if text.starts_with("{% raw") {
+            format!("{{{{ r }}}}{payload}")
+        } else if text.starts_with("{{ '{%") {
+            format!("{{% raw %}}{payload}")
+        } else {
+            payload.to_string()
+        };
+        assert_eq!(t.render(text, with), Ok(json!(want)), "{text}");
+    }
+    let (resolved, data) = t.resolve_vars_tainted(Vars {
+        map: &vars(json!({"r": payload, "a": "{{ r }}", "b": "{% raw %}{{ r }}{% endraw %}"})),
+        untrusted: Some(&host),
+        ..Vars::from(&map)
+    });
+    assert_eq!(resolved["r"], json!(payload));
+    assert_eq!(resolved["a"], json!(payload));
+    assert!(
+        data.contains("a"),
+        "a name built from a host's text is data"
+    );
+}

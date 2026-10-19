@@ -4972,6 +4972,48 @@ fn a_fact_carrying_a_result_cannot_name_a_variable() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Text a managed host printed is text, whatever raw tags it holds: a raw block around an
+/// expression, or tags that close one the author wrote, never makes the expression run.
+#[test]
+fn host_text_holding_raw_tags_is_never_rendered() {
+    let (dir, marker) = trust_dir("raw-wrapped", "h1 ansible_connection=local\n");
+    let call = format!("{{{{ lookup('pipe', 'touch {}') }}}}", marker.display());
+    let payloads = [
+        ("wrapped", format!("{{% raw %}}{call}{{% endraw %}}")),
+        ("split", format!("{{% endraw %}}{call}{{% raw %}}")),
+        ("opened", format!("{{% raw %}}{{% endraw %}}{call}")),
+    ];
+    for (name, text) in payloads {
+        let payload = dir.join(format!("{name}.txt"));
+        std::fs::write(&payload, &text).expect("the payload");
+        let out = volant_within(
+            &[
+                "playbook",
+                "-i",
+                dir.join("inv.ini").to_str().expect("a path"),
+                "-e",
+                &format!("payload={}", payload.display()),
+                &fixture("trust/raw-wrapped-host-text.yml"),
+            ],
+            std::time::Duration::from_secs(30),
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            !marker.exists(),
+            "{name}: text from a host ran on the controller:\n{stdout}"
+        );
+        assert_eq!(out.status.code(), Some(0), "{name}: {stdout}");
+        let shown = text.replace('"', "\\\"");
+        assert!(
+            stdout.contains(&format!(
+                "\"msg\": \"{shown}|{{{{ r.stdout }}}}|{{{{ r.stdout }}}}|{shown}\""
+            )),
+            "{name}: the text is shown as it came:\n{stdout}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A directory holding one executable `ssh` that writes `marker` and exits 255, first on `PATH`,
 /// beside an inventory file holding `inventory`. Nothing here reaches the network: the fake is
 /// what a run opening an ssh connection finds, and the marker is what it leaves behind.
