@@ -258,7 +258,7 @@ fn a_merge_key_merges_as_pyyaml_does() {
         ("d: {<<: !!map {b: 2}}\n", r#"{"d":{"b":2}}"#),
         (
             "x: &x [{a: 1}, {b: 2}]\nd: {<<: *x, c: 3}\n",
-            r#"{"x":[{"a":1},{"b":2}],"d":{"a":1,"b":2,"c":3}}"#,
+            r#"{"x":[{"a":1},{"b":2}],"d":{"b":2,"a":1,"c":3}}"#,
         ),
         // Nothing to merge, and a merge key at the top of the document.
         ("x: &x {}\nd: {<<: *x}\n", r#"{"x":{},"d":{}}"#),
@@ -330,10 +330,6 @@ fn a_bad_merge_value_is_a_constructor_error() {
             "while constructing a mapping\n  in \"t.yml\", line 1, column 4\nexpected a mapping or list of mappings for merging, but found scalar\n  in \"t.yml\", line 1, column 9",
         ),
         (
-            "d: {<<: }\n",
-            "while constructing a mapping\n  in \"t.yml\", line 1, column 4\nexpected a mapping or list of mappings for merging, but found scalar\n  in \"t.yml\", line 1, column 8",
-        ),
-        (
             "d:\n  <<: [1]\n",
             "while constructing a mapping\n  in \"t.yml\", line 2, column 3\nexpected a mapping for merging, but found scalar\n  in \"t.yml\", line 2, column 8",
         ),
@@ -348,6 +344,19 @@ fn a_bad_merge_value_is_a_constructor_error() {
         // An alias names the node it points at.
         (
             "a: &s foo\nd: {<<: *s}\n",
+            "while constructing a mapping\n  in \"t.yml\", line 2, column 4\nexpected a mapping or list of mappings for merging, but found scalar\n  in \"t.yml\", line 1, column 4",
+        ),
+        (
+            "a: &s\n  - 1\nd: {<<: [*s]}\n",
+            "while constructing a mapping\n  in \"t.yml\", line 3, column 4\nexpected a mapping for merging, but found sequence\n  in \"t.yml\", line 1, column 4",
+        ),
+        // A tag counts as part of the node too.
+        (
+            "d: {<<: !!str foo}\n",
+            "while constructing a mapping\n  in \"t.yml\", line 1, column 4\nexpected a mapping or list of mappings for merging, but found scalar\n  in \"t.yml\", line 1, column 9",
+        ),
+        (
+            "a: !!str &s foo\nd: {<<: *s}\n",
             "while constructing a mapping\n  in \"t.yml\", line 2, column 4\nexpected a mapping or list of mappings for merging, but found scalar\n  in \"t.yml\", line 1, column 4",
         ),
         (

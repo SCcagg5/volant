@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! YAML loading shared by playbooks, variable files and inventories, with the PyYAML habits
 //! Ansible content relies on (`yes`/`no` booleans, leading-zero and underscore-grouped
-//! integers) and the tags Ansible adds (`!vault`, `!unsafe`).
+//! integers), the merge key `<<` and the tags Ansible adds (`!vault`, `!unsafe`).
+
+mod merge;
 
 use std::fmt::Write;
 
@@ -13,6 +15,9 @@ use serde_json::{Map, Value};
 ///
 /// A key written twice in one mapping keeps its last value, as PyYAML does for ansible-core
 /// (which only warns). saphyr refuses it unless told otherwise.
+///
+/// A merge key (`<<: *anchor`) merges the mappings it names, and a mapping that has one is built
+/// as PyYAML builds it: see [`merge`].
 pub fn load<'a>(text: &'a str, source: &str) -> anyhow::Result<Vec<Yaml<'a>>> {
     let docs = marked(text, source)?;
     if holds_nothing(text) {
@@ -25,10 +30,15 @@ pub fn load<'a>(text: &'a str, source: &str) -> anyhow::Result<Vec<Yaml<'a>>> {
 fn marked<'a>(text: &'a str, source: &str) -> anyhow::Result<Vec<MarkedYaml<'a>>> {
     let mut loader = YamlLoader::<MarkedYaml>::default();
     loader.allow_duplicate_keys(true);
-    saphyr_parser::Parser::new_from_str(text)
-        .load(&mut loader, true)
-        .and_then(|()| loader.error().cloned().map_or(Ok(()), Err))
-        .with_context(|| format!("{source}: invalid YAML"))?;
+    if merge::may_hold_a_merge_key(text) {
+        merge::load(text, source, &mut loader)
+    } else {
+        saphyr_parser::Parser::new_from_str(text)
+            .load(&mut loader, true)
+            .map_err(Into::into)
+    }
+    .and_then(|()| loader.error().cloned().map_or(Ok(()), |e| Err(e.into())))
+    .with_context(|| format!("{source}: invalid YAML"))?;
     Ok(loader.into_documents())
 }
 
