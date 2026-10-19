@@ -25,7 +25,8 @@ pub(crate) use env::{
 };
 use env::{any_undefined, environment, type_name};
 pub use templar::Templar;
-use vm::{convert_error, holds_template, render_str};
+pub(crate) use vm::holds_template;
+use vm::{convert_error, render_str};
 
 pub use bridged::{bridged_name, not_sent_reason};
 pub use file::FileRender;

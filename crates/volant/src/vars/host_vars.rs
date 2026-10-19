@@ -27,6 +27,9 @@ pub struct HostVars {
     pub untrusted: BTreeSet<String>,
     /// Hosts holding at least one such name, for the `hostvars[other]` path.
     pub untrusted_hosts: Arc<BTreeSet<String>>,
+    /// The variables the items of a loop share, read after `map` and never written: see
+    /// [`HostVars::shared_by_items`]. Empty for a map that stands alone.
+    pub base: Arc<Map<String, Value>>,
 }
 
 impl HostVars {
@@ -94,6 +97,38 @@ impl HostVars {
             .get(key)
             .or_else(|| self.facts.get(key))
             .or_else(|| self.map.get(key))
+            .or_else(|| self.base.get(key))
+    }
+
+    /// Every variable of the host's own map, the shared base first and the map over it.
+    pub fn own_variables(&self) -> std::borrow::Cow<'_, Map<String, Value>> {
+        if self.base.is_empty() {
+            return std::borrow::Cow::Borrowed(&self.map);
+        }
+        let mut all = Map::clone(&self.base);
+        all.extend(self.map.iter().map(|(k, v)| (k.clone(), v.clone())));
+        std::borrow::Cow::Owned(all)
+    }
+
+    /// Moves the values no render will change into [`HostVars::base`], so that a copy of these
+    /// variables for each item of a loop costs the values left in `map`, not all of them.
+    ///
+    /// Left in `map`: a value that still holds a template, because binding the loop variable
+    /// can make it render, and a value written to a name that came from a managed host stays out
+    /// of it because it is data and no render touches it, whatever text it holds.
+    pub fn shared_by_items(mut self) -> Self {
+        let mut base = Map::clone(&self.base);
+        let mut kept = Map::new();
+        for (name, value) in std::mem::take(&mut self.map) {
+            if self.untrusted.contains(&name) || !crate::template::holds_template(&value) {
+                base.insert(name, value);
+            } else {
+                kept.insert(name, value);
+            }
+        }
+        self.map = kept;
+        self.base = Arc::new(base);
+        self
     }
 }
 
@@ -106,6 +141,7 @@ impl<'a> From<&'a HostVars> for Vars<'a> {
             facts: Some(&vars.facts),
             untrusted: Some(&vars.untrusted),
             untrusted_hosts: Some(&vars.untrusted_hosts),
+            base: Some(&vars.base),
         }
     }
 }

@@ -127,7 +127,11 @@ pub(super) fn start(
     // The layers in the order a read goes through them: the host's own map last.
     let mut task_vars: Map<String, Value> = (*vars.shared).clone();
     task_vars.extend(vars.facts.iter().map(|(k, v)| (k.clone(), v.clone())));
-    task_vars.extend(vars.map.iter().map(|(k, v)| (k.clone(), v.clone())));
+    task_vars.extend(
+        vars.own_variables()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone())),
+    );
     // Each other host's variables are asked for when a plugin reads them.
     task_vars.remove("hostvars");
     // Where the plugin looks for a `src`: the role's root, the directory of the task's file, then

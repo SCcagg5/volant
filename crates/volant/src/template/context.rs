@@ -49,6 +49,9 @@ pub struct Vars<'a> {
     /// Hosts that have at least one such name, for the `hostvars[other]` path. Coarser than the
     /// reference, which tags each string: reading any name of such a host taints the render.
     pub untrusted_hosts: Option<&'a BTreeSet<String>>,
+    /// Variables an item shares with the others of its loop, read after `map`: a name in `map`
+    /// answers first. A caller that owns its whole map leaves it empty.
+    pub base: Option<&'a Arc<Map<String, Value>>>,
 }
 
 impl<'a> From<&'a Map<String, Value>> for Vars<'a> {
@@ -60,6 +63,7 @@ impl<'a> From<&'a Map<String, Value>> for Vars<'a> {
             facts: None,
             untrusted: None,
             untrusted_hosts: None,
+            base: None,
         }
     }
 }
@@ -94,6 +98,7 @@ impl Memo {
 #[derive(Debug)]
 pub(super) struct Context {
     pub(super) vars: Map<String, Value>,
+    pub(super) base: Option<Arc<Map<String, Value>>>,
     pub(super) hostvars: Option<Arc<Map<String, Value>>>,
     pub(super) shared: Option<Arc<Map<String, Value>>>,
     pub(super) facts: Option<Arc<Map<String, Value>>>,
@@ -101,6 +106,16 @@ pub(super) struct Context {
     pub(super) untrusted_hosts: BTreeSet<String>,
     tainted: Tainted,
     memo: Memo,
+}
+
+impl Context {
+    /// The host's own variables as one map: the base shared by the items of a loop, then the
+    /// map over it.
+    pub(super) fn flat_vars(&self) -> Map<String, Value> {
+        let mut all = self.base.as_deref().cloned().unwrap_or_default();
+        all.extend(self.vars.iter().map(|(k, v)| (k.clone(), v.clone())));
+        all
+    }
 }
 
 impl Object for Context {
@@ -156,7 +171,10 @@ impl Object for Context {
             {
                 return Some(minijinja::Value::from_serialize(value));
             }
-            self.vars.get(key).map(minijinja::Value::from_serialize)
+            self.vars
+                .get(key)
+                .or_else(|| self.base.as_ref().and_then(|base| base.get(key)))
+                .map(minijinja::Value::from_serialize)
         })
     }
 
@@ -166,6 +184,11 @@ impl Object for Context {
             .keys()
             .map(|k| minijinja::Value::from(k.as_str()))
             .collect();
+        for key in self.base.iter().flat_map(|b| b.keys()) {
+            if !self.vars.contains_key(key) {
+                keys.push(minijinja::Value::from(key.as_str()));
+            }
+        }
         if self.hostvars.is_some() && !self.vars.contains_key("hostvars") {
             keys.push(minijinja::Value::from("hostvars"));
         }
@@ -224,6 +247,7 @@ pub(super) fn context_of(vars: Vars<'_>) -> (minijinja::Value, Tainted) {
     let tainted: Tainted = Arc::new(AtomicBool::new(false));
     let ctx = minijinja::Value::from_object(Context {
         vars: vars.map.clone(),
+        base: vars.base.cloned(),
         hostvars: vars.hostvars.cloned(),
         shared: vars.shared.cloned(),
         facts: vars.facts.cloned(),

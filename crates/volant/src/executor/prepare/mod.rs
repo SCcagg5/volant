@@ -67,6 +67,14 @@ pub(super) fn prepare(
         &step.origin,
         &playbook_dir,
     );
+    // Every item of a loop starts from these variables. They are shared rather than copied
+    // into each item, so that the memory of a loop does not grow with the size of what the host
+    // holds, a registered result for one.
+    let base = if task.loop_items.is_some() {
+        base.shared_by_items()
+    } else {
+        base
+    };
     // Whether the list this loop walks came from a managed host. A loop over a literal list the
     // playbook wrote binds author content; one over `{{ r.stdout_lines }}` binds data, and the
     // items of such a loop are never rendered again.

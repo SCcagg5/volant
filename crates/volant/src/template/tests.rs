@@ -227,6 +227,7 @@ fn hostvars_answers_alike_from_a_map_a_view_or_a_bare_map() {
                 facts: None,
                 untrusted: None,
                 untrusted_hosts: None,
+                base: None,
             };
             assert_eq!(t.render(text, vars).unwrap(), want, "{text}");
         }
@@ -254,6 +255,7 @@ fn the_context_hands_out_the_shared_view_and_ranks_inventory_wide_names() {
             facts: None,
             untrusted: None,
             untrusted_hosts: None,
+            base: None,
         });
         let first = ctx
             .get_attr("hostvars")
@@ -287,6 +289,7 @@ fn the_context_hands_out_the_shared_view_and_ranks_inventory_wide_names() {
             facts: None,
             untrusted: None,
             untrusted_hosts: None,
+            base: None,
         };
         assert_eq!(
             t.render("{{ groups['web'] }}", vars).unwrap(),
@@ -306,6 +309,7 @@ fn the_context_hands_out_the_shared_view_and_ranks_inventory_wide_names() {
             facts: None,
             untrusted: None,
             untrusted_hosts: None,
+            base: None,
         });
         let mut names: Vec<String> = ctx
             .try_iter()
@@ -353,6 +357,7 @@ fn extract_reads_hostvars_by_host_name_and_taints_like_a_bare_read() {
                 facts: None,
                 untrusted: None,
                 untrusted_hosts: None,
+                base: None,
             };
             assert_eq!(t.render(loop_text, v).unwrap(), want, "{server_group}");
         }
@@ -371,6 +376,7 @@ fn extract_reads_hostvars_by_host_name_and_taints_like_a_bare_read() {
                 facts: None,
                 untrusted: None,
                 untrusted_hosts,
+                base: None,
             };
             for text in [
                 "{{ hostvars['h2'].x }}",
@@ -430,6 +436,7 @@ fn conditions_need_a_boolean_and_never_evaluate_a_host_string() {
             facts: None,
             untrusted: Some(&registered),
             untrusted_hosts: Some(&hosts),
+            base: None,
         };
         for text in [
             "{{ s.stdout }}",
