@@ -285,11 +285,13 @@ async fn run_all(
     for (pb, steps) in playbooks.iter().zip(&compiled) {
         for (play, compiled) in pb.plays.iter().zip(steps) {
             // Resolved quietly: `play_hosts` prints the pattern warnings when the play starts.
-            let matched = inventory.resolve(&play.hosts).hosts.iter().any(|h| {
-                limit
-                    .as_ref()
-                    .is_none_or(|allowed| allowed.contains(&h.name))
-            });
+            // A template is not known yet, so it may match: refused as a pattern that does.
+            let matched = executor::is_templated(play)
+                || inventory.resolve(&play.hosts).hosts.iter().any(|h| {
+                    limit
+                        .as_ref()
+                        .is_none_or(|allowed| allowed.contains(&h.name))
+                });
             preflight::check_steps(compiled, terminal && matched)?;
         }
     }

@@ -107,6 +107,7 @@ pub(super) fn parse_play(yaml: &Yaml, dir: &Path) -> anyhow::Result<Play> {
         hosts,
         host_patterns,
         host_list,
+        nameless: false,
         tags: tags(yaml, "")?,
         gather_facts,
         gather_written: gather_written.is_some(),

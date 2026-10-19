@@ -24,7 +24,7 @@ use crate::compile::Compiled;
 use crate::playbook::Play;
 use crate::stats::Refusal;
 use crate::template::Templar;
-use crate::vars::{Scope, VarStore};
+use crate::vars::{Scope, VarStore, holds_template};
 
 /// What the render reads besides the play.
 pub(crate) struct Context<'a> {
@@ -102,11 +102,18 @@ pub(crate) fn render_hosts<'a>(
     }
     let mut patterns: Vec<String> = Vec::new();
     let mut shown = None;
+    let mut nameless = false;
     for written in &play.host_patterns {
-        let rendered = context
+        let (rendered, data) = context
             .templar
-            .render_value(&Value::String(written.clone()), view.vars())
+            .render_value_tainted(&Value::String(written.clone()), view.vars())
             .map_err(|err| undefined(&err.0))?;
+        // Text that is still a template after the passes the templar makes is variables that name
+        // each other in a ring, or too deep a chain: the reference refuses it. A result that came
+        // from a host is data and stays as it is.
+        if !data && holds_template(&rendered) {
+            return Err(undefined("Recursive loop detected in template."));
+        }
         match rendered {
             Value::String(text) => {
                 if text.is_empty() {
@@ -130,7 +137,7 @@ pub(crate) fn render_hosts<'a>(
             // `none` is the pattern `None`, which matches nothing and is warned about. The
             // reference names the play with nothing: its banner has no brackets.
             Value::Null => {
-                shown = Some(String::new());
+                nameless = true;
                 patterns.push("None".to_string());
             }
             other => return Err(not_a_string(&refuse, &other)),
@@ -140,6 +147,7 @@ pub(crate) fn render_hosts<'a>(
     play.hosts = patterns.join(",");
     if unnamed {
         play.name = shown.unwrap_or_else(|| play.hosts.clone());
+        play.nameless = nameless;
     }
     play.host_patterns = patterns;
     Ok(Cow::Owned(play))

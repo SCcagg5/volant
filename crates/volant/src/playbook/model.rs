@@ -27,6 +27,8 @@ pub struct Play {
     pub host_patterns: Vec<String>,
     /// Whether `hosts` was written as a list. A template inside a list renders to one string.
     pub host_list: bool,
+    /// Set when `hosts` rendered to `none`: the play has no name, and its banner has no brackets.
+    pub nameless: bool,
     /// The play's own tags. Every task under it inherits them for the selection; the listing
     /// prints them on the play's own line.
     pub tags: Vec<String>,

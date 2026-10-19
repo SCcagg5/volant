@@ -75,7 +75,7 @@ fn an_interruption_that_came_first_is_not_turned_into_a_reason() {
 #[case::string_is_one_pattern("\"{{ groups['web'] | join(',') }}\"", &[], false, Ok((&["w1,w2"][..], "w1,w2")))]
 #[case::list_is_many("\"{{ groups['web'] }}\"", &[], false, Ok((&["w1", "w2"][..], "['w1', 'w2']")))]
 #[case::empty_list("\"{{ [] }}\"", &[], false, Ok((&[][..], "[]")))]
-#[case::none("\"{{ none }}\"", &[], false, Ok((&["None"][..], "")))]
+#[case::none("\"{{ none }}\"", &[], false, Ok((&["None"][..], "None")))]
 #[case::extra_variable("\"{{ target }}\"", &[("target", "w2")], false, Ok((&["w2"][..], "w2")))]
 #[case::play_variable("\"{{ pick }}\"\n  vars: {pick: w1}", &[], false, Ok((&["w1"][..], "w1")))]
 #[case::extra_beats_play("\"{{ pick }}\"\n  vars: {pick: w1}", &[("pick", "w2")], false, Ok((&["w2"][..], "w2")))]
@@ -84,6 +84,7 @@ fn an_interruption_that_came_first_is_not_turned_into_a_reason() {
 #[case::hostvars_not_yet("\"{{ hostvars['w1'].x }}\"", &[], false, Err("name"))]
 #[case::hostvars_after_a_play("\"{{ hostvars['w1'].x }}\"", &[], true, Err("name"))]
 #[case::undefined("\"{{ nosuch }}\"", &[], false, Err("name"))]
+#[case::a_ring_of_variables("\"{{ a }}\"\n  vars: {a: '{{ b }}', b: '{{ a }}'}", &[], false, Err("Recursive loop"))]
 #[case::empty_string("\"{{ '' }}\"", &[], false, Err("cannot have empty values"))]
 #[case::integer("\"{{ 3 }}\"", &[], false, Err("not 'int'"))]
 #[case::mapping("\"{{ {'a': 1} }}\"", &[], false, Err("not 'dict'"))]
@@ -127,6 +128,8 @@ fn a_templated_hosts_renders_to_patterns(
             assert_eq!(got.host_patterns, patterns);
             assert_eq!(got.hosts, patterns.join(","));
             assert_eq!(got.name, name);
+            // The reference prints a play that `none` named with no name at all.
+            assert_eq!(got.nameless, hosts.contains("none"), "{hosts}");
         }
         Err(needle) => {
             let err = format!("{:#}", got.expect_err("the hosts are refused"));
