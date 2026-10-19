@@ -229,3 +229,5 @@ volant runtime remove [ID | --all]
 ## Not there yet
 
 Every `ansible-playbook` option is accepted. `--scp-extra-args` and `--sftp-extra-args` have no effect, because files move over the agent link. The [parity page](/reference/parity/#ansible-playbook-option) lists the rest.
+
+`volant` has two subcommands, `playbook` and `runtime`. The other Ansible tools have no counterpart yet: `ansible` for ad-hoc commands, `ansible-inventory`, `ansible-vault`, `ansible-doc`, `ansible-config` and `ansible-galaxy`. There is no `volant check` and no `volant lint`. Run those tools from ansible-core, or use the listing options of `volant playbook`.

@@ -71,7 +71,14 @@ The file's own trailing newline survives the render. [Action plugins](/reference
 ## Not there yet
 
 - A value under `!unsafe` is data and is never templated. A `!vault` value is decrypted; see [Vault](/variables/vault/).
-- The `inventory_hostnames` and `varnames` lookups are not supported yet.
+- A variable that reads another templated variable through a filter or an operator gives wrong data. With `b: "{{ c }}"` and `s: "{{ b | int + 1 }}"`, `s` is not `c + 1` ([issue 466](https://github.com/lorica-labs/volant/issues/466), [pull request 483](https://github.com/lorica-labs/volant/pull/483)).
+- A `set_fact` in a loop whose items read the result of the item before keeps only the last item.
+- A statement block `{% ... %}` in a variable or a task argument is not rendered: the value stays text, and `trim_blocks` does not apply to it. A template file for the `template` module is not affected.
+- Python methods that change a value or that MiniJinja lacks fail with `method <name> is not available yet`: `append`, `extend`, `insert`, `pop`, `remove`, `sort`, `reverse`, `update`, `setdefault`, `copy`, `index`, `rsplit`, `partition`, `zfill`, `ljust`, `swapcase`, `removeprefix`, `encode` and `dict.fromkeys`. So does `%` formatting of a string, as in `'%s' % x`.
+- `dict()` of a list of pairs, `now()`, `lipsum()`, `cycler()` and `undef()` fail with an unknown function or an invalid operation. `dict(a=1)` works ([issue 520](https://github.com/lorica-labs/volant/issues/520)).
+- These filter arguments are not supported: the precision and method of `round`, `start` and `attribute` of `sum`, `attribute` of `min` and `max`, `count` of `replace`, `base` of `int`, `sort_keys` of `to_json`, `encoding` of `b64encode`, and `strict` and `version_type` of the `version` test.
+- `regex_findall` with a group returns the whole match instead of the group ([issue 476](https://github.com/lorica-labs/volant/issues/476), [pull request 485](https://github.com/lorica-labs/volant/pull/485)).
+- `password_hash`, `json_query` and `ipaddr` need the Python packages `passlib`, `jmespath` and `netaddr`. The managed runtime does not carry them. See [the managed runtime](/reference/runtime/).
 - In a template file, `template_host`, `template_uid`, `template_run_date` and `template_mtime` are not set, unlike `template_path`, `template_fullpath` and `ansible_managed`.
 - In a template file, `{% include %}` and `{% import %}` fail: nothing loads a second file during a render.
 - The six delimiter options (`variable_start_string` and its five relatives) and an `output_encoding` other than UTF-8 are not supported yet.

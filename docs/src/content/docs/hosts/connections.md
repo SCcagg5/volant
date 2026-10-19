@@ -14,9 +14,9 @@ Volant reaches a managed host, puts a small static agent there, and talks to it 
 | `ssh` | Runs the OpenSSH client from your `PATH`. Volant builds the command line itself, without a wrapper and without a Rust SSH library, so your `~/.ssh/config` applies. |
 | `local` | Runs the agent as a child process on the controller, with no network. |
 
-Ansible's other connection plugins (`paramiko_ssh`, `winrm`, `psrp`) and a collection's are not supported yet: that host is reported unreachable, with the transport named, and the rest of the run continues. A value that names no plugin at all fails the task with `the connection plugin '<name>' was not found`, as Ansible does. That applies whether the value is the host's own connection, a `delegate_to` target's, or that of the host running a `run_once` task.
+Ansible's other connection plugins (`paramiko_ssh`, `winrm`, `psrp`) and a collection's are not supported yet: that host is reported unreachable, with the transport named, and the rest of the run continues. A value that names no plugin at all fails the task with `the connection plugin '<name>' was not found`, as Ansible does. A `connection` keyword that names a collection's plugin, such as `docker`, fails the task the same way. That applies whether the value is the host's own connection, a `delegate_to` target's, or that of the host running a `run_once` task.
 
-Only key files and keys held by an ssh-agent work. `ssh` runs with `BatchMode=yes` and never prompts, so a host that would ask for a password or a passphrase is reported unreachable instead of hanging the run. `-k` and `ansible_password` are not implemented, because OpenSSH cannot read a password from its standard input without `sshpass`.
+Keys, key files and an ssh-agent work without a prompt. `ssh` runs with `BatchMode=yes`, so a host that would ask for a password or a passphrase is reported unreachable instead of hanging the run, unless you pass the password with `-k` or `--connection-password-file`. The `ansible_password` variable is not read yet ([issue 464](https://github.com/lorica-labs/volant/issues/464), [pull request 469](https://github.com/lorica-labs/volant/pull/469)).
 
 ## Host variables
 
@@ -130,8 +130,7 @@ ulimit -Sn; ulimit -Hn
 
 ## Not there yet
 
-- The `ansible_password` variable. `-k` and `--connection-password-file` work.
-- `connection` as a play, block or task keyword.
+- The `ansible_password` variable, and the legacy `ansible_ssh_host`, `ansible_ssh_port` and `ansible_ssh_user`. Volant ignores them without a message. `-k` and `--connection-password-file` work ([issue 464](https://github.com/lorica-labs/volant/issues/464), [pull request 469](https://github.com/lorica-labs/volant/pull/469)).
 - Windows and network devices.
 
 [Keywords](/reference/keywords/) is the full list, generated from the tables the engine reads.

@@ -5,7 +5,7 @@ description: Check an existing Ansible project against this release in a few sec
 
 import { Steps, Aside } from '@astrojs/starlight/components';
 
-Volant loads the whole ansible-core 2.19 grammar, so your playbook parses here as it parses under Ansible. Whatever this release does not support yet is named before the first connection, and the run stops there. You find out in seconds, and nothing half-runs.
+Volant loads the whole ansible-core 2.19 grammar, so your playbook parses here as it parses under Ansible. Most of what this release does not support yet is named before the first connection, and the run stops there. You find out in seconds. The [known gaps](#known-gaps) below are the exceptions: a run can ignore a setting or give a wrong result there without an error.
 
 ## Check a project
 
@@ -26,9 +26,9 @@ Volant loads the whole ansible-core 2.19 grammar, so your playbook parses here a
    volant playbook -i inventory.ini site.yml --limit test1
    ```
 
-   Anything this release cannot execute stops the run before it connects. The message names the module, the keyword or the value, and the run exits with code 4.
+   Most of what this release cannot execute stops the run before it connects. The message names the module, the keyword or the value, and the run exits with code 4.
 
-3. Fix or wait. Everything not supported yet is listed in [Keywords](/reference/keywords/) or [Modules](/reference/modules/), and most have a workaround below.
+3. Fix or wait. What is not supported yet is listed in [Keywords](/reference/keywords/), [Modules](/reference/modules/) and the [known gaps](#known-gaps) below, and most have a workaround.
 
 </Steps>
 
@@ -40,28 +40,52 @@ A file that only a dynamic `include_tasks` or `include_role` names is read when 
 
 | Area | Runs today | Not yet |
 |---|---|---|
-| Plays | `pre_tasks`, roles, `tasks`, `post_tasks`, handlers, `serial`, `strategy` (`linear`, `free`, `host_pinned`, `debug`), `order`, `throttle`, `timeout`, `debugger`, `any_errors_fatal`, `max_fail_percentage`, `ignore_errors`, `ignore_unreachable` | |
-| Tasks | `when`, `loop`, `with_items`, `with_first_found`, `with_fileglob`, `register`, `until`, `retries`, `changed_when`, `failed_when`, `ignore_errors`, `ignore_unreachable`, `any_errors_fatal`, `no_log`, `environment`, `timeout`, `tags`, `async`, `poll`, `module_defaults` | other `with_*` lookups |
+| Plays | `pre_tasks`, roles, `tasks`, `post_tasks`, handlers, `serial`, `strategy` (`linear`, `free`, `host_pinned`, `debug`), `order`, `throttle`, `timeout`, `debugger`, `any_errors_fatal`, `max_fail_percentage`, `ignore_errors`, `ignore_unreachable` | `hosts:` written as a template |
+| Tasks | `when`, `loop`, the `with_*` forms, `register`, `until`, `retries`, `changed_when`, `failed_when`, `ignore_errors`, `ignore_unreachable`, `any_errors_fatal`, `no_log`, `environment`, `timeout`, `tags`, `async`, `poll`, `module_defaults` | `with_flattened`, `with_cartesian`, `with_filetree` |
 | Blocks | `block`, `rescue`, `always` | |
-| Reuse | roles and dependencies, `import_tasks`, `import_role`, `import_playbook`, `include_tasks`, `include_role`, `include_vars` | `include_vars: dir` |
+| Reuse | roles and dependencies, `import_tasks`, `import_role`, `import_playbook`, `include_tasks`, `include_role`, `include_vars` | `include_vars: dir`, `when` and `tags` on `import_playbook` |
 | Delegation | `delegate_to`, `delegate_facts`, `local_action`, `run_once` | |
-| Modules | `command`, `shell`, `raw`, controller modules, `copy`, `dnf`, `fetch`, `package`, `reboot`, `service`, `template`, `unarchive`, most ansible-core Python modules, modules from installed collections | a few modules backed by an action plugin: `uri`, `script` and others, and a collection's own action plugins |
-| Inventories | INI, YAML and TOML files, directories, scripts, `constructed`, `generator` and collection plugins, several `-i`, `group_vars`, `host_vars`, the `jsonfile` fact cache | none left |
-| Connections | `ssh` with keys, an ssh-agent or a password (`-k`, needs OpenSSH 8.4 or later), `local` | the `ansible_password` variable, Windows, network devices |
+| Modules | `command`, `shell`, `raw`, controller modules, `copy`, `dnf`, `fetch`, `package`, `reboot`, `service`, `template`, `unarchive`, `uri`, `script`, most ansible-core Python modules, modules from installed collections and their action plugins | `yum`, a collection's action plugin that needs Windows or a network device, custom action plugins |
+| Inventories | INI, YAML and TOML files, directories, scripts, `constructed`, `generator` and collection plugins, several `-i`, `group_vars`, `host_vars`, the `jsonfile` fact cache | `hostvars` for an implicit `localhost` |
+| Connections | `ssh` with keys, an ssh-agent or a password (`-k`, needs OpenSSH 8.4 or later), `local` | the `ansible_password` variable, other connection plugins, Windows, network devices |
 | Escalation | `become` through `sudo` or `su`, with or without a password | `doas` and other methods |
-| Templating | Jinja2 with the common Ansible filters, tests and lookups | `!unsafe`, some filters such as `hash` or `password_hash`, filters and lookups from collections |
+| Templating | Jinja2 with the common Ansible filters, tests and lookups, `!unsafe`, filters and lookups from collections | some filter arguments, Python methods that change a value, statement blocks in a variable |
 | Run modes | normal runs, [`--check` and `--diff`](/playbooks/check-and-diff/), [vault](/variables/vault/), `--start-at-task`, `--step`, the four listing commands | none left |
 
 ## Common blockers and what to do
 
 | Not supported yet | Why | What you can do today |
 |---|---|---|
-| `uri`, `script` | These modules rely on an action plugin that runs on the controller first, and Volant does not have theirs yet. | Use a module without an action plugin, such as `get_url` or `lineinfile`, or `command` and `shell`. |
-| A collection module its collection runs through an action plugin, such as `ansible.posix.synchronize` | Volant runs a collection's modules, not its action plugins. | Keep the play under `ansible-playbook` for now. |
+| `ansible.posix.synchronize` over ssh | The collection's action plugin fails in the Python helper on an ssh connection ([issue 491](https://github.com/lorica-labs/volant/issues/491), [pull request 495](https://github.com/lorica-labs/volant/pull/495)). | Use a local connection, or keep that play under `ansible-playbook`. |
+| An action plugin of your own, in `action_plugins/` | Volant runs the action plugins of ansible-core and of installed collections, not yours. | Write a module, or keep the play under `ansible-playbook`. |
 | A collection that is not installed | Volant does not install one during a run. It asks the controller's ansible-core what is installed, before the first connection. | Run `volant runtime install --collections NAME`, or the `ansible-galaxy collection install` command the error names. See [The managed runtime](/reference/runtime/#collections) and [Modules from collections](/internals/python/#modules-from-collections). |
 | No Python with ansible-core on the controller | Volant installs its own on first need, with `curl` or `wget` and `tar`. | Nothing, or `volant runtime install` ahead of time. Without a network, use `volant runtime pack` and `install --from`. |
-| `with_dict` and the other `with_*` forms | Only `with_items`, `with_first_found` and `with_fileglob` have a loop. | Rewrite with `loop` and a filter, such as `loop: "{{ users \| dict2items }}"`. |
+| `with_flattened`, `with_cartesian`, `with_filetree` | Volant stops the playbook when it loads, with `conflicting action statements` ([issue 479](https://github.com/lorica-labs/volant/issues/479), [pull request 484](https://github.com/lorica-labs/volant/pull/484)). | Rewrite with `loop` and a filter, such as `loop: "{{ a \| product(b) \| list }}"`, or use the `find` module. |
 | `apt`, `user`, `group` or `file` under `--check` or `--diff` on a host with no Python | These modules answer through Python on the host when the run asks for a check or a diff. | Install Python on the host, or run the play without `--check` and `--diff`. |
-| `gather_subset` | Not supported yet. | Remove it: the play gets every fact. |
+
+## Known gaps
+
+These differ from `ansible-playbook` without a message before the run, or with a message that names something else. Each row says what happens. A number links to the issue or the open pull request.
+
+| What | What happens |
+|---|---|
+| A variable that reads another templated variable through a filter or an operator | Wrong data: `b: "{{ c }}"` then `s: "{{ b \| int + 1 }}"` does not give `c + 1` ([issue 466](https://github.com/lorica-labs/volant/issues/466), [pull request 483](https://github.com/lorica-labs/volant/pull/483)). |
+| `set_fact` in a loop that reads its own result: `acc: "{{ acc + [item] }}"` | Only the last item stays. No error. |
+| `hosts:` written as a template | The pattern is not rendered. The run prints `Could not match supplied host pattern`, runs nothing and exits 0. |
+| `when` and `tags` on `import_playbook` | Ignored. The imported plays always run, and `--tags` and `--skip-tags` do not select them. |
+| A statement block `{% ... %}` in a variable or a task argument | The value stays text. A template file is not affected. |
+| Python methods such as `append`, `update`, `index`, `rsplit`, and `dict()` of a list of pairs | The task fails with `method <name> is not available yet` or `invalid operation` ([issue 520](https://github.com/lorica-labs/volant/issues/520) for `dict()`). |
+| `callback_plugins/`, `vars_plugins/`, `stdout_callback`, `callbacks_enabled`, `result_format` | Ignored. The output is the default one. |
+| The `ansible_password` variable and the legacy `ansible_ssh_host`, `ansible_ssh_port`, `ansible_ssh_user` | Ignored. `-k` and `--connection-password-file` work ([issue 464](https://github.com/lorica-labs/volant/issues/464), [pull request 469](https://github.com/lorica-labs/volant/pull/469)). |
+| `include_vars` with `dir` and its related options | Refused when the playbook loads ([issue 477](https://github.com/lorica-labs/volant/issues/477), [pull request 480](https://github.com/lorica-labs/volant/pull/480)). |
+| `template` with custom delimiters, a `#jinja2:` line or `output_encoding` | Fails when the task runs ([issue 492](https://github.com/lorica-labs/volant/issues/492), [pull request 497](https://github.com/lorica-labs/volant/pull/497)). |
+| `no_log`, `become`, `run_once` and other boolean or integer keywords written as a template | Refused when the playbook loads ([issue 472](https://github.com/lorica-labs/volant/issues/472), [pull request 473](https://github.com/lorica-labs/volant/pull/473)). |
+| `yum` in any spelling | Refused when the playbook loads. `ansible-playbook` runs it as `dnf` ([issue 459](https://github.com/lorica-labs/volant/issues/459), [pull request 462](https://github.com/lorica-labs/volant/pull/462)). |
+| `command` and `shell` with `creates=`, `removes=` or `chdir=` written in the command line | The text goes to the program and the guard is ignored ([issue 458](https://github.com/lorica-labs/volant/issues/458), [pull request 463](https://github.com/lorica-labs/volant/pull/463)). |
+| A YAML merge key `<<` | Not merged: the key stays in the mapping ([issue 465](https://github.com/lorica-labs/volant/issues/465), [pull request 481](https://github.com/lorica-labs/volant/pull/481)). |
+| `hostvars['localhost']` when the inventory has no `localhost` | Missing ([issue 487](https://github.com/lorica-labs/volant/issues/487), [pull request 489](https://github.com/lorica-labs/volant/pull/489)). |
+| `volant check`, `inventory`, `vault`, `doc`, `config`, `galaxy` and ad-hoc commands | They do not exist. `volant` has `playbook` and `runtime`. |
+
+[Templating](/variables/templating/#not-there-yet) lists the filters and arguments that fail. The [parity page](/reference/parity/) marks a filter `partial` when one of its arguments fails.
 
 If a playbook behaves differently under Volant and `ansible-playbook` without being reported as unsupported, that is a bug. Please [open a compatibility report](https://github.com/lorica-labs/volant/issues/new?template=compat.yml) with a minimal playbook.

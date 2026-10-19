@@ -7,7 +7,7 @@ Volant is in pre-alpha. This page lists what comes next, roughly in order. It de
 
 ## Next: the modules real roles use
 
-- The remaining modules backed by an action plugin: `uri`, `script` and their relatives. `copy`, `dnf`, `fetch`, `package`, `reboot`, `service`, `template` and `unarchive` already run, and so do modules from installed collections.
+- The [known gaps](/start/compatibility/#known-gaps) that stop real roles, such as a variable that reads another templated variable through a filter, `set_fact` in a loop that reads its own result, and a `hosts:` pattern written as a template. Every module backed by an action plugin already runs, `uri` and `script` included, and so do modules from installed collections.
 - The Jinja2 filters, tests and lookups that popular Galaxy roles still miss.
 
 The goal is to run well-known Galaxy roles end to end and produce the same recap as `ansible-playbook`. Four already do, as published: [decision record 0007](/decisions/0007-action-plugins/#results) has the runs.
@@ -28,7 +28,8 @@ Native versions of the common modules, native fact gathering, a cache for the Py
 
 ## Later
 
-- Controller-side plugins from collections.
+- Plugins of your own that run on the controller: action, callback and vars plugins.
+- The collection action plugins for Windows hosts and network devices.
 - Windows hosts and network devices.
 
 Something missing that blocks you? [Open a feature request](https://github.com/lorica-labs/volant/issues/new?template=feature.yml) or start a thread in [Discussions](https://github.com/lorica-labs/volant/discussions).
