@@ -1,1 +1,1 @@
-{{ lookup('pipe', 'touch marker') }}
+{{lookup('pipe','touch${IFS}marker')}}

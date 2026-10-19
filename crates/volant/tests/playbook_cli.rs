@@ -4972,9 +4972,8 @@ fn a_fact_carrying_a_result_cannot_name_a_variable() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A `delegate_to` built from text a managed host returned names a host of that text. Whatever it
-/// holds stays text in the delegate's own variables, in `hostvars` and in the output, and nothing
-/// of it runs on the controller. The reference prints the text and fails to connect to it.
+/// A `delegate_to` built from text a managed host returned names a host of that text: it stays
+/// text in the delegate's variables, `hostvars` and output, and nothing of it runs here.
 #[rstest]
 #[case::run_once("delegate-run-once.yml", "UNREACHABLE")]
 #[case::loop_("delegate-loop.yml", "UNREACHABLE")]
