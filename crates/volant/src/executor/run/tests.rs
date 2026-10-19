@@ -5343,9 +5343,9 @@ fn a_name_from_a_hosts_text_is_data_whatever_it_holds() {
     }
 }
 
-/// What an `include_vars` writes keeps the trust of what it is made from: a value merged over a
-/// variable that came from a managed host is data, as a `set_fact` built from one is, and a
-/// value that replaces a variable takes the status of the new value alone.
+/// What an `include_vars` writes keeps the trust of what it is made from: a value merged over
+/// host data is data too, and a value that replaces a variable takes the new value's status.
+#[cfg(unix)]
 #[tokio::test]
 #[expect(
     clippy::too_many_lines,

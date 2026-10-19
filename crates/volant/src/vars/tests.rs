@@ -1511,9 +1511,8 @@ fn the_variables_items_share_keep_templates_apart_and_stay_readable() {
     );
 }
 
-/// What a directory read gives, in order: the files as they sit under the directory, and the
-/// variables. The tree holds uppercase and lowercase names, hidden files and directories, a
-/// directory whose name continues another's (`sub` and `sub-b`), a nested one, and a text file.
+/// What a directory read gives, in order: the files and the variables. The tree holds mixed-case
+/// names, hidden entries, `sub` and `sub-b`, a nested directory and a text file.
 #[rstest::rstest]
 #[case::directories_by_path_then_files_by_name(0.0, None, &[], &["yaml", "yml", "json"], true,
     &["A.yml", "a.yaml", "b.json", ".hid/h.yml", "sub/s.yml", "sub-b/x.yml", "sub/deep/d.yml"][..])]
@@ -1593,9 +1592,8 @@ fn a_later_file_replaces_whole_values() {
     assert_eq!(read.files.len(), 3);
 }
 
-/// What goes wrong in a directory, as the reference words it: a failure the module answers keeps
-/// the variables of the directories before the failing one, and a failure the action raises
-/// leaves no result.
+/// What goes wrong in a directory, as the reference words it: a returned failure keeps the
+/// variables read before it, a raised one leaves no result.
 #[rstest::rstest]
 #[case::extension_without_the_skip(&["a.yml", "sub/b.yml", "sub/c.txt"], "sub/c.txt does not have a valid extension: yaml, yml, json", &["a.yml", "sub/b.yml"], json!({"a": 1}))]
 #[case::not_a_mapping(&["a.yml", "sub/list.yml"], "sub/list.yml must be stored as a dictionary/hash", &["a.yml"], json!({"a": 1}))]
