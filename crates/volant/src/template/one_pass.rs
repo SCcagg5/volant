@@ -6,6 +6,7 @@ use std::sync::atomic::Ordering;
 use minijinja::machinery::WhitespaceConfig;
 use serde_json::Value;
 
+use super::context::take_failure;
 use super::vm::{convert_error, render_str, single_expression};
 use super::{Templar, TemplateError, Vars, context_of};
 
@@ -30,9 +31,10 @@ impl Templar {
             keep_trailing_newline: true,
             ..WhitespaceConfig::default()
         };
-        render_str(self, "<string>", text, ctx, ws)
+        let rendered = render_str(self, "<string>", text, ctx, ws)
             .map(Value::String)
-            .map_err(convert_error)
+            .map_err(convert_error);
+        take_failure(ctx).map_or(rendered, Err)
     }
 
     /// `render_one_pass`, saying as well whether the pass read a name that is data: a value from
@@ -43,7 +45,7 @@ impl Templar {
         text: &str,
         vars: impl Into<Vars<'a>>,
     ) -> Result<(Value, bool), TemplateError> {
-        let (ctx, tainted) = context_of(vars.into());
+        let (ctx, tainted) = context_of(self, vars.into());
         let value = self.render_once(text, &ctx)?;
         Ok((value, tainted.load(Ordering::Relaxed)))
     }

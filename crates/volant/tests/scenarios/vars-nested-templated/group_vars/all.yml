@@ -1,0 +1,6 @@
+gc: 7
+gb: "{{ gc }}"
+gs: "{{ gb | int + 1 }}"
+ghost: example.org
+gurl: "http://{{ ghost }}:8080/x"
+gcond: "{{ gb | int > 5 }}"
