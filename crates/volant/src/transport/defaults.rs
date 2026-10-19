@@ -75,6 +75,14 @@ impl BecomeMethod {
             _ => None,
         }
     }
+
+    /// The name a playbook gives it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Sudo => "sudo",
+            Self::Su => "su",
+        }
+    }
 }
 
 /// Privilege escalation for one link: run the agent as `user` through `sudo` or `su`.

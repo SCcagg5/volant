@@ -401,6 +401,7 @@ impl Templar {
                 facts: vars.facts,
                 untrusted: Some(&untrusted),
                 untrusted_hosts: vars.untrusted_hosts,
+                base: vars.base,
             });
             let mut next = current.clone();
             let mut changed = false;

@@ -37,7 +37,6 @@ mod ssh_pub_keys;
 mod user;
 
 use std::collections::BTreeMap;
-use std::time::Instant;
 
 use std::path::{Path, PathBuf};
 
@@ -58,7 +57,7 @@ pub const NATIVE: Native = Native {
     enabled: true,
     run: |args, context, cancelled| {
         let clock = Clock {
-            deadline: context.timeout.map(|timeout| Instant::now() + timeout),
+            deadline: context.deadline(),
             cancelled,
         };
         match answer(args, &Root::real(), context, agent_env(), clock) {

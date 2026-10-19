@@ -349,7 +349,7 @@ pub(crate) fn execute(
     };
     let cancelled: &dyn Fn() -> bool = &latch;
 
-    let deadline = timeout.map(|t| Instant::now() + t);
+    let deadline = ctx.deadline();
     let status = loop {
         let left = match deadline {
             // `checked_duration_since` gives None once the deadline is behind us, which is the
