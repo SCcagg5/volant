@@ -79,7 +79,22 @@ fn remote_tmp(dir: &Path) -> PathBuf {
 }
 
 fn cache_dir(dir: &Path) -> PathBuf {
-    remote_tmp(dir).join(format!("volant-agent-{}", env!("CARGO_PKG_VERSION")))
+    remote_tmp(dir).join(format!(
+        "volant-agent-{}-{}",
+        env!("CARGO_PKG_VERSION"),
+        uid()
+    ))
+}
+
+/// The numeric id of the account these tests log in as, which names its agent directory.
+fn uid() -> u32 {
+    let out = Command::new("id").arg("-u").output().unwrap();
+    assert!(out.status.success(), "'id -u' failed");
+    String::from_utf8(out.stdout)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap()
 }
 
 /// Every host gets `-F /dev/null`, so a developer's own `~/.ssh/config` cannot reroute a local
@@ -303,6 +318,69 @@ fn ssh_an_outdated_cached_agent_is_replaced() {
             "{name}: the script must have been replaced by the real agent"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// An agent directory another account made first, holding a program that answers the probe, is
+/// never run and is named; once it is gone, the run works and makes a private directory.
+#[test]
+#[ignore = "needs sshd on localhost and passwordless sudo, run through just ssh-test"]
+fn ssh_an_agent_directory_made_by_another_account_is_not_run() {
+    assert_passwordless_sudo("the test hands a directory to another account");
+    let dir = tmp("planted");
+    let inv = inventory(&dir, &[("box", "")]);
+    std::fs::create_dir_all(remote_tmp(&dir)).unwrap();
+    std::fs::set_permissions(remote_tmp(&dir), std::fs::Permissions::from_mode(0o1777)).unwrap();
+    let triple = volant::transport::triple_for(std::env::consts::ARCH)
+        .expect("this architecture has an agent triple");
+    let shipped = Path::new(&std::env::var("VOLANT_AGENT_DIR").expect("VOLANT_AGENT_DIR is set"))
+        .join(format!("volant-agent-{triple}"));
+    let expected = Command::new(shipped)
+        .args(["--version", "--build-id"])
+        .output()
+        .unwrap();
+    let expected = String::from_utf8(expected.stdout).unwrap();
+    let marker = dir.join("marker");
+    let planted = cache_dir(&dir);
+    write_executable(
+        &planted.join("volant-agent"),
+        &format!(
+            "#!/bin/sh\necho '{}'\necho ran >> '{}'\n",
+            expected.trim(),
+            marker.display()
+        ),
+    );
+    let _guard = AsRoot(planted.clone());
+    as_root(&["chown", "-R", "4242", &planted.display().to_string()]);
+
+    let out = volant(&["playbook", "-i", &inv, &fixture("ssh/e2e.yml")]);
+    let text = both(&out);
+    assert_eq!(out.status.code(), Some(4), "{text}");
+    assert!(text.contains("UNREACHABLE!"), "{text}");
+    assert!(text.contains(&planted.display().to_string()), "{text}");
+    assert!(text.contains("owner uid 4242"), "{text}");
+    assert!(!marker.exists(), "the planted program ran: {text}");
+
+    as_root(&["rm", "-rf", &planted.display().to_string()]);
+    let out = volant(&["playbook", "-i", &inv, &fixture("ssh/e2e.yml")]);
+    assert_eq!(out.status.code(), Some(0), "{}", both(&out));
+    assert_eq!(
+        std::fs::metadata(&planted).unwrap().permissions().mode() & 0o077,
+        0,
+        "the directory this run made is private"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Removes a path another account owns, however the test ends.
+struct AsRoot(PathBuf);
+
+impl Drop for AsRoot {
+    fn drop(&mut self) {
+        let _ = Command::new("sudo")
+            .args(["-n", "rm", "-rf"])
+            .arg(&self.0)
+            .output();
     }
 }
 
@@ -561,6 +639,10 @@ fn ssh_become_over_ssh() {
     // The fixture targets `localhost`, and an inventory that defines that name wins over the
     // implicit local one: the run goes over `ssh` to 127.0.0.1 like every other test here.
     let inv = inventory(&dir, &[("localhost", "")]);
+    // Both accounts keep an agent directory of their own in `remote_tmp`. A `remote_tmp` that
+    // does not exist yet is made by the first account that needs it, root here, and is then
+    // closed to the other, so this test makes it first, as it is on a host that has been set up.
+    std::fs::create_dir_all(remote_tmp(&dir)).unwrap();
     let out = volant(&["playbook", "-i", &inv, &fixture("become.yml")]);
     let text = both(&out);
     assert_eq!(out.status.code(), Some(0), "{text}");
@@ -713,7 +795,13 @@ fn ssh_delegate_to_another_inventory_name() {
     let shown = both(&out);
     assert_eq!(out.status.code(), Some(0), "{shown}");
     assert!(shown.contains("changed: [a -> b]"), "{shown}");
-    let cached = |root: &Path| root.join(format!("volant-agent-{}", env!("CARGO_PKG_VERSION")));
+    let cached = |root: &Path| {
+        root.join(format!(
+            "volant-agent-{}-{}",
+            env!("CARGO_PKG_VERSION"),
+            uid()
+        ))
+    };
     assert!(
         cached(&b_tmp).join("volant-agent").exists(),
         "the delegate's own directory holds the agent: {shown}"

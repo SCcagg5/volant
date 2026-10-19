@@ -3,6 +3,7 @@
 //! stdout carry protocol frames: the agent itself for `local`, an `ssh` running the agent
 //! remotely for `ssh`.
 
+mod agent_dir;
 mod bootstrap;
 mod choose;
 mod control;
