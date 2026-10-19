@@ -543,3 +543,24 @@ fn the_world_writable_warning_is_the_references() {
          https://docs.ansible.com/ansible/devel/reference_appendices/config.html#cfg-in-world-writable-dir"
     );
 }
+
+/// The mode of a directory decides, and one that cannot be read counts as world-writable, so it
+/// is no source.
+#[cfg(unix)]
+#[rstest::rstest]
+#[case::world_writable(0o777, true)]
+#[case::sticky(0o1777, true)]
+#[case::world_bit_alone(0o702, true)]
+#[case::group_writable(0o775, false)]
+#[case::plain(0o755, false)]
+fn the_mode_of_a_directory_decides_whether_others_can_write_it(
+    #[case] mode: u32,
+    #[case] expected: bool,
+) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(mode)).unwrap();
+    assert_eq!(is_world_writable(dir.path()), expected);
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(is_world_writable(&dir.path().join("gone")));
+}

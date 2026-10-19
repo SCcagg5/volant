@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 /// The mode bit "write for others". The reference tests only this bit: the sticky bit and the
 /// owner of the directory change nothing.
+#[cfg(unix)]
 const WORLD_WRITABLE: u32 = 0o002;
 
 /// The outcome of the search.
@@ -67,9 +68,19 @@ pub(super) fn find(
     }
 }
 
-fn is_world_writable(dir: &Path) -> bool {
+/// Whether `dir` has the world-write bit. A directory that cannot be read counts as writable:
+/// it is then no source, which is what the reference does when it cannot read the directory.
+#[cfg(unix)]
+pub(crate) fn is_world_writable(dir: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt as _;
-    std::fs::metadata(dir).is_ok_and(|meta| meta.permissions().mode() & WORLD_WRITABLE != 0)
+    std::fs::metadata(dir).map_or(true, |meta| meta.permissions().mode() & WORLD_WRITABLE != 0)
+}
+
+/// A platform without Unix mode bits has no "writable by others" bit to test, so no directory
+/// is skipped there. Its access lists are not part of the reference's rule either.
+#[cfg(not(unix))]
+pub(crate) fn is_world_writable(_dir: &Path) -> bool {
+    false
 }
 
 /// The warning line of the reference, without the `[WARNING]: ` prefix. The address is the

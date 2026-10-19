@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime};
 
 use serde_json::{Map, Value};
 
-use super::key::{configs, expanded, key_from, plugin_files};
+use super::key::{CONFIG_BOUND, configs, expanded, key_from, plugin_files};
 use super::sweep::sweep;
 use super::*;
 use crate::agent::BlobFrame;
@@ -629,7 +629,7 @@ fn the_ansible_config_is_read_and_expanded_for_the_key() {
         let root = scratch();
         let cfg = root.path().join("ansible.cfg");
         let key_now = || {
-            let found = configs(Some(root.path().as_os_str()), None);
+            let found = configs(Some(root.path().as_os_str()), None, Path::new("."));
             key_from(
                 None,
                 &interpreter(),
@@ -645,13 +645,17 @@ fn the_ansible_config_is_read_and_expanded_for_the_key() {
         fs::write(&cfg, "[defaults]\ncollections_path = ./colls-next\n").unwrap();
         assert_ne!(key_now(), before);
         // A file named directly, and one that is not there, are both what they are.
-        assert_eq!(configs(Some(cfg.as_os_str()), None)[0].0, cfg);
+        assert_eq!(
+            configs(Some(cfg.as_os_str()), None, Path::new("."))[0].0,
+            cfg
+        );
         let home = root.path().join("home");
         fs::create_dir_all(&home).unwrap();
         fs::write(home.join(".ansible.cfg"), "[defaults]\n").unwrap();
         let fell_through = configs(
             Some(root.path().join("absent.cfg").as_os_str()),
             Some(&home),
+            Path::new("."),
         );
         assert!(
             fell_through
@@ -684,7 +688,92 @@ fn the_ansible_config_is_read_and_expanded_for_the_key() {
     ",
         )
         .unwrap();
-        let found = configs(Some("~/proj/ansible.cfg".as_ref()), Some(root.path()));
+        let found = configs(
+            Some("~/proj/ansible.cfg".as_ref()),
+            Some(root.path()),
+            Path::new("."),
+        );
         assert!(found.iter().any(|(path, _)| *path == cfg), "{found:?}");
     }
+}
+
+/// The key reads the working directory's `ansible.cfg` only when ansible-core would: a
+/// world-writable directory is skipped, so what a stranger plants there adds nothing to it. A
+/// small regular file in any other directory goes in whole, as before.
+#[cfg(unix)]
+#[test]
+fn the_key_skips_ansible_cfg_in_a_world_writable_directory() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let root = scratch();
+    let cwd = root.path().join("cwd");
+    fs::create_dir(&cwd).unwrap();
+    fs::write(cwd.join("ansible.cfg"), "[defaults]\nforks = 3\n").unwrap();
+    let found = configs(None, None, &cwd);
+    assert_eq!(
+        found,
+        vec![(cwd.join("ansible.cfg"), b"[defaults]\nforks = 3\n".to_vec())]
+    );
+    fs::set_permissions(&cwd, fs::Permissions::from_mode(0o777)).unwrap();
+    assert_eq!(configs(None, None, &cwd), vec![]);
+    fs::set_permissions(&cwd, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// What the key reads of a file named `ansible.cfg`: a link to a regular file is followed, and a
+/// file over the bound contributes its size and mtime, a few bytes, whatever it holds. A FIFO, a
+/// device and a directory contribute nothing and are not waited for or read: the FIFO has no
+/// writer, so a read of it would never return, and the zero device never ends.
+#[cfg(unix)]
+#[test]
+fn the_key_reads_only_a_regular_file_and_only_up_to_the_bound() {
+    let root = scratch();
+    let place = |name: &str| {
+        let cwd = root.path().join(name);
+        fs::create_dir(&cwd).unwrap();
+        cwd
+    };
+    let read = |cwd: &Path| configs(None, None, cwd);
+
+    let cwd = place("linked");
+    let target = root.path().join("real.cfg");
+    fs::write(&target, "[defaults]\n").unwrap();
+    std::os::unix::fs::symlink(&target, cwd.join("ansible.cfg")).unwrap();
+    assert_eq!(read(&cwd)[0].1, b"[defaults]\n");
+
+    let cwd = place("exact");
+    let text = vec![b'#'; usize::try_from(CONFIG_BOUND).unwrap()];
+    fs::write(cwd.join("ansible.cfg"), &text).unwrap();
+    assert_eq!(read(&cwd)[0].1, text);
+
+    let cwd = place("over");
+    fs::write(cwd.join("ansible.cfg"), vec![b'#'; text.len() + 1]).unwrap();
+    let stamp = read(&cwd)[0].1.clone();
+    assert!(stamp.len() < 64, "{} bytes", stamp.len());
+    fs::write(cwd.join("ansible.cfg"), vec![b'#'; text.len() + 2]).unwrap();
+    assert_ne!(read(&cwd)[0].1, stamp, "the size is in the stamp");
+
+    let cwd = place("sparse");
+    fs::File::create(cwd.join("ansible.cfg"))
+        .unwrap()
+        .set_len(8 << 30)
+        .unwrap();
+    assert!(read(&cwd)[0].1.len() < 64);
+
+    let cwd = place("device");
+    std::os::unix::fs::symlink("/dev/zero", cwd.join("ansible.cfg")).unwrap();
+    assert_eq!(read(&cwd), vec![]);
+
+    let cwd = place("directory");
+    fs::create_dir(cwd.join("ansible.cfg")).unwrap();
+    assert_eq!(read(&cwd), vec![]);
+
+    let cwd = place("fifo");
+    let fifo = std::ffi::CString::new(
+        cwd.join("ansible.cfg")
+            .into_os_string()
+            .into_encoded_bytes(),
+    )
+    .unwrap();
+    // SAFETY: `fifo` is a valid C string that outlives the call.
+    assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o644) }, 0);
+    assert_eq!(read(&cwd), vec![]);
 }
