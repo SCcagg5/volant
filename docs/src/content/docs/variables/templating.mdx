@@ -66,13 +66,90 @@ On top of MiniJinja's own Jinja2 builtins, Volant adds these from Ansible:
 | Filters | `default` / `d`, `bool`, `int`, `float`, `mandatory`, `ternary`, `combine`, `dict2items`, `items2dict`, `to_json`, `to_nice_json`, `from_json`, `to_yaml`, `to_nice_yaml`, `from_yaml`, `basename`, `dirname`, `split`, `regex_replace`, `regex_search`, `regex_findall`, `regex_escape`, `b64encode`, `b64decode`, `comment`, `difference`, `intersect`, `union`, `flatten`, `to_uuid`, `type_debug`, `quote` |
 | Tests | `truthy`, `falsy`, `match`, `search`, `regex`, `contains`, `changed` / `change`, `failed` / `failure`, `succeeded` / `success` / `successful`, `skipped` / `skip`, `version` (and `version_compare`) |
 | Lookups | `env`, `file`, `vars`, `pipe`, `first_found`, `fileglob`, `template` |
+| Globals | `now`, `lipsum` |
 | From `ansible.utils` | the `ansible.utils.ipwrap` filter, under that name only |
 
 Every filter, test and lookup in this list also answers under its `ansible.builtin.*` name, so `{{ data | ansible.builtin.to_json }}` works. A filter, test or lookup that is not in this list runs in the controller's Python helper with ansible-core's own code, [when Python is available](/variables/python-helper/). That includes the plugins of other collections.
 
 `first_found`, `fileglob` and `template` look for files along `ansible_search_path`. In a role's task that is the role's directory, the directory of the task's file, then the playbook's directory. Outside a role it is the playbook's directory. `role_path` is set in a role's task and is undefined outside one. `fileglob` tries a relative pattern under `files/` of each entry, then in the entry itself, and the first entry with a match wins. It returns files only, sorted, and a single match comes back as a string. Each one is checked against ansible-core in the golden test corpus under `crates/volant/tests/golden`.
 
-A value also answers a handful of Python methods: `.split()`, `.startswith()` and `.find()` on a string, `.keys()` on a mapping, and the others that `minijinja-contrib`'s Python compatibility layer provides. A method neither that layer nor the engine knows fails with its own name rather than silently doing nothing.
+`now(utc=False, fmt=None)` gives the date and time on the controller, never on a managed host. It returns a `datetime` with no time zone, in UTC when `utc` is true. When `fmt` is set it returns the text `strftime(fmt)` gives instead, so `{{ now(utc=true, fmt='%Y%m%d') }}` is `20261019`. The `datetime` has the attributes `year`, `month`, `day`, `hour`, `minute`, `second`, `microsecond` and `tzinfo`, the methods `strftime`, `isoformat`, `timestamp`, `weekday` and `isoweekday`, and compares with another `datetime`. As a result or through `to_json` it prints as `2026-10-19T23:13:50.741151`. In text, through `string` or after `~`, it prints with a space instead of the `T`, as Python does. `strftime` always uses the C locale: day and month names are English and `%c` reads `Mon Oct 19 23:13:50 2026`. ansible-core uses the locale of the controller.
+
+`lipsum(n=5, html=True, min=20, max=100)` gives `n` paragraphs of random filler text, as Jinja does. Each one has at least `min` and fewer than `max` words. With `html` true each paragraph sits in `<p>` tags and a newline separates them, otherwise a blank line does. One call makes at most 10 million words.
+
+## Python methods
+
+A template can call the methods Python gives to its values, as it can in ansible-core. A method that Volant does not run fails with its own name, so nothing is skipped without a message.
+
+These `str` methods run, with the arguments and keywords Python takes and Python's wording for a wrong call (`must be str or None, not int`, `substring not found`):
+
+| Group | Methods |
+|---|---|
+| Cut and join | `split`, `rsplit`, `splitlines`, `partition`, `rpartition`, `join`, `expandtabs` |
+| Trim and pad | `strip`, `lstrip`, `rstrip`, `removeprefix`, `removesuffix`, `center`, `ljust`, `rjust`, `zfill` |
+| Search | `find`, `rfind`, `index`, `rindex`, `count`, `startswith`, `endswith`, `replace` |
+| Case | `upper`, `lower`, `title`, `capitalize`, `swapcase`, `casefold` |
+| Test | `isalpha`, `isalnum`, `isdigit`, `isdecimal`, `isnumeric`, `isspace`, `islower`, `isupper`, `istitle`, `isascii`, `isidentifier`, `isprintable` |
+| Other | `format`, `format_map`, `translate`, `maketrans` |
+
+Positions count characters, not bytes, and `start` and `end` take negative values. `split(maxsplit=1)` and the other keyword forms work. `startswith` and `endswith` take a text or a tuple of texts. A list is accepted as a tuple, because Volant's Jinja has no tuple type.
+
+What differs from CPython:
+
+- `casefold` is lower case plus `ß` to `ss`. It is not the full Unicode case folding.
+- `isdigit`, `isalpha` and the other tests outside ASCII follow Rust's Unicode tables. `'½'.isdigit()` is true here and false in Python.
+- A format field can read an item (`{0[a]}`, `{a[0]}`) but not an attribute (`{0.real}`).
+- A width, a count or a precision that would make a method build more than 256 MiB of text (`'a'.ljust(10000000000)`, `'{:.300000000f}'.format(x)`) stops the task with an error that names the limit. Python builds the text until the machine runs out of memory. A number too large for an index gives Python's own error, `Python int too large to convert to C ssize_t`.
+- `encode` and `decode` are not available, because Volant has no bytes values.
+- A backslash escape such as `'\n'` inside a template string is read by the template engine. ansible-core 2.19 keeps the two characters. Pass a value in a variable when the text must hold a real newline.
+
+### Lists and mappings
+
+`list` and `dict` methods run too: `append`, `extend`, `insert`, `remove`, `pop`, `sort`, `reverse`, `index`, `count`, `copy` and `clear` on a list, and `get`, `keys`, `values`, `items`, `pop`, `popitem`, `setdefault`, `update`, `copy`, `clear` and `fromkeys` on a mapping. `keys()`, `values()` and `items()` give lists. `sort` takes `reverse`, and `key` only as `none`. The usual ways to write a change are `{% set _ = items.append(x) %}` and `{{ items.append(x) or '' }}`: the method changes the list and answers `none`.
+
+A template changes a list or mapping in place, and other names for the same value see the change:
+
+```jinja
+{% set seen = [] %}
+{% for host in groups['web'] %}{% set _ = seen.append(host) %}{% endfor %}
+{% set alias = seen %}{% set _ = alias.append('db') %}
+{{ seen }}   {# every web host, then db #}
+```
+
+This follows Python and ansible-core 2.19, which agree on these cases (each is a row of the golden corpus):
+
+- A value read from a variable is a copy for the string being rendered. A play variable `x` that a template changes with `x.append(1)` is changed for that template only. The next task, the next field of the same task and the next template read it as it was. There is no change to a variable that outlasts the render.
+- Inside one template, `b = a` names one list, and a change through `b` shows in `a`. `b = a | list` and `b = a.copy()` make a new list.
+- A list or mapping inside another is reached by `x[0]`, `x.key` and `for item in x` as the same object, so `d.a.append(1)` changes `d`. A value stored by `append`, `extend`, `insert`, `update` or `setdefault` is a copy, and so are the values that `get`, `items`, `values` and `copy` answer.
+- `d.setdefault('k', []).append(1)` changes `d`. `v = d.setdefault('k', [])` followed by `v.append(1)` changes `d` here, and does not in ansible-core.
+
+What differs from ansible-core:
+
+- A list or mapping that a template passes to a macro, `namespace()` or another call is the same object in Volant. ansible-core passes a copy, so a macro that changes its argument changes the caller's list only here.
+- ansible-core 2.19 keeps the error of a call whose result is never read. `{% set _ = [1].remove(5) %}` is no error there. It is one here.
+- A list that `a + b` or a slice `a[1:]` built cannot be changed: write `(a + b) | list`. The error says so.
+- A list that a call has just built and that no variable holds, such as `(x | list).append(1)`, is changed as a copy: the call answers as Python does, and nothing else changes.
+- A list that grows inside a `{% for %}` over itself is read up to its length at the start of the loop. One that `remove` or `pop` shrinks inside such a loop fails with an undefined value, where ansible-core goes on.
+- A list that a filter answers is a copy, as in ansible-core, so `(items | first).append(1)` does not change `items`. A slice (`a[1:]`) shares the lists inside it with `a`.
+- A list or mapping that is the item or the key of its own method is read as a copy of itself, and a mapping used as a key is an error (`unhashable type: 'dict'`), as in Python.
+- `sort()` of a list that holds `nan` is an error here. ansible-core sorts it.
+- `{% do %}` is accepted here and refused by ansible-core 2.19, which does not enable `jinja2.ext.do`. Use `{% set _ = ... %}` in a template that has to run on both.
+- `items()` and `popitem()` give lists where Python gives tuples, so they print as `['a', 1]` and not `('a', 1)`.
+- `sort(key=...)` with a function is not available.
+
+### The `%` operator
+
+On a text, `%` formats it the way Python does: `'%s-%d' % (name, 3)`, `'%(host)s:%(port)d' % item`, `'%5.2f%%' % pct`. The flags `-`, `+`, space, `0` and `#`, a width and a precision (each of them `*` to read it from the arguments), the length modifiers `h`, `l` and `L`, and the conversions `s`, `r`, `a`, `c`, `d`, `i`, `u`, `o`, `x`, `X`, `e`, `E`, `f`, `F`, `g`, `G` and `%` are read. A wrong call fails with Python's words: `not enough arguments for format string`, `not all arguments converted during string formatting`, `%d format: a real number is required, not str`.
+
+Integers up to 128 bits that a template writes or computes are read exactly (`'%d' % 18446744073709551615`). An integer above 63 bits in a variable file reaches the template as text, which the YAML reader decides, not `%`. A width or a precision past 256 MiB of text is a task error that names the limit, as for the `str` methods, and one past what an index holds is Python's `width too big`.
+
+On two numbers, `%` takes the sign of the divisor, as in Python: `7 % -3` is `-2`. A zero divisor is an error. The `format` filter is `%` with the arguments written out, and reads the same formats.
+
+Volant has no tuple type, so the right side of `%` is read as a tuple when it is written out in the template, as `(a, b)`, `(a,)` or `['a', 'b']`. A list that a variable holds or a call answers is one argument, as it is in Python: `'%s' % items` prints the list. `'%s %s' % pair` with a two item list in `pair` is an error in ansible-core, and here. A tuple prints as a list: `'%s' % ((1, 2),)` is `[1, 2]` here and `(1, 2)` in ansible-core.
+
+Two numbers written out in the template (`7 % -3`) are folded when the template is compiled, and a fold does not follow Python's sign rule or raise on a zero divisor. A number that comes from a variable does.
+
+`.get()`, `.keys()`, `.values()` and `.items()` on other mapping-like values, such as `hostvars` and the loop variable, come from `minijinja-contrib`'s Python compatibility layer.
 
 `difference`, `intersect` and `union` build a Python `set` in ansible-core, whose order is its own: small integers happen to come out sorted, and strings come out in an order that changes with `PYTHONHASHSEED` from one run to the next. Volant sorts the result when every element is an integer, which matches every integer case measured, and otherwise keeps the order in which the elements first appeared. On strings, that order is not guaranteed to match a given run of ansible-core.
 
@@ -142,10 +219,9 @@ The file's own trailing newline survives the render. [Action plugins](/reference
 
 - A string that reads two variables, one of them chained through a third that holds a `raw` block, is rendered once more than in the reference.
 - A value under `!unsafe` is data and is never templated. A `!vault` value is decrypted; see [Vault](/variables/vault/).
-- Python methods that change a value or that MiniJinja lacks fail with `method <name> is not available yet`: `append`, `extend`, `insert`, `pop`, `remove`, `sort`, `reverse`, `update`, `setdefault`, `copy`, `index`, `rsplit`, `partition`, `zfill`, `ljust`, `swapcase`, `removeprefix`, `encode` and `dict.fromkeys`. So does `%` formatting of a string, as in `'%s' % x`.
-- `now()` and `lipsum()` fail with an unknown function.
 - These filter arguments are not supported: the method of `round`, `start` and `attribute` of `sum`, `attribute` of `min` and `max`, `count` of `replace`, `base` of `int`, `sort_keys` of `to_json`, `encoding` of `b64encode`, and `strict` and `version_type` of the `version` test.
 - `password_hash`, `json_query` and `ipaddr` need the Python packages `passlib`, `jmespath` and `netaddr`. The managed runtime does not carry them. See [the managed runtime](/reference/runtime/).
+- A `datetime` from `now()` does not take part in arithmetic, so `now() - now()` fails, and it lacks the methods `date`, `time`, `replace`, `astimezone`, `utcoffset` and `timetuple`.
 - In a template file, `template_host`, `template_uid`, `template_run_date` and `template_mtime` are not set, unlike `template_path`, `template_fullpath` and `ansible_managed`.
 - `{% include %}` and `{% import %}` fail, in a template file and in a string: nothing loads a second file during a render. ansible-core loads the file from the playbook directory.
 - A `{% set x %}...{% endset %}` block in a string makes the result a string even when the rest is one expression.

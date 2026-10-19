@@ -7,15 +7,18 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 mod bridged;
+mod clock;
 mod context;
 mod env;
 mod file;
 mod filters;
 pub(crate) use filters::python_json;
 mod globals;
+mod lipsum;
 mod lookups;
 mod once;
 mod one_pass;
+mod pymethods;
 mod resolve;
 mod templar;
 mod test_plugins;
@@ -103,6 +106,24 @@ const ITEM_KEY: &str = "volant::item";
 /// Prefix of the name an attribute lookup is routed through; the context answers it with a
 /// function that reads that attribute.
 const ATTR_KEY: &str = "volant::attr:";
+/// `ATTR_KEY` for a template that changes a list or mapping in place: what it reads is the
+/// mutable form of the value, see [`pymethods::mutable`].
+const MATTR_KEY: &str = "volant::mattr:";
+/// The globals `%` is compiled to call: the second when the right side was written as a tuple,
+/// see [`vm::route_calls`].
+const REM_KEY: &str = "volant::rem";
+const REMT_KEY: &str = "volant::remt";
+/// Prefix of the name a list or mapping literal is routed through in such a template, then the
+/// literal as JSON: minijinja folds a literal of constants into one shared value, and a template
+/// that changes a list needs a new one each time the literal runs.
+const CONST_KEY: &str = "volant::const:";
+/// Prefix of the name a variable read is routed through in such a template.
+const VAR_KEY: &str = "volant::var:";
+/// `ITEM_KEY` for such a template.
+const MITEM_KEY: &str = "volant::mitem";
+/// What a list or mapping written out in such a template is built by, so that it can change.
+const MKLIST_KEY: &str = "volant::mklist";
+const MKMAP_KEY: &str = "volant::mkmap";
 
 /// The global a call to `query` or `q` is compiled to call, see [`vm::route_calls`]. Not a global of
 /// either name: measured on ansible-core 2.19.12, `q is defined` is false on a host with no

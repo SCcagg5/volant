@@ -81,14 +81,35 @@ Measured on ansible-core 2.19.12, a relative `src` climbing with `..` makes the 
 
 - `the fetched path <p> is outside '<dest>'`
 
-This is checked twice: once on the `src` the playbook wrote, and again on the path the host names back, which does not have to match. A `dest` whose render read a managed host is refused before anything is asked, and so is a loop's `inventory_hostname` when a host set it, or one that is not a single path component:
+This is checked twice: once on the `src` the playbook wrote, and again on the path the host names back, which does not have to match. A `dest` whose render read a managed host is refused before anything is asked unless `[volant] host_named_dest_dirs` covers it (see [A dest a managed host named](#a-dest-a-managed-host-named)), and so is a loop's `inventory_hostname` when a host set it, or one that is not a single path component:
 
-- `the 'dest' of this task was named by a managed host, and a controller path a host chose is never written`
+- `the 'dest' of this task was named by a managed host, and a controller path a host chose is never written unless host_named_dest_dirs names a directory above it`
 - `the inventory_hostname '<name>' is not one path component, and fetch files what it fetches under it`
 
 A symbolic link anywhere below `dest` is refused rather than followed, on both the path built from the playbook and the one the host names back.
 
 `fail_on_missing`, on by default as in the reference, fails the task on a missing source or a directory; `fail_on_missing: false` turns either into an `ok` result carrying the reference's own message instead. Either way, any other failure, such as a read the agent refuses because the module server's per-stream limit was reached, still fails the task. That limit is 4 MiB of `slurp`'s base64-encoded stdout, about 3 MiB of source file before encoding. `validate_checksum` checks the written file's SHA-1 against the host's before keeping it; a mismatch fails the task and removes what was written, unlike the reference, which leaves the mismatched file where it wrote it. A file being replaced keeps its existing mode, so a `0600` file fetched again stays `0600`.
+
+### A dest a managed host named
+
+A `dest` is named by a managed host when its render read something a host contributed. A real case is `dest: "{{ tmp.path }}/out/"`, where `tmp` is the registered result of a `tempfile` task. ansible-core writes there. A host that answers `tempfile` with `/home/<operator>/.ssh` would make the controller write as the operator under that directory, so by default `fetch` refuses it and names the setting.
+
+`[volant] host_named_dest_dirs` (environment: `VOLANT_HOST_NAMED_DEST_DIRS`) is a colon-separated list of absolute directories, empty by default. A `dest` a host named is written only when the path it resolves to on the file system lies strictly inside one of them:
+
+- The `dest` must be absolute and hold no `..`. A relative path and a path that starts with `~` are refused, never expanded.
+- The deepest part of the path that exists is resolved through every link, and the rest is appended. A link that leaves the directory, a link that points nowhere, the directory itself and a sibling that shares its name as a prefix (`/srv/fetch-evil` for `/srv/fetch`) are refused. The check runs again just before the write.
+- The write walks down from the directory of the list and refuses any link below it, even one that stays inside, and any existing directory below it that another user owns or that every user can write without the sticky bit. Another user could otherwise swap either for a link between the check and the write. The directories `fetch` creates on the way are its own.
+- A directory of the list that the group or other users can write to holds nothing, unless its sticky bit is set, as it is on `/tmp`. This is checked when a task uses the directory.
+- An entry that is relative, empty, written with `~` or `..`, or `/`, stops the run at start with exit code 5.
+- A `dest` the playbook wrote is not held to the list, and the setting changes nothing for `src`, which names a file on the host.
+
+```
+the 'dest' of this task was named by a managed host, and '/home/op/.ssh/x/' is not inside any of the directories (host_named_dest_dirs = /srv/fetch)
+```
+
+Name a directory that only the operator can write. With `/tmp` in the list a host can pick any name below it.
+
+Only `fetch` is held to the list. `copy` and `template` with `delegate_to: localhost`, and `synchronize` in pull mode, write a `dest` on the controller too. They are not refused when a host named it, as in ansible-core and as before.
 
 ## `service`
 
@@ -199,7 +220,7 @@ The setting covers the tasks listed above. It does not cover `include_vars`, `va
 
 The mode changes which file is read, never how the text of a template is trusted. When the `src` of a `template` was named by a host, `template_path` and `template_fullpath` are that host's values in the render, the way `template_destpath` is for a `dest`.
 
-`fetch` is outside this setting. Its `dest` is a place the controller writes, not a file it reads, and a `dest` a host named is refused in every mode (see `fetch` below). `dest` of the other plugins is only ever a place to write on the host, so it is not refused; `template_destpath` carries it into the render as the host's own value.
+`fetch` is outside this setting. Its `dest` is a place the controller writes, not a file it reads, and `host_named_dest_dirs` decides what happens to one a host named (see [A dest a managed host named](#a-dest-a-managed-host-named)). `dest` of the other plugins is only ever a place to write on the host, so it is not refused; `template_destpath` carries it into the render as the host's own value.
 
 ## What stays on the host
 

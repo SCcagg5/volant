@@ -219,8 +219,8 @@ fn a_chdir_without_search_permission_is_a_chdir_failure() {
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).unwrap();
 }
 
-/// Each form runs the way the reference runs it: the shell form through `sh`, `argv`
-/// and `cmd` directly, an `argv` on the shell path as the list, and a fed standard input.
+/// Each form runs the way the reference runs it: the shell form through `sh`, `argv` and `cmd`
+/// directly, an `argv` item that is not a string as text, and a fed standard input.
 #[rstest]
 #[case::shell_form(json!({"_raw_params": "echo $((6 * 7))"}), true, "42", json!("echo $((6 * 7))"))]
 #[case::argv(
@@ -228,6 +228,14 @@ fn a_chdir_without_search_permission_is_a_chdir_failure() {
 )]
 #[case::cmd(json!({"cmd": "echo cmd-form"}), false, "cmd-form", json!(["echo", "cmd-form"]))]
 #[case::argv_on_the_shell_path(json!({"argv": ["echo", "hi"]}), true, "hi", json!(["echo", "hi"]))]
+#[case::argv_items_that_are_not_strings(
+    json!({"argv": ["echo", 17, 1.5, true, null, [1], {"k": "v"}, "x"]}),
+    false, "17 1.5 True  [1] {'k': 'v'} x", json!(["echo", "17", "1.5", "True", "", "[1]", "{'k': 'v'}", "x"])
+)]
+#[case::argv_items_on_the_shell_path(
+    json!({"argv": ["echo", 17, false]}), true, "17 False", json!(["echo", "17", "False"])
+)]
+#[case::argv_as_a_string(json!({"argv": "echo,hi"}), false, "hi", json!(["echo", "hi"]))]
 #[case::stdin_is_fed(
     json!({"_raw_params": "cat", "stdin": "from stdin"}), false, "from stdin", json!(["cat"])
 )]

@@ -49,7 +49,7 @@ A file that only a dynamic `include_tasks` or `include_role` names is read when 
 | Inventories | INI, YAML and TOML files, directories, scripts, `constructed`, `generator` and collection plugins, several `-i`, `group_vars`, `host_vars`, the `jsonfile` fact cache | none left |
 | Connections | `ssh` with keys, an ssh-agent or a password (`-k` or `ansible_password`, needs OpenSSH 8.4 or later), `local` | other connection plugins, Windows, network devices |
 | Escalation | `become` through `sudo` or `su`, with or without a password | `doas` and other methods |
-| Templating | Jinja2 with the common Ansible filters, tests and lookups, `!unsafe`, filters and lookups from collections | some filter arguments, Python methods that change a value |
+| Templating | Jinja2 with the common Ansible filters, tests and lookups, `!unsafe`, filters and lookups from collections | some filter arguments |
 | Run modes | normal runs, [`--check` and `--diff`](/playbooks/check-and-diff/), [vault](/variables/vault/), `--start-at-task`, `--step`, the four listing commands | none left |
 
 ## Common blockers and what to do
@@ -68,7 +68,6 @@ These differ from `ansible-playbook` without a message before the run, or with a
 
 | What | What happens |
 |---|---|
-| Python methods such as `append`, `update`, `index` and `rsplit`, and `%` formatting of a string | The task fails with `method <name> is not available yet` or `invalid operation`. |
 | `callback_plugins/`, `vars_plugins/`, `stdout_callback`, `callbacks_enabled`, `result_format` | Ignored. The output is the default one. |
 | `volant check`, `inventory`, `vault`, `doc`, `config`, `galaxy` and ad-hoc commands | They do not exist. `volant` has `playbook` and `runtime`. |
 

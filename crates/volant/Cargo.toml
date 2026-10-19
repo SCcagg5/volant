@@ -29,6 +29,7 @@ blake3.workspace = true
 clap.workspace = true
 ctr.workspace = true
 hmac.workspace = true
+indexmap.workspace = true
 libc.workspace = true
 minijinja.workspace = true
 minijinja-contrib.workspace = true

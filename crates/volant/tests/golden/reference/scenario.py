@@ -8,7 +8,8 @@ recorded again with `--check`, `--check --diff` and `--diff` appended, in that o
 itself, and `expected.json` is then a list; `env`, extra environment for both engines;
 `forks`, 1 unless said, so that hosts print in the inventory's order under both engines; `needs`,
 any of `ansible-core`, `sudo`, `systemd`; `unordered`, regexes of the lines whose order may differ
-once `forks` is above 1. The copy's path reads `<golden-tmp>` in stdout, and a controller temp
+once `forks` is above 1; `links`, a mapping of a path to the target of the link made there in each
+copy, for a link that cannot be tracked, such as one to a file that does not exist. The copy's path reads `<golden-tmp>` in stdout, and a controller temp
 file of a diff header `<golden-ansible-tmp>`; nothing else is normalised.
 """
 import os
@@ -23,7 +24,7 @@ from .redact import TMP
 from .run import EMPTY_CONFIG, Failed, run, scratch, write_json
 
 MODES = {"check": ["--check"], "check-diff": ["--check", "--diff"], "diff": ["--diff"]}
-KEYS = {"args", "runs", "modes", "env", "forks", "needs", "unordered"}
+KEYS = {"args", "runs", "modes", "env", "forks", "needs", "unordered", "links"}
 NEEDS = {"ansible-core", "sudo", "systemd"}
 
 # The two things the reference prints out of a Python set, in an order that changes between
@@ -109,7 +110,17 @@ def load(directory):
             re.compile(pattern)
         except re.error as e:
             raise Failed(f"scenario {name}: `unordered` {pattern!r} is not a regex ({e})") from None
-    return {"runs": runs, "env": env, "forks": forks, "needs": needs, "single": "args" in case and not modes}
+    links = case.get("links") or {}
+    if not isinstance(links, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in links.items()):
+        raise Failed(f"scenario {name}: `links` is not a mapping of strings")
+    return {
+        "runs": runs,
+        "env": env,
+        "forks": forks,
+        "needs": needs,
+        "links": links,
+        "single": "args" in case and not modes,
+    }
 
 
 def _missing(needs):
@@ -134,6 +145,9 @@ def record_one(directory):
         with scratch() as tmp:
             copy = os.path.join(tmp, name)
             shutil.copytree(directory, copy, symlinks=True, ignore=shutil.ignore_patterns("case.yml", "expected.json"))
+            for path, target in case["links"].items():
+                os.makedirs(os.path.dirname(os.path.join(copy, path)), exist_ok=True)
+                os.symlink(target, os.path.join(copy, path))
             own = os.path.join(copy, "ansible.cfg")
             config = own if os.path.exists(own) else EMPTY_CONFIG
             argv = ["ansible-playbook", *one["args"], "--forks", str(case["forks"])]
