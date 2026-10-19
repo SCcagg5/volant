@@ -66,11 +66,16 @@ On top of MiniJinja's own Jinja2 builtins, Volant adds these from Ansible:
 | Filters | `default` / `d`, `bool`, `int`, `float`, `mandatory`, `ternary`, `combine`, `dict2items`, `items2dict`, `to_json`, `to_nice_json`, `from_json`, `to_yaml`, `to_nice_yaml`, `from_yaml`, `basename`, `dirname`, `split`, `regex_replace`, `regex_search`, `regex_findall`, `regex_escape`, `b64encode`, `b64decode`, `comment`, `difference`, `intersect`, `union`, `flatten`, `to_uuid`, `type_debug`, `quote` |
 | Tests | `truthy`, `falsy`, `match`, `search`, `regex`, `contains`, `changed` / `change`, `failed` / `failure`, `succeeded` / `success` / `successful`, `skipped` / `skip`, `version` (and `version_compare`) |
 | Lookups | `env`, `file`, `vars`, `pipe`, `first_found`, `fileglob`, `template` |
+| Globals | `now`, `lipsum` |
 | From `ansible.utils` | the `ansible.utils.ipwrap` filter, under that name only |
 
 Every filter, test and lookup in this list also answers under its `ansible.builtin.*` name, so `{{ data | ansible.builtin.to_json }}` works. A filter, test or lookup that is not in this list runs in the controller's Python helper with ansible-core's own code, [when Python is available](/variables/python-helper/). That includes the plugins of other collections.
 
 `first_found`, `fileglob` and `template` look for files along `ansible_search_path`. In a role's task that is the role's directory, the directory of the task's file, then the playbook's directory. Outside a role it is the playbook's directory. `role_path` is set in a role's task and is undefined outside one. `fileglob` tries a relative pattern under `files/` of each entry, then in the entry itself, and the first entry with a match wins. It returns files only, sorted, and a single match comes back as a string. Each one is checked against ansible-core in the golden test corpus under `crates/volant/tests/golden`.
+
+`now(utc=False, fmt=None)` gives the date and time on the controller, never on a managed host. It returns a `datetime` with no time zone, in UTC when `utc` is true. When `fmt` is set it returns the text `strftime(fmt)` gives instead, so `{{ now(utc=true, fmt='%Y%m%d') }}` is `20261019`. The `datetime` has the attributes `year`, `month`, `day`, `hour`, `minute`, `second`, `microsecond` and `tzinfo`, the methods `strftime`, `isoformat`, `timestamp`, `weekday` and `isoweekday`, and compares with another `datetime`. As a result or through `to_json` it prints as `2026-10-19T23:13:50.741151`. In text, through `string` or after `~`, it prints with a space instead of the `T`, as Python does. `strftime` always uses the C locale: day and month names are English and `%c` reads `Mon Oct 19 23:13:50 2026`. ansible-core uses the locale of the controller.
+
+`lipsum(n=5, html=True, min=20, max=100)` gives `n` paragraphs of random filler text, as Jinja does. Each one has at least `min` and fewer than `max` words. With `html` true each paragraph sits in `<p>` tags and a newline separates them, otherwise a blank line does. One call makes at most 10 million words.
 
 A value also answers a handful of Python methods: `.split()`, `.startswith()` and `.find()` on a string, `.keys()` on a mapping, and the others that `minijinja-contrib`'s Python compatibility layer provides. A method neither that layer nor the engine knows fails with its own name rather than silently doing nothing.
 
@@ -115,6 +120,7 @@ The file's own trailing newline survives the render. [Action plugins](/reference
 - A string that reads two variables, one of them chained through a third that holds a `raw` block, is rendered once more than in the reference.
 - A value under `!unsafe` is data and is never templated. A `!vault` value is decrypted; see [Vault](/variables/vault/).
 - The `inventory_hostnames` and `varnames` lookups are not supported yet.
+- A `datetime` from `now()` does not take part in arithmetic, so `now() - now()` fails, and it lacks the methods `date`, `time`, `replace`, `astimezone`, `utcoffset` and `timetuple`.
 - In a template file, `template_host`, `template_uid`, `template_run_date` and `template_mtime` are not set, unlike `template_path`, `template_fullpath` and `ansible_managed`.
 - In a template file, `{% include %}` and `{% import %}` fail: nothing loads a second file during a render.
 - `line_statement_prefix` and `line_comment_prefix` in a `#jinja2:` line are refused by name. minijinja and Jinja2 differ on a blank line after a line statement and on the newline of a line comment.
