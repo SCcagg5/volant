@@ -373,3 +373,47 @@ fn delimiters_the_lexer_cannot_use_are_refused_by_name() {
         );
     }
 }
+
+/// Each of the six delimiters has the same bound, 64 characters: the lexer builds a table from
+/// them whose cost grows with the square of their length. The error names the option.
+#[test]
+fn a_delimiter_has_a_bound() {
+    const D: [&str; 6] = ["{{", "}}", "{%", "%}", "{#", "#}"];
+    const NAMES: [&str; 6] = [
+        "variable_start_string",
+        "variable_end_string",
+        "block_start_string",
+        "block_end_string",
+        "comment_start_string",
+        "comment_end_string",
+    ];
+    let started = std::time::Instant::now();
+    for (i, name) in NAMES.iter().enumerate() {
+        let make = |len: usize| {
+            let mut parts = D.map(String::from);
+            parts[i] = "@".repeat(len - 1) + &i.to_string();
+            parts
+        };
+        let render = |len: usize| {
+            let parts = make(len);
+            let options = FileRender {
+                syntax: syntax(parts.each_ref().map(String::as_str)),
+                ..Default::default()
+            };
+            templar().render_file("{{ 1 }} x {% if 1 %}y{% endif %}\n", &Map::new(), &options)
+        };
+        let at_bound = render(64).err().map(|e| e.0).unwrap_or_default();
+        assert!(
+            !at_bound.contains("longer"),
+            "{name} at the bound: {at_bound}"
+        );
+        for len in [65, 3_000, 200_000] {
+            assert_eq!(
+                render(len).unwrap_err().0,
+                format!("Syntax error in template: {name} must not be longer than 64 characters"),
+                "{name} at {len}"
+            );
+        }
+    }
+    assert!(started.elapsed().as_secs() < 20, "{:?}", started.elapsed());
+}

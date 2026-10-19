@@ -161,6 +161,26 @@ fn a_template_lookup_fails_on_an_undefined_name_and_a_missing_file() {
     );
 }
 
+/// The delimiter options of the lookup have the bound of the `template` module's.
+#[test]
+fn a_template_lookup_refuses_a_very_long_delimiter() {
+    let role = Role::new();
+    role.write("role/templates/t.j2", "x {{ 1 }}\n");
+    let t = templar(&role.dir);
+    let long = "@".repeat(100_000);
+    let err = t
+        .render(
+            &format!("{{{{ lookup('template', 't.j2', variable_start_string='{long}') }}}}"),
+            &role.vars(),
+        )
+        .unwrap_err();
+    assert!(
+        err.0
+            .contains("variable_start_string must not be longer than 64 characters"),
+        "{err}"
+    );
+}
+
 /// A template that looks itself up fails the task instead of overflowing the stack.
 #[test]
 fn a_template_that_looks_itself_up_fails() {

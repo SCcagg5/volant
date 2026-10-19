@@ -148,3 +148,55 @@ fn a_header_the_reference_refuses_is_refused_in_its_words() {
         );
     }
 }
+
+/// Python's tokenizer stops at 200 levels of parentheses and says so; the value of a pair is
+/// read without recursion, so a very deep one is a clean error and not a stack overflow.
+#[test]
+fn parentheses_nest_to_the_reference_s_depth() {
+    let line = |depth: usize| {
+        format!(
+            "#jinja2: trim_blocks: {}False{}\n",
+            "(".repeat(depth),
+            ")".repeat(depth)
+        )
+    };
+    for depth in [1, 49, 200] {
+        let (_, o) = parsed(&line(depth)).unwrap().unwrap();
+        assert!(!o.trim_blocks, "depth {depth}");
+    }
+    for depth in [201, 1000, 10_000, 200_000] {
+        assert_eq!(
+            parsed(&line(depth)),
+            Err("Syntax error in template: too many nested parentheses (<unknown>, line 1)".into()),
+            "depth {depth}"
+        );
+    }
+}
+
+/// A first line longer than the bound is refused before it is read, whatever it holds.
+#[test]
+fn a_header_line_has_a_bound() {
+    let at_bound = |pad: usize| {
+        let head = "#jinja2: trim_blocks: False";
+        format!(
+            "{head}{}\nrest\n",
+            " ".repeat(pad - (head.len() - "#jinja2:".len()))
+        )
+    };
+    assert!(parsed(&at_bound(16 * 1024)).unwrap().is_some());
+    let refusal =
+        "Syntax error in template: the '#jinja2:' line must not be longer than 16384 bytes";
+    assert_eq!(parsed(&at_bound(16 * 1024 + 1)), Err(refusal.into()));
+    let started = std::time::Instant::now();
+    let huge = format!(
+        "#jinja2: variable_start_string: '{}'\nrest\n",
+        "a".repeat(4_000_000)
+    );
+    assert_eq!(parsed(&huge), Err(refusal.into()));
+    let escapes = format!(
+        "#jinja2: variable_start_string: '{}'\n",
+        "\\x41".repeat(1_000_000)
+    );
+    assert_eq!(parsed(&escapes), Err(refusal.into()));
+    assert!(started.elapsed().as_secs() < 5, "{:?}", started.elapsed());
+}
