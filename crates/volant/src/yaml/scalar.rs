@@ -67,6 +67,9 @@ pub(super) fn plain(value: Cow<'_, str>) -> Result<Scalar<'_>, String> {
     if matches!(body, "~" | "null" | "Null" | "NULL" | "") {
         return Ok(Scalar::Null);
     }
+    if matches!(first, Some('0'..='9')) && TIMESTAMP_PATTERN.is_match(&value) {
+        return timestamp(&value);
+    }
     Ok(Scalar::String(value))
 }
 
@@ -97,6 +100,7 @@ pub(super) fn read<'a>(
         "float" => float(&value),
         "bool" => bool_constructor(&value),
         "null" => Ok(Scalar::Null),
+        "timestamp" => timestamp(&value),
         "seq" => Err("Expected a sequence node, but found scalar.".into()),
         "map" | "set" | "python/dict" => Err("Expected a mapping node, but found scalar.".into()),
         "omap" => {
@@ -265,4 +269,109 @@ pub(super) fn py_repr(text: &str) -> String {
     }
     out.push(quote);
     out
+}
+
+/// The timestamp pattern of PyYAML's resolver.
+static TIMESTAMP_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{4}-[0-9][0-9]?-[0-9][0-9]?(?:[Tt]|[ \t]+)[0-9][0-9]?:[0-9]{2}:[0-9]{2}(?:\.[0-9]*)?(?:[ \t]*(?:Z|[-+][0-9][0-9]?(?::[0-9]{2})?))?)\n?\z",
+    )
+    .expect("a fixed pattern")
+});
+
+/// The pattern of PyYAML's `construct_yaml_timestamp`, with a group for each part.
+static TIMESTAMP: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^(?P<year>[0-9]{4})-(?P<month>[0-9][0-9]?)-(?P<day>[0-9][0-9]?)(?:(?:[Tt]|[ \t]+)(?P<hour>[0-9][0-9]?):(?P<minute>[0-9]{2}):(?P<second>[0-9]{2})(?:\.(?P<fraction>[0-9]*))?(?:[ \t]*(?P<tz>Z|(?P<sign>[-+])(?P<tz_hour>[0-9][0-9]?)(?::(?P<tz_minute>[0-9]{2}))?))?)?\n?\z",
+    )
+    .expect("a fixed pattern")
+});
+
+/// PyYAML's `construct_yaml_timestamp`. The value model has no date, so the date or the date and
+/// time come out as the string Python's `isoformat` gives, which is what ansible-core prints.
+fn timestamp(value: &str) -> Result<Scalar<'static>, String> {
+    let Some(parts) = TIMESTAMP.captures(value) else {
+        return Err("'NoneType' object has no attribute 'groupdict'".into());
+    };
+    let number = |name: &str| {
+        parts
+            .name(name)
+            .map_or(0, |m| m.as_str().parse::<u32>().unwrap_or(0))
+    };
+    let (year, month, day) = (number("year"), number("month"), number("day"));
+    if year == 0 {
+        return Err("year 0 is out of range".into());
+    }
+    if !(1..=12).contains(&month) {
+        return Err("month must be in 1..12".into());
+    }
+    if day == 0 || day > days_in_month(year, month) {
+        return Err("day is out of range for month".into());
+    }
+    let mut text = format!("{year:04}-{month:02}-{day:02}");
+    if parts.name("hour").is_none() {
+        return Ok(Scalar::String(text.into()));
+    }
+    let (hour, minute, second) = (number("hour"), number("minute"), number("second"));
+    if hour > 23 {
+        return Err("hour must be in 0..23".into());
+    }
+    if minute > 59 {
+        return Err("minute must be in 0..59".into());
+    }
+    if second > 59 {
+        return Err("second must be in 0..59".into());
+    }
+    _ = write!(text, "T{hour:02}:{minute:02}:{second:02}");
+    let fraction = parts.name("fraction").map_or("", |m| m.as_str());
+    let micros: u32 = format!("{:0<6}", &fraction[..fraction.len().min(6)])
+        .parse()
+        .unwrap_or(0);
+    if micros != 0 {
+        _ = write!(text, ".{micros:06}");
+    }
+    if let Some(sign) = parts.name("sign") {
+        let minutes = i64::from(number("tz_hour")) * 60 + i64::from(number("tz_minute"));
+        let seconds = if sign.as_str() == "-" {
+            -minutes * 60
+        } else {
+            minutes * 60
+        };
+        if seconds.abs() >= 86_400 {
+            return Err(offset_error(seconds));
+        }
+        let (sign, minutes) = (if seconds < 0 { '-' } else { '+' }, seconds.abs() / 60);
+        _ = write!(text, "{sign}{:02}:{:02}", minutes / 60, minutes % 60);
+    } else if parts.name("tz").is_some() {
+        text.push_str("+00:00");
+    }
+    Ok(Scalar::String(text.into()))
+}
+
+fn days_in_month(year: u32, month: u32) -> u32 {
+    match month {
+        2 if year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400)) => {
+            29
+        }
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
+/// Python's message for a time zone offset of a day or more, naming it as `repr` does.
+fn offset_error(seconds: i64) -> String {
+    let days = seconds.div_euclid(86_400);
+    let rest = seconds.rem_euclid(86_400);
+    let mut shown = Vec::new();
+    if days != 0 {
+        shown.push(format!("days={days}"));
+    }
+    if rest != 0 {
+        shown.push(format!("seconds={rest}"));
+    }
+    format!(
+        "offset must be a timedelta strictly between -timedelta(hours=24) and timedelta(hours=24), not datetime.timedelta({}).",
+        shown.join(", ")
+    )
 }
