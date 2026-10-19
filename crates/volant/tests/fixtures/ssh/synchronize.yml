@@ -1,0 +1,20 @@
+- name: synchronize runs rsync from the controller over ssh
+  hosts: box
+  gather_facts: false
+  tasks:
+    - name: push, deleting what the source lacks
+      ansible.posix.synchronize:
+        src: "{{ work }}/src/"
+        dest: "{{ work }}/dest/"
+        delete: true
+        rsync_opts: ["--exclude=skipped"]
+    - name: pull back to the controller
+      ansible.posix.synchronize:
+        src: "{{ work }}/dest/"
+        dest: "{{ work }}/back/"
+        mode: pull
+    - name: a check run changes nothing
+      ansible.posix.synchronize:
+        src: "{{ work }}/src/"
+        dest: "{{ work }}/never/"
+      check_mode: true

@@ -1,0 +1,14 @@
+# One regex per line. Checked by ~/.claude/skills/volant-lane/scripts/gate.py on added lines and commit messages.
+# Infrastructure names (docs/superpowers/infra.md).
+carapace-
+netbird\.cloud
+\bhookwood\b
+\b100\.109\.\d+\.\d+\b
+# AI assistant mentions.
+(?i)\bclaude\b
+(?i)\banthropic\b
+(?i)\bAI assistant\b
+(?i)generated with
+(?i)\bLLM\b
+# tool-specific comment markers (CLAUDE.md: no tool-specific comments in code)
+(?i)ponytail

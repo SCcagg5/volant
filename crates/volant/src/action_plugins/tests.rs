@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use super::*;
+use serde_json::json;
 
 /// A gathered fact sits in its own layer beside the host's map, not in it, and the backend
 /// `package` and `service` pick is read off it all the same.
@@ -108,4 +109,57 @@ fn a_plugin_runs_only_what_the_union_can_hold() {
 #[case::async_status("async_status", false)]
 fn async_is_supported_where_the_reference_supports_it(#[case] module: &str, #[case] ok: bool) {
     assert_eq!(supports_async(module), ok, "{module}");
+}
+
+/// What a plugin reads of its link: an ssh link carries key, user and `ssh` arguments (quoted
+/// as `shlex.quote`), a `local` one none; escalation and delegate are carried on any transport.
+#[rstest::rstest]
+#[case::ssh(
+    json!({"ansible_connection": "ssh", "ansible_user": "deploy", "ansible_ssh_private_key_file": "/k/id",
+           "ansible_ssh_common_args": "-o StrictHostKeyChecking=no -o 'ProxyCommand=nc %h 22'"}),
+    None,
+    None,
+    Some("/k/id"),
+    Some("deploy"),
+    Some("-o StrictHostKeyChecking=no -o 'ProxyCommand=nc %h 22'"),
+)]
+#[case::local(json!({"ansible_connection": "local"}), None, None, None, None, None)]
+#[case::delegate_and_escalation(
+    json!({"ansible_connection": "local"}),
+    Some(("sudo", "root")),
+    Some("jump"),
+    None,
+    None,
+    None,
+)]
+fn the_link_facts_follow_the_transport(
+    #[case] vars: Value,
+    #[case] escalation: Option<(&str, &str)>,
+    #[case] delegate: Option<&str>,
+    #[case] key: Option<&str>,
+    #[case] user: Option<&str>,
+    #[case] common: Option<&str>,
+) {
+    let vars = vars.as_object().expect("a map").clone();
+    let transport =
+        crate::transport::Transport::for_vars("h1", &vars, &crate::testing::defaults()).unwrap();
+    let escalation = escalation.map(|(method, user)| crate::transport::Escalation {
+        method: crate::transport::BecomeMethod::named(method).unwrap(),
+        user: user.to_string(),
+        password: None,
+        exe: Vec::new(),
+        flags: None,
+        prompt_l10n: Vec::new(),
+    });
+    let delegated = delegate.map(|name| (name.to_string(), HostVars::default()));
+    let facts = LinkFacts::of(&transport, escalation.as_ref(), delegated.as_ref());
+    assert_eq!(facts.private_key.as_deref(), key);
+    assert_eq!(facts.remote_user.as_deref(), user);
+    assert_eq!(facts.ssh_common_args.as_deref(), common);
+    assert_eq!(facts.ssh_extra_args, None);
+    assert_eq!(
+        facts.escalation,
+        escalation.map(|e| (e.method.name().to_string(), e.user))
+    );
+    assert_eq!(facts.delegate.as_deref(), delegate);
 }

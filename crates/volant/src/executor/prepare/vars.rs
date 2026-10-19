@@ -136,6 +136,7 @@ pub(in crate::executor) fn delegate_host_vars(
         let layers = store.layered_for_host(host, &scope);
         HostVars {
             map: layers.map,
+            base: Arc::default(),
             hostvars,
             shared: layers.shared,
             facts: layers.facts,

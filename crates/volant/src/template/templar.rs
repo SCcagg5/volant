@@ -13,11 +13,12 @@ use serde_json::{Map, Value};
 use crate::bridge::{Bridge, PluginKind};
 
 use super::bridged;
-use super::context::{Vars, context_of};
+use super::context::{Vars, begin, context_of, is_literal, reads};
 use super::env::{environment, holds_undefined, truthy, type_name};
 use super::filters;
 use super::vm::{
-    convert_error, eval_expr, holds_template, render_str, single_expression, unwrap_unsafe,
+    convert_error, eval_expr, holds_template, keep_literal, render_str, single_expression,
+    unwrap_unsafe,
 };
 use super::{RESOLVING, Tainted, TemplateError};
 
@@ -158,26 +159,29 @@ impl Templar {
         // Per string, not per context: `render_value_in` walks a whole structure through one
         // context, and a tainted field must not make the next field data too.
         tainted.store(false, Ordering::Relaxed);
+        let before = begin(ctx);
         let mut value = self.render_once(text, ctx)?;
+        keep_literal(text, &value, ctx, true, reads(ctx) == before);
         // A variable can hold a template of its own, so Ansible renders a result again while it
         // still carries a marker. Three further passes: a chain longer than that is a loop, and
-        // an unchanged result ends it earlier.
-        //
-        // Not when the pass read a value that came from a managed host, or a file read at run
-        // time: such a result is data, and rendering it again is how a remote string gets to
-        // run code here.
+        // an unchanged result ends it earlier. Not when the pass read a value that came from a
+        // managed host, or a file read at run time: such a result is data, and rendering it
+        // again is how a remote string gets to run code here. Nor when the text wrote the
+        // marker itself: see `keep_literal`.
         for _ in 0..3 {
-            if tainted.load(Ordering::Relaxed) {
+            if tainted.load(Ordering::Relaxed) || is_literal(ctx) {
                 break;
             }
             let Value::String(text) = &value else { break };
             if !Self::is_template(text) {
                 break;
             }
+            let before = reads(ctx);
             let next = self.render_once(text, ctx)?;
             if next == value {
                 break;
             }
+            keep_literal(text, &next, ctx, false, reads(ctx) == before);
             value = next;
         }
         Ok(value)
@@ -223,10 +227,9 @@ impl Templar {
         Ok(self.render_value_tainted(value, vars)?.0)
     }
 
-    /// `render_value`, saying as well whether what came out is data: true when any string of it
-    /// was rendered by a pass that read a name from a managed host, or read a file at run time.
-    /// The loop path asks, because the items of a loop built from a registered list are data and
-    /// must not be rendered again once they are bound to the loop variable.
+    /// `render_value`, saying as well whether what came out is data: true when a string of it
+    /// read a name from a managed host or a file at run time, or holds text `keep_literal` keeps.
+    /// The loop path asks: such items must not be rendered again once bound to the loop variable.
     pub fn render_value_tainted<'a>(
         &self,
         value: &Value,
@@ -234,7 +237,7 @@ impl Templar {
     ) -> Result<(Value, bool), TemplateError> {
         let (ctx, tainted) = context_of(vars.into());
         let mut any = false;
-        let out = self.render_value_in(value, &ctx, &tainted, &mut any)?;
+        let out = self.render_value_in(value, &ctx, &tainted, &mut any, true)?;
         Ok((out, any))
     }
 
@@ -257,7 +260,7 @@ impl Templar {
         for (key, value) in map {
             let mut any = false;
             let rendered = self
-                .render_value_in(value, &ctx, &tainted, &mut any)
+                .render_value_in(value, &ctx, &tainted, &mut any, false)
                 .map_err(|err| {
                     // Measured on ansible-core 2.19.12: a plugin's failure names the value it
                     // was resolving, `Error while resolving value for 'msg': The lookup plugin
@@ -287,23 +290,24 @@ impl Templar {
         ctx: &minijinja::Value,
         tainted: &Tainted,
         any: &mut bool,
+        keep: bool,
     ) -> Result<Value, TemplateError> {
         Ok(match value {
             Value::String(s) => {
                 let out = self.render_in(s, ctx, tainted)?;
-                *any |= tainted.load(Ordering::Relaxed);
+                *any |= tainted.load(Ordering::Relaxed) || (keep && is_literal(ctx));
                 out
             }
             Value::Array(items) => Value::Array(
                 items
                     .iter()
-                    .map(|v| self.render_value_in(v, ctx, tainted, any))
+                    .map(|v| self.render_value_in(v, ctx, tainted, any, keep))
                     .collect::<Result<_, _>>()?,
             ),
             Value::Object(map) => {
                 let mut out = Map::new();
                 for (k, v) in map {
-                    out.insert(k.clone(), self.render_value_in(v, ctx, tainted, any)?);
+                    out.insert(k.clone(), self.render_value_in(v, ctx, tainted, any, keep)?);
                 }
                 Value::Object(out)
             }
@@ -401,6 +405,7 @@ impl Templar {
                 facts: vars.facts,
                 untrusted: Some(&untrusted),
                 untrusted_hosts: vars.untrusted_hosts,
+                base: vars.base,
             });
             let mut next = current.clone();
             let mut changed = false;
@@ -440,7 +445,7 @@ impl Templar {
                 let out = self
                     .render_in(s, ctx, tainted)
                     .unwrap_or_else(|_| value.clone());
-                *any |= tainted.load(Ordering::Relaxed);
+                *any |= tainted.load(Ordering::Relaxed) || is_literal(ctx);
                 out
             }
             Value::Array(items) => Value::Array(
