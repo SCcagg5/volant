@@ -131,6 +131,11 @@ impl Renderer {
     }
 
     pub fn play(&mut self, name: &str) {
+        // A play named with nothing, which `hosts: "{{ none }}"` gives, prints no brackets.
+        if name.is_empty() {
+            self.banner("PLAY");
+            return;
+        }
         self.banner(&format!("PLAY [{name}]"));
     }
 

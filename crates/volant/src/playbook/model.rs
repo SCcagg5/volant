@@ -25,6 +25,8 @@ pub struct Play {
     /// one per item for the list form. `--list-hosts` prints it as the Python list the
     /// reference prints, and `hosts: a,b` there is one pattern while `hosts: [a, b]` is two.
     pub host_patterns: Vec<String>,
+    /// Whether `hosts` was written as a list. A template inside a list renders to one string.
+    pub host_list: bool,
     /// The play's own tags. Every task under it inherits them for the selection; the listing
     /// prints them on the play's own line.
     pub tags: Vec<String>,

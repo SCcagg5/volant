@@ -12,6 +12,7 @@ mod driver;
 mod free;
 mod include;
 mod play_checks;
+mod play_hosts;
 mod prepare;
 mod report;
 mod run;
@@ -39,6 +40,7 @@ use coordinator::run_batch;
 pub(crate) use driver::{expressions, strings, task_strings};
 pub(crate) use play_checks::as_bool_value;
 use play_checks::{check_gather_keywords, load_play_vars_files, max_fail_percentage};
+pub(crate) use play_hosts::{Context as HostsContext, is_templated, render_hosts};
 pub use state::{Abort, LinkKey, PlayEnd, Reboots, RunState};
 
 /// Ansible's default `timeout`: seconds to establish a connection.

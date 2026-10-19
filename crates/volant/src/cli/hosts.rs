@@ -1,15 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::borrow::Cow;
 use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 use super::args::PlaybookArgs;
+use crate::bridge::Bridge;
+use crate::compile::Compiled;
 use crate::compile::TagSelection;
 use crate::config::Config;
-use crate::inventory::{Host, Inventory};
+use crate::executor::{self, HostsContext};
+use crate::inventory::{Host, Inventory, Source};
 use crate::listing::Listing;
 use crate::playbook;
 use crate::render::Renderer;
 use crate::stats::Refusal;
+use crate::template::Templar;
+use crate::vars::VarStore;
 
 /// The tags the run selects, from the configuration file, the environment and the command line.
 ///
@@ -71,6 +78,116 @@ pub(super) fn resolve_limit(
         );
     }
     Ok(Some(names))
+}
+
+/// The play with its `hosts` rendered, for a play whose `hosts` is a template, against the
+/// run's own variables.
+pub(super) fn rendered<'a>(
+    play: &'a playbook::Play,
+    compiled: &Compiled,
+    state: &executor::RunState,
+    inventory: &Inventory,
+    limit: Option<&HashSet<String>>,
+) -> anyhow::Result<Cow<'a, playbook::Play>> {
+    let (templar, vars) = (&state.templar, &state.vars);
+    render_with(
+        play,
+        compiled,
+        templar,
+        vars,
+        inventory,
+        limit,
+        state.played,
+    )
+}
+
+fn render_with<'a>(
+    play: &'a playbook::Play,
+    compiled: &Compiled,
+    templar: &Templar,
+    store: &Mutex<VarStore>,
+    inventory: &Inventory,
+    limit: Option<&HashSet<String>>,
+    with_hostvars: bool,
+) -> anyhow::Result<Cow<'a, playbook::Play>> {
+    if !executor::is_templated(play) {
+        return Ok(Cow::Borrowed(play));
+    }
+    let all_hosts: Vec<String> = inventory
+        .resolve("all")
+        .hosts
+        .into_iter()
+        .map(|h| h.name)
+        .filter(|name| limit.is_none_or(|allowed| allowed.contains(name)))
+        .collect();
+    executor::render_hosts(
+        play,
+        &HostsContext {
+            templar,
+            vars: store,
+            compiled,
+            all_hosts: &all_hosts,
+            with_hostvars,
+        },
+    )
+}
+
+/// What a listing renders a play's `hosts` against: a store over the inventory and the extra
+/// variables, built when a play needs it and not otherwise, so a listing of plain patterns reads
+/// no `group_vars` it did not read before.
+pub(super) struct ListingHosts<'a> {
+    args: &'a PlaybookArgs,
+    sources: &'a [Source],
+    bridge: &'a Arc<Bridge>,
+    selection: &'a TagSelection,
+    limit: Option<&'a HashSet<String>>,
+    store: Option<Mutex<VarStore>>,
+}
+
+impl<'a> ListingHosts<'a> {
+    pub fn new(
+        args: &'a PlaybookArgs,
+        sources: &'a [Source],
+        bridge: &'a Arc<Bridge>,
+        selection: &'a TagSelection,
+        limit: Option<&'a HashSet<String>>,
+    ) -> Self {
+        Self {
+            args,
+            sources,
+            bridge,
+            selection,
+            limit,
+            store: None,
+        }
+    }
+
+    /// The play with its `hosts` rendered, as the run renders it, with no play behind it.
+    pub fn render<'p>(
+        &mut self,
+        play: &'p playbook::Play,
+        compiled: &Compiled,
+        inventory: &Inventory,
+    ) -> anyhow::Result<Cow<'p, playbook::Play>> {
+        if !executor::is_templated(play) {
+            return Ok(Cow::Borrowed(play));
+        }
+        if self.store.is_none() {
+            let extra =
+                crate::vars::parse_extra_vars(&self.args.extra_vars, &std::env::current_dir()?)?;
+            let mut store = VarStore::with_sources(inventory, self.sources, &play.dir, extra)?;
+            let (run, skip) = self.selection.lists();
+            store.set_tags(run, skip);
+            store.set_modes(self.args.check, self.args.diff);
+            self.store = Some(Mutex::new(store));
+        }
+        let store = self.store.as_ref().expect("the store is built");
+        store.lock().expect("vars lock").rebase(&play.dir)?;
+        let templar = Templar::with_bridge(play.dir.clone(), Some(Arc::clone(self.bridge)));
+        render_with(
+            play, compiled, &templar, store, inventory, self.limit, false,
+        )
+    }
 }
 
 /// The hosts one play would run on: its own pattern resolved, narrowed by `--limit`. One

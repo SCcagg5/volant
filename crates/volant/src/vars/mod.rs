@@ -7,6 +7,7 @@ mod host_vars;
 mod layers;
 mod load;
 mod magic;
+mod play_view;
 mod shared;
 mod store;
 
