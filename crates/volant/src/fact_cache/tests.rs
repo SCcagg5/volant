@@ -201,3 +201,18 @@ fn a_fact_too_deep_to_read_back_is_not_written() {
     );
     assert!(!dir.path().join("pfx_s1_h").exists());
 }
+
+/// A file that was written deeper than `serde_json` reads by default still reads, and a file
+/// deeper than the loader allows, which only another program writes, is ignored, not an error.
+#[rstest]
+#[case::a_file_an_earlier_run_wrote(300, true)]
+#[case::a_file_no_loader_value_makes(600, false)]
+fn a_deep_file_is_read_or_ignored(#[case] levels: usize, #[case] read: bool) {
+    let dir = tempfile::tempdir().unwrap();
+    let payload = format!("{{\"k\": {}1{}}}", "[".repeat(levels), "]".repeat(levels));
+    let body = dumps(&json!({ "__payload__": payload }));
+    std::fs::write(dir.path().join("pfx_s1_h"), body).unwrap();
+    let back = cache(dir.path(), 0).read("h").unwrap();
+    assert_eq!(back.is_some(), read);
+    assert!(dir.path().join("pfx_s1_h").exists());
+}

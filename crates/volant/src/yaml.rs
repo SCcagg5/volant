@@ -11,6 +11,9 @@ use serde_json::{Map, Value};
 
 mod limits;
 
+/// The deepest nesting a YAML text may have, for the code that must read a value back.
+pub(crate) const MAX_DEPTH: usize = limits::MAX_DEPTH;
+
 /// Loads every document of `text`. Errors name `source`.
 ///
 /// A key written twice in one mapping keeps its last value, as PyYAML does for ansible-core

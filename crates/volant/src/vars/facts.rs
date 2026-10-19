@@ -304,6 +304,12 @@ impl VarStore {
         if !self.caching() {
             return;
         }
+        if !crate::fact_cache::fits(value) {
+            eprintln!(
+                "[WARNING]: The fact '{key}' of {host} nests too deep for the fact cache and is not cached."
+            );
+            return;
+        }
         self.persisted
             .entry(host.to_string())
             .or_default()
