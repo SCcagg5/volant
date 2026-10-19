@@ -992,9 +992,24 @@ def shim():
         else:
             self._connection._shell.tmpdir = None
 
-    ActionBase._execute_module = execute_module
-    ActionBase._make_tmp_path = make_tmp_path
-    ActionBase._remove_tmp_path = remove_tmp_path
+    # A plugin that makes a connection of its own (`synchronize` runs rsync on the controller
+    # through a `local` one) gets ansible-core's own methods: only the stand-in carries `_ident`
+    # and answers to the controller.
+    original = (
+        ActionBase._execute_module, ActionBase._make_tmp_path, ActionBase._remove_tmp_path
+    )
+
+    def toward_link(shimmed, kept):
+        def method(self, *args, **kwargs):
+            if isinstance(self._connection, Link):
+                return shimmed(self, *args, **kwargs)
+            return kept(self, *args, **kwargs)
+
+        return method
+
+    ActionBase._execute_module = toward_link(execute_module, original[0])
+    ActionBase._make_tmp_path = toward_link(make_tmp_path, original[1])
+    ActionBase._remove_tmp_path = toward_link(remove_tmp_path, original[2])
     SHIM.update(Link=Link, Unsupported=Unsupported)
     return SHIM
 
@@ -1067,6 +1082,8 @@ def run_action(ident, request):
         if shell is None:
             raise AnsibleError("the shell plugin %s is not supported yet" % shell_type)
         shell.set_options(var_options=task_vars)
+        # What ansible-core's own `_execute_module` reads to build a module that runs here.
+        task_vars.setdefault("ansible_playbook_python", sys.executable)
         groups = task_vars.get("groups")
         names = groups.get("all", []) if isinstance(groups, dict) else []
         known = task_vars.get("hostvars")
