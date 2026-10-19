@@ -1,0 +1,72 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! The steps of a batch as one host runs them, with the keywords written as templates rendered.
+
+use std::collections::HashMap;
+
+use tokio::sync::mpsc;
+
+use crate::compile::{Compiled, Step};
+use crate::template::{Templar, TemplateError};
+
+use super::super::coordinator::Event;
+use super::super::prepare::{Prepared, resolve};
+
+/// The steps of the batch in hand whose keywords were rendered for this host, by position. A
+/// step with nothing to render is not in it.
+pub(super) type Rendered = HashMap<usize, Step>;
+
+/// The step at `index` as this host runs it: the copy its templated keywords were rendered into
+/// when there is one, the compiled step otherwise.
+pub(super) fn step_at<'a>(c: &'a Compiled, rendered: &'a Rendered, index: usize) -> &'a Step {
+    rendered.get(&index).unwrap_or(&c.steps[index])
+}
+
+/// Renders the templated keywords of `step` for this host, once the task's own `when` has held
+/// for it, and keeps the copy that holds what they rendered to in `rendered`. What the reference
+/// prints before the task goes to `tx`. A value that is not what its keyword needs turns the
+/// preparation into the failure of the task for this host, the way an argument that does not
+/// render does.
+pub(super) async fn render_keywords(
+    step: &Step,
+    index: usize,
+    host: &str,
+    prepared: Result<Prepared, TemplateError>,
+    rendered: &mut Rendered,
+    templar: &Templar,
+    tx: &mpsc::Sender<Event>,
+) -> Result<Prepared, TemplateError> {
+    if !step.task.deferred.any() {
+        return prepared;
+    }
+    rendered.remove(&index);
+    let Ok(ready) = &prepared else {
+        return prepared;
+    };
+    if matches!(ready, Prepared::Skipped(_)) {
+        return prepared;
+    }
+    let items: Vec<_> = ready
+        .items()
+        .iter()
+        .filter(|i| i.skipped.is_none())
+        .map(|i| &i.vars)
+        .collect();
+    let resolution = resolve(step, &items, templar);
+    for message in resolution.warnings {
+        let _ = tx
+            .send(Event::Warning {
+                host: host.to_string(),
+                index,
+                message,
+                censored: false,
+            })
+            .await;
+    }
+    if let Some(copy) = resolution.step {
+        rendered.insert(index, *copy);
+    }
+    match resolution.error {
+        Some(err) => Err(err),
+        None => prepared,
+    }
+}
