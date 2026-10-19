@@ -1,0 +1,14 @@
+- hosts: remote
+  gather_facts: false
+  ignore_unreachable: true
+  tasks:
+    - command: "true"
+      connection: local
+      notify: unreachable
+    - debug:
+        msg: the play goes on
+  handlers:
+    - name: unreachable
+      command: "true"
+      connection: ssh
+      port: 1

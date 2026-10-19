@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use serde_json::{Map, Value};
-use volant_protocol::modules::{is_builtin, short_name};
+use volant_protocol::modules::{is_builtin, resolved_name, short_name};
 
 use crate::compile::{Compiled, Step, after, after_failure, rescue_target};
 use crate::playbook::PlayTask;
@@ -86,7 +86,7 @@ pub(super) const FACT_MODULES: [&str; 10] = [
 /// as they stood before. A builtin answers from [`FACT_MODULES`]; any other module - a
 /// collection's, a role's `library/` - may return `ansible_facts`, so it ends its batch too.
 pub(super) fn writes_facts(task: &PlayTask) -> bool {
-    !is_builtin(&task.module) || FACT_MODULES.contains(&short_name(&task.module))
+    !is_builtin(&task.module) || FACT_MODULES.contains(&resolved_name(&task.module))
 }
 
 /// Whether rendering a task calls a lookup: `lookup`, `query` or `q` in an expression, or a
