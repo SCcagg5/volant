@@ -56,8 +56,8 @@ pub(crate) fn not_found(name: &str, searched: &[PathBuf]) -> String {
 }
 
 /// What `host_named_paths` says about a controller source `name` that `untrusted` lists `arg`
-/// as named by a managed host, made before the file is read: a lookup that answers "not found"
-/// for a name outside the allowed directories would tell a host which files exist there.
+/// as named by a managed host, made before the file is read. Where the text of the name decides,
+/// nothing is looked up: an answer of "not found" would tell a host which paths exist.
 ///
 /// Measured on ansible-core 2.19.12, the reference sends whatever controller file a registered
 /// value or a gathered fact names, `~/.ssh` included, so a host that controls a command's output

@@ -165,14 +165,21 @@ A `src` is named by a managed host when its render read something a host contrib
 | Value | What the task does |
 |---|---|
 | `allow` (the default) | Looks the file up and sends it, as ansible-core does. |
-| `contained` | Looks the file up only when its path stays inside the directories where you keep the files of the task. |
+| `contained` | Reads the file only when it is in a `files` or `templates` directory that the task searches. |
 | `refuse` | Fails the task before any path is looked up. |
 
 `allow` means that a managed host can choose which readable controller file a `copy`, `template` or `script` task sends to it, exactly as in ansible-core 2.19.12. Measured there, a `src` that is a registered value, a command's `stdout` or a fact sends whatever file it names, `~/.ssh` included. Roles that pick a template by fact depend on this. `contained` and `refuse` exist to tighten it, for a run where a host is less trusted than the person who runs the playbook.
 
-Under `contained`, a name is accepted when it has no `..` component and, if it is absolute, lies under one of the directories the reference searches for the task: the role and the roles it is a dependency of, the directory of the task's file, and the playbook's directory. A relative name is joined to those directories, so it is inside unless it climbs out. The check reads the text of the path. A link that you placed inside those directories is your own file and is followed. For `script`, the file is the first word of the line. Because the playbook's directory counts, a playbook kept in a home directory makes the files below it reachable.
+Under `contained`, the directories that count are the `files` and `templates` directories of the role, of the roles it is a dependency of, of the directory of the task's file (`tasks/files` in a role) and of the playbook directory. The rest of those trees does not count: `group_vars`, `vars`, `defaults`, an inventory, `ansible.cfg` and a vault password file are never reachable by a name a host chose, and neither is a file kept beside the playbook. The rules, in order:
 
-A refused task fails before the path is so much as looked up, because an answer of "not found" would already tell a host whether a path exists on the controller. Under `refuse` the message is:
+- A name that starts with `~`, or `~user`, is refused. ansible-core's own plugins expand it to a home directory, which the text of the name does not show.
+- A name with a `..` component is refused, even one that folds back inside. The file system follows a link before it folds `..`, so the folded path is not the one that would be opened.
+- An absolute name must lie under one of those directories and must not hold a `$`, which ansible-core expands in an absolute name. `with_first_found` hands over an absolute name of this kind.
+- A relative name is looked up as the plugin looks it up. The first file that exists is the one read, and it must lie under one of those directories. A file with that name beside the playbook, outside `files`, is refused when it exists. As a result the refusal tells a host that such a file exists; the answer for any other name is the usual "could not find".
+
+The check reads the text of the path. A link that you placed inside those directories is your own file and is followed. A source on the host, such as `remote_src: true` for `copy` and `unarchive`, or `assemble` when `remote_src` is not set to false, is not a controller file and is not checked. For `script`, the file is the first word of the line, or of `cmd`. For `uri`, `src` and the `filename` of each field of a multipart `body` count.
+
+A task is refused before the path is looked up when the mode or the text of the name decides it, because an answer of "not found" would already tell a host whether a path exists on the controller. Under `refuse` the message is:
 
 ```text
 the 'src' of this task was named by a managed host, and a controller file a host chose is
@@ -183,10 +190,10 @@ Under `contained`, it names the value and the setting:
 
 ```text
 the 'src' of this task was named by a managed host, and '../up.j2' is not inside the
-directories of the playbook or the role (host_named_paths = contained)
+files or templates directories of the playbook or the role (host_named_paths = contained)
 ```
 
-The argument is `_raw_params` for a `script`. Any other word for the setting stops the run at start with exit code 5 and names the key, the three words and the value found.
+The argument is `_raw_params` or `cmd` for a `script`. Any other word for the setting stops the run at start with exit code 5 and names the key, the three words and the value found.
 
 The mode changes which file is read, never how the text of a template is trusted. When the `src` of a `template` was named by a host, `template_path` and `template_fullpath` are that host's values in the render, the way `template_destpath` is for a `dest`.
 
