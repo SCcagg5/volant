@@ -4,9 +4,8 @@ use serde_json::json;
 
 use super::mutable::{identity, is_literal, mutable, plain_list, plain_map, snapshot};
 
-/// The mutable objects stand in for the plain lists and mappings minijinja builds, which this
-/// module finds by the Rust type behind them. An upgrade of minijinja that changes those types
-/// fails here, not in a template.
+/// The mutable objects stand in for the plain lists and mappings minijinja builds, found by
+/// their Rust type. An upgrade that changes those types fails here, not in a template.
 #[test]
 fn plain_lists_and_mappings_are_told_from_other_objects() {
     assert!(plain_list(&Value::from_serialize(json!([1, 2]))).is_some());
@@ -99,7 +98,7 @@ fn copying_a_list_that_holds_copies_of_itself_is_linear() {
     let out = render(
         "{% set l = [1] %}{% for i in range(60) %}{% set _ = l.append(l.copy()) %}{% endfor %}{{ l | length }}",
     );
-    assert_eq!(out, Ok(json!("61")));
+    assert_eq!(out, Ok(json!(61)));
 }
 
 /// A list of mixed types is no total order: sorting it is an error and never a panic, for any
@@ -122,7 +121,7 @@ fn a_reverse_sort_is_stable_and_orders_the_items() {
         render(
             "{% set l = [[1, 'a'], [2, 'b'], [1, 'c']] %}{% set _ = l.sort(reverse=True) %}{{ l }}"
         ),
-        Ok(json!("[[2, 'b'], [1, 'c'], [1, 'a']]"))
+        Ok(json!([[2, "b"], [1, "c"], [1, "a"]]))
     );
 }
 
