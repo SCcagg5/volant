@@ -6669,3 +6669,46 @@ fn a_deeply_nested_yaml_file_is_a_load_error() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A cacheable fact built from nested host text is read back by the next run. The cache file was
+/// read with a recursion limit lower than what the loader accepts, so one such fact ended every
+/// later run before any host ran, until the file was removed.
+#[test]
+fn a_nested_cacheable_fact_does_not_break_the_next_run() {
+    let dir = probe_dir("deep-cached-fact");
+    std::fs::write(dir.join("inv.ini"), "h1 ansible_connection=local\n").expect("an inventory");
+    std::fs::write(dir.join("doc.yml"), format!("{}x\n", "- ".repeat(200))).expect("doc.yml");
+    std::fs::write(
+        dir.join("ansible.cfg"),
+        format!(
+            "[defaults]\nfact_caching = jsonfile\nfact_caching_connection = {}\n",
+            dir.join("cache").display()
+        ),
+    )
+    .expect("ansible.cfg");
+    std::fs::write(
+        dir.join("play.yml"),
+        "- hosts: all\n  gather_facts: false\n  tasks:\n    \
+         - command: cat doc.yml\n      register: r\n    \
+         - set_fact: {deep: \"{{ r.stdout | from_yaml }}\", cacheable: true}\n",
+    )
+    .expect("the play");
+    for run in 1..=2 {
+        let out = volant_within_full(
+            &["playbook", "-i", "inv.ini", "play.yml"],
+            PROBE_DEADLINE,
+            None,
+            None,
+            Some(&dir),
+            None,
+            &[],
+        );
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(out.status.code(), Some(0), "run {run}: {text}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -406,3 +406,97 @@ fn a_file_that_reuses_a_few_anchors_loads_whole() {
     assert_eq!(json["h299"]["vars"]["dns"], json!({"x": 1, "y": 2}));
     assert_eq!(json["h7"]["tags"], json!(["t1", "t2"]));
 }
+
+/// A stream holds one document, as in ansible-core 2.19.12, whose loaders all stop at the second
+/// one with `expected a single document in the stream`. The limits on nesting and on copies are
+/// for the whole text, so a stream of documents cannot add up to more than one document may.
+#[test]
+fn a_stream_holds_one_document() {
+    for (what, text) in [
+        ("two documents", "---\na: 1\n---\nb: 2\n".to_string()),
+        ("a trailing marker", "a: 1\n---\n".to_string()),
+        ("empty documents", "---\n---\n".to_string()),
+        ("many empty documents", "---\n".repeat(100_000)),
+        (
+            "three alias bombs",
+            format!("---\n{0}---\n{0}---\n{0}", alias_bomb(5)),
+        ),
+    ] {
+        let err = load(&text, "stream.yml")
+            .err()
+            .unwrap_or_else(|| panic!("{what} loaded"));
+        let err = format!("{err:#}");
+        assert!(
+            err.contains("stream.yml") && err.contains("single document"),
+            "{what}: {err}"
+        );
+    }
+    for text in [
+        "---\na: 1\n",
+        "# c\n---\na: 1\n",
+        "a: 1\n...\n",
+        "---\n",
+        "",
+    ] {
+        assert!(load(text, "one.yml").is_ok(), "{text:?}");
+    }
+}
+
+/// A scalar that an alias names is copied with its text, so the bytes count too. Ten aliases of
+/// a one-megabyte scalar load, and eighty exceed the limit of 64 MiB, in every scalar style.
+#[test]
+fn aliases_of_a_big_scalar_are_counted_by_their_bytes() {
+    let text = "x".repeat(1_000_000);
+    let styles = [
+        ("plain", format!("a: &a {text}\n")),
+        ("single-quoted", format!("a: &a '{text}'\n")),
+        ("double-quoted", format!("a: &a \"{text}\\n\"\n")),
+        ("literal", format!("a: &a |\n  {text}\n")),
+        (
+            "multi-line plain",
+            format!(
+                "a: &a {}y\n",
+                format!("{}\n  ", "x".repeat(99)).repeat(10_000)
+            ),
+        ),
+    ];
+    for (style, anchor) in styles {
+        for (aliases, loads) in [(10, true), (80, false)] {
+            let doc = format!("{anchor}b: [{}]\n", vec!["*a"; aliases].join(","));
+            let loaded = load(&doc, "big.yml");
+            assert_eq!(
+                loaded.is_ok(),
+                loads,
+                "{style} x {aliases}: {:?}",
+                loaded.err()
+            );
+            if let Some(err) = loaded.err() {
+                let err = format!("{err:#}");
+                assert!(
+                    err.contains("big.yml") && err.contains("67108864 bytes"),
+                    "{style}: {err}"
+                );
+            }
+        }
+    }
+}
+
+/// `!unsafe` inside `!unsafe` wraps a string once. Wrapping again at every level doubled the
+/// string each time, so a document of a few hundred bytes took gigabytes.
+#[test]
+fn nested_unsafe_wraps_a_string_once() {
+    let once = unsafe_data(Value::String("{{".into()));
+    for levels in [1, 2, 3, 32, 254] {
+        let text = format!(
+            "{}\"{{{{\"{}\n",
+            "{a: !unsafe ".repeat(levels),
+            "}".repeat(levels)
+        );
+        let docs = load(&text, "unsafe.yml").unwrap();
+        let mut value = to_json(&docs[0]).unwrap();
+        for _ in 0..levels {
+            value = value["a"].take();
+        }
+        assert_eq!(value, once, "{levels} levels");
+    }
+}

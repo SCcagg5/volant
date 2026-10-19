@@ -165,3 +165,39 @@ fn the_reference_s_file_is_written_back_byte_for_byte() {
         expected
     );
 }
+
+/// A `set_fact` value that the YAML loader accepts must come back from the file. The writer
+/// wraps each level in a second object, so 254 levels of a list are about 510 levels of JSON,
+/// four times the recursion limit of `serde_json`: such a value made every later run fail until
+/// the file was removed.
+#[test]
+fn a_deeply_nested_fact_comes_back_from_the_file() {
+    let mut value = json!("x");
+    for _ in 0..254 {
+        value = json!([value]);
+    }
+    let facts = json!({"deep": tag(&value)});
+    let dir = tempfile::tempdir().unwrap();
+    cache(dir.path(), 0)
+        .write("h", facts.as_object().unwrap())
+        .unwrap();
+    let back = cache(dir.path(), 0).read("h").unwrap().unwrap();
+    assert_eq!(back["deep"], value);
+}
+
+/// A value too deep to read back is not written, so that no file of ours fails the next run.
+#[test]
+fn a_fact_too_deep_to_read_back_is_not_written() {
+    let mut value = json!("x");
+    for _ in 0..400 {
+        value = json!([value]);
+    }
+    let facts = json!({"deep": tag(&value)});
+    let dir = tempfile::tempdir().unwrap();
+    assert!(
+        cache(dir.path(), 0)
+            .write("h", facts.as_object().unwrap())
+            .is_err()
+    );
+    assert!(!dir.path().join("pfx_s1_h").exists());
+}
