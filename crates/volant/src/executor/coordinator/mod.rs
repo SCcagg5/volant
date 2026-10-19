@@ -2,7 +2,6 @@
 //! The coordinator: the serialised view of a batch's progress, and everything that reaches
 //! the terminal.
 
-use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
@@ -22,12 +21,14 @@ use super::include::IncludeGroup;
 use super::prepare::{PlayPlan, Strategy};
 use super::{RunOptions, RunState};
 
+mod arrivals;
 mod display;
 mod events;
 mod meta;
 mod publish;
 mod types;
 
+use arrivals::{Arrivals, arrivals};
 use display::{arrived, header, header_for, report_result, switch_header};
 use events::{
     Held, answer, book, debug_ask, debugging, show_now, shows_a_line, unreachable_ask,
@@ -246,6 +247,9 @@ pub(super) async fn run_batch(
     // host reports its request and then blocks, which it may do while this loop is still holding
     // an earlier index for a slower host.
     let mut includes: HashMap<usize, Vec<(String, Vec<IncludeGroup>)>> = HashMap::new();
+    // The role instances each host has had brought in, which is what `allow_duplicates: false`
+    // is checked against.
+    let mut roles_run: HashMap<String, HashSet<String>> = HashMap::new();
     // What a host that could not be reached owes the terminal, by host and the step its batch
     // began at. The host leaves the play on arrival; its block and line print where the host
     // stands in the step's order, like a result, instead of in front of the hosts before it.
@@ -619,41 +623,12 @@ pub(super) async fn run_batch(
                 // share one `included:` line and one copy of the steps behind it. First
                 // appearance decides the order, walked in the play's host order and then in each
                 // host's item order, which is the order the reference prints them in.
-                let mut arrived = includes.remove(&index).unwrap_or_default();
-                // `usize::MAX` rather than `None` for a host the batch does not hold, which
-                // would otherwise sort in front of every rank and take the first line.
-                arrived.sort_by_key(|(host, _)| {
-                    play_hosts
-                        .iter()
-                        .position(|h| h == host)
-                        .unwrap_or(usize::MAX)
-                });
-                let mut asking: Vec<String> =
-                    arrived.iter().map(|(host, _)| host.clone()).collect();
-                let mut order: Vec<String> = Vec::new();
-                let mut grouped: HashMap<String, (IncludeGroup, Vec<String>)> = HashMap::new();
-                for (host, groups) in arrived {
-                    for group in groups {
-                        match grouped.entry(group.key.clone()) {
-                            Entry::Vacant(slot) => {
-                                order.push(group.key.clone());
-                                slot.insert((group, vec![host.clone()]));
-                            }
-                            Entry::Occupied(mut slot) => slot.get_mut().1.push(host.clone()),
-                        }
-                    }
-                }
-                let mut lines: Vec<(String, Vec<String>, Option<String>)> = Vec::new();
-                let mut expansions: Vec<crate::compile::Grafted> = Vec::new();
-                for key in order {
-                    let (group, hosts) = grouped.remove(&key).expect("a key just inserted");
-                    lines.push((group.what, hosts.clone(), group.label));
-                    expansions.push(crate::compile::Grafted {
-                        expanded: group.expanded,
-                        params: group.params,
-                        hosts: hosts.into(),
-                    });
-                }
+                let arrived = includes.remove(&index).unwrap_or_default();
+                let Arrivals {
+                    mut asking,
+                    lines,
+                    expansions,
+                } = arrivals(arrived, &play_hosts, &mut roles_run);
                 crate::compile::graft(&mut next, index + 1, &step, expansions);
                 for (what, hosts, label) in lines {
                     // The banner goes in front of the first line this step shows, and for an

@@ -4,7 +4,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::bail;
 use serde_json::{Map, Value};
 
 use crate::playbook::{Apply, PlayTask, TaskFileRefused};
@@ -12,7 +11,7 @@ use crate::roles::{RoleEntry, RoleVars};
 
 use super::builder::{Builder, sorted};
 use super::flatten::unknown_options;
-use super::inherit::merge;
+use super::inherit::{extend, lay_under, merge};
 use super::model::{BlockSpan, Compiled, IncludeParams, Step};
 /// What one host asked for at an include step, for one item of its loop.
 #[derive(Debug, Clone)]
@@ -25,6 +24,9 @@ pub(crate) struct IncludeRequest {
     pub vars: IncludeParams,
     /// The item's display label, which the `included:` line carries as `=> (item=...)`.
     pub label: Option<String>,
+    /// For a role, what makes two statements the same role instance for a host that has already
+    /// run one: see [`role_identity`].
+    pub role_id: Option<String>,
 }
 
 impl IncludeRequest {
@@ -41,6 +43,11 @@ impl IncludeRequest {
             "vars": sorted(&self.vars.values),
             "untrusted": &self.vars.untrusted,
             "label": &self.label,
+            "role": &self.role_id,
+            "flags": match &self.target {
+                IncludeTarget::Role(entry) => [entry.public, entry.unique, entry.validate],
+                IncludeTarget::File(_) => [false; 3],
+            },
         })
         .to_string()
     }
@@ -115,6 +122,8 @@ pub(crate) fn expand_include(
         depth: 0,
         include_depth: depth,
         selection: &base.selection,
+        exporting: true,
+        imported: Vec::new(),
     };
     // `block` and `role` are seeded empty and rebased by `graft`: a sub-compilation that mixed
     // the running play's absolute indices with its own relative ones would be a list where the
@@ -192,7 +201,7 @@ pub(crate) fn graft(
     let mut steps: Vec<Step> = Vec::new();
     let mut spans: Vec<BlockSpan> = Vec::new();
     for Grafted {
-        expanded: sub,
+        expanded: mut sub,
         params,
         hosts,
     } in groups
@@ -216,6 +225,7 @@ pub(crate) fn graft(
             span.parent = span.parent.map(|p| p + block_offset).or(parent.block);
             spans.push(span);
         }
+        publish_roles(base, &mut sub.roles);
         base.roles.extend(sub.roles);
         // Behind the play's own, measured: a play handler and an included role's handler notified
         // in that order run in that order. Appending is also what keeps every index a host is
@@ -232,6 +242,38 @@ pub(crate) fn graft(
     steps
 }
 
+/// Settles the variables of the roles one expansion brought in.
+///
+/// Measured on ansible-core 2.19.12: a role an `include_role` reads sees what the public roles of
+/// the play lend, and a public one adds its own `defaults` and `vars` to that for everything
+/// that runs after it, the roles the play has already compiled included. `public: true` does not
+/// reach back: a task that ran before the statement read nothing of it. The play's own tasks and
+/// the roles of other hosts see it as well, because the reference keeps the list in the play and
+/// not in the host.
+fn publish_roles(base: &mut Compiled, brought: &mut [RoleVars]) {
+    let mut group = (Map::new(), Map::new());
+    for role in brought.iter() {
+        extend(&mut group.0, &role.defaults);
+        extend(&mut group.1, &role.vars);
+    }
+    let mut published = false;
+    for role in brought.iter().filter(|role| role.public) {
+        extend(&mut base.exported.defaults, &role.defaults);
+        published = true;
+    }
+    for role in brought.iter().filter(|role| role.public) {
+        extend(&mut base.exported.vars, &role.vars);
+    }
+    if published {
+        for role in &mut base.roles {
+            lay_under(role, &base.exported, None);
+        }
+    }
+    for role in brought {
+        lay_under(role, &base.exported, Some(group.clone()));
+    }
+}
+
 /// The role one `include_role` task names, read out of its arguments and whatever the item
 /// rendered for them.
 pub(crate) fn include_role_entry(args: &Map<String, Value>) -> anyhow::Result<RoleEntry> {
@@ -242,30 +284,79 @@ pub(crate) fn include_role_entry(args: &Map<String, Value>) -> anyhow::Result<Ro
         .ok_or_else(|| anyhow::anyhow!("'include_role' takes a role name"))?;
     let from = |key: &str, fallback: &str| text(key).unwrap_or(fallback).to_string();
     Ok(RoleEntry {
-        name: name.to_string(),
-        from: crate::roles::RoleFrom {
-            tasks: from("tasks_from", "main"),
-            vars: from("vars_from", "main"),
-            defaults: from("defaults_from", "main"),
-            handlers: from("handlers_from", "main"),
-        },
         // As for `import_role`: everything the statement says is an argument of the statement,
         // and what it hands the role travels in the task's own `vars:`.
         params: Map::new(),
         keywords: PlayTask::empty(),
+        // An include keeps the variables of its role to the role unless it says `public: true`,
+        // and unlike an import it runs its role again unless it says `allow_duplicates: false`.
+        public: role_flag(args, "public", false)?,
+        validate: role_flag(args, "rolespec_validate", true)?,
+        unique: !role_flag(args, "allow_duplicates", true)?,
+        ..RoleEntry::named(
+            name,
+            crate::roles::RoleFrom {
+                tasks: from("tasks_from", "main"),
+                vars: from("vars_from", "main"),
+                defaults: from("defaults_from", "main"),
+                handlers: from("handlers_from", "main"),
+            },
+        )
     })
 }
 
-/// The arguments `include_role` takes, and the two it takes that this release cannot honour.
+/// What makes two `include_role` statements one role instance, for the host that ran the first
+/// when the second says `allow_duplicates: false`.
 ///
-/// `apply` is read with the statement and put on what it brings in by [`expand_include`].
+/// Measured on ansible-core 2.19.12: the role, the files it was read from, the `vars:` of the
+/// statement and what its loop bound. The same item twice is one instance, two items are two, and
+/// so are one item under two names of the loop variable.
+pub(crate) fn role_identity(entry: &RoleEntry, vars: &Map<String, Value>) -> String {
+    serde_json::json!({
+        "name": &entry.name,
+        "vars": sorted(vars),
+        "from": [
+            &entry.from.tasks,
+            &entry.from.vars,
+            &entry.from.defaults,
+            &entry.from.handlers,
+        ],
+    })
+    .to_string()
+}
+
+/// A boolean option of a role statement: `public`, `allow_duplicates` or `rolespec_validate`.
 ///
-/// `public: true` is measured to export the role's `defaults` and `vars` to everything behind the
-/// include, where the default `public: false` keeps them to the role's own tasks - so honouring it
-/// would mean changing the play's variable layers while hosts stand at different steps of it.
-/// Refused by name, the way `import_role` refuses the same three, rather than accepted and
-/// dropped - but by value for `public`, whose false is what this release does. See
-/// `refuse_public`.
+/// Read as the reference reads a boolean keyword, so `"no"` is false and `maybe` is refused in
+/// its words.
+pub(super) fn role_flag(
+    args: &Map<String, Value>,
+    key: &str,
+    default: bool,
+) -> anyhow::Result<bool> {
+    let Some(value) = args.get(key) else {
+        return Ok(default);
+    };
+    let flag = match value {
+        Value::Number(n) => match n.as_f64() {
+            Some(1.0) => Some(true),
+            Some(0.0) => Some(false),
+            _ => None,
+        },
+        other => crate::executor::as_bool_value(other),
+    };
+    flag.ok_or_else(|| {
+        anyhow::anyhow!(
+            "Error processing keyword '{key}': The value {} could not be converted to 'bool'.",
+            crate::playbook::python_repr(value)
+        )
+    })
+}
+
+/// The arguments `include_role` takes. All four options the reference documents beside the file
+/// selectors are honoured: `apply` is read with the statement, `public` and `allow_duplicates` by
+/// the coordinator that splices the role in, and `rolespec_validate` by the compilation of the
+/// role.
 pub(super) fn include_role_options(args: &Map<String, Value>) -> anyhow::Result<()> {
     unknown_options(
         "include_role",
@@ -282,32 +373,12 @@ pub(super) fn include_role_options(args: &Map<String, Value>) -> anyhow::Result<
             "rolespec_validate",
             "apply",
         ],
-        &["allow_duplicates", "rolespec_validate"],
-    )?;
-    refuse_public("include_role", args)
+        &[],
+    )
 }
 
-/// `public` is the one refusable argument whose **false** is what this release already does.
-///
-/// The others name work that is missing: nothing dedups a role, the argument-spec check has no
-/// off switch, and there is no layer to apply keywords through, so writing any of them at all is
-/// asking for something that will not happen. `public: false` asks for the role's `defaults` and
-/// `vars` to stay behind the include, which is exactly what happens here - refusing it by
-/// presence turns a statement that asks for the engine's own behaviour into an error.
-///
-/// Anything that is not a spelled-out false is refused, a template included: what `public` will
-/// be worth is not known where this runs, and the safe answer for an export this release cannot
-/// do is to say so rather than to guess.
-pub(super) fn refuse_public(statement: &str, args: &Map<String, Value>) -> anyhow::Result<()> {
-    match args.get("public") {
-        None => Ok(()),
-        Some(value) if crate::executor::as_bool_value(value) == Some(false) => Ok(()),
-        Some(_) => bail!("'{statement}' option 'public' is not supported yet"),
-    }
-}
-
-/// `include_tasks` takes a file name and `apply`, which [`expand_include`] puts on what the
-/// statement brings in.
+/// `include_tasks` takes a file name and `apply`, which the compilation of what the statement
+/// brings in reads from the task.
 pub(super) fn include_options(statement: &str, args: &Map<String, Value>) -> anyhow::Result<()> {
     unknown_options(statement, args, &["file", "_raw_params", "apply"], &[])
 }

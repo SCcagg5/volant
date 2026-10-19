@@ -1,0 +1,11 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: before
+      debug:
+        msg: before
+    - name: include with a bad key
+      include_tasks:
+        file: inc.yml
+        apply:
+          nosuchkeyword: 1

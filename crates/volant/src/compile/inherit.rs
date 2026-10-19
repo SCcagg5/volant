@@ -4,6 +4,7 @@
 use serde_json::{Map, Value};
 
 use crate::playbook::PlayTask;
+use crate::roles::{OwnVars, RoleVars};
 
 pub(super) fn extend(target: &mut Map<String, Value>, source: &Map<String, Value>) {
     for (key, value) in source {
@@ -11,8 +12,41 @@ pub(super) fn extend(target: &mut Map<String, Value>, source: &Map<String, Value
     }
 }
 
-pub(super) fn layered(under: &Map<String, Value>, over: &Map<String, Value>) -> Map<String, Value> {
+/// Lays what the rest of the play lends under one role's own values.
+///
+/// Measured on ansible-core 2.19.12: a role sees the `defaults` and `vars` every public role of the
+/// play holds, its own over them. `group` is what the roles of the same statement lend each
+/// other, a dependency and the role that asked for it, public or not; it is kept with the role's
+/// own values so that the next public statement can lay its variables under the role again
+/// without losing it.
+pub(crate) fn lay_under(
+    role: &mut RoleVars,
+    exported: &RoleVars,
+    group: Option<(Map<String, Value>, Map<String, Value>)>,
+) {
+    let own = role.own.get_or_insert_with(|| {
+        Box::new(OwnVars {
+            defaults: role.defaults.clone(),
+            vars: role.vars.clone(),
+            ..OwnVars::default()
+        })
+    });
+    if let Some((defaults, vars)) = group {
+        own.group_defaults = defaults;
+        own.group_vars = vars;
+    }
+    role.defaults = stacked(&exported.defaults, &own.group_defaults, &own.defaults);
+    role.vars = stacked(&exported.vars, &own.group_vars, &own.vars);
+}
+
+/// Three layers in one copy: `under`, then `middle`, then `over`.
+fn stacked(
+    under: &Map<String, Value>,
+    middle: &Map<String, Value>,
+    over: &Map<String, Value>,
+) -> Map<String, Value> {
     let mut out = under.clone();
+    extend(&mut out, middle);
     extend(&mut out, over);
     out
 }

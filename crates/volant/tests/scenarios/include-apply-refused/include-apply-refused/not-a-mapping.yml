@@ -1,0 +1,10 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: before
+      debug:
+        msg: before
+    - name: apply is a list
+      include_tasks:
+        file: inc.yml
+        apply: [tags]

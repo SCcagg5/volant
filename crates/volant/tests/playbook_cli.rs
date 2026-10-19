@@ -4968,31 +4968,6 @@ fn an_include_that_includes_itself_is_bounded() {
     );
 }
 
-/// An argument an include statement does not take, or takes and this release cannot honour, is
-/// refused by its own name before the first connection.
-#[test]
-fn an_include_statement_refuses_an_argument_it_cannot_honour() {
-    for (file, message) in [
-        ("include/refused.yml", "'include_role' option 'public'"),
-        ("include/vars-dir.yml", "'include_vars' option 'dir'"),
-    ] {
-        let out = volant(&[
-            "playbook",
-            "-i",
-            &fixture("include/inv.ini"),
-            &fixture(file),
-        ]);
-        let text = format!(
-            "{}{}",
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
-        );
-        assert_eq!(out.status.code(), Some(4), "{text}");
-        assert!(text.contains(message), "{text}");
-        assert!(!text.contains("PLAY ["), "nothing runs before it: {text}");
-    }
-}
-
 /// `include_tasks` takes `file`, `_raw_params` and `apply`, and refuses any other key.
 #[test]
 fn include_tasks_refuses_an_unknown_key() {

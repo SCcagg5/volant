@@ -1,0 +1,20 @@
+- hosts: h1
+  gather_facts: false
+  tasks:
+    - name: before
+      debug:
+        msg: "before: rdef={{ rdef | default('unset') }} rvar={{ rvar | default('unset') }}"
+    - name: private import
+      import_role:
+        name: r
+        public: false
+    - name: after the private import
+      debug:
+        msg: "after: rdef={{ rdef | default('unset') }} rvar={{ rvar | default('unset') }}"
+    - name: public import
+      import_role:
+        name: q
+        public: true
+    - name: after the public import
+      debug:
+        msg: "after q: qdef={{ qdef | default('unset') }} qvar={{ qvar | default('unset') }}"
