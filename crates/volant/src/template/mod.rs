@@ -14,6 +14,7 @@ mod file;
 mod filters;
 pub(crate) use filters::python_json;
 mod globals;
+mod lipsum;
 mod lookups;
 mod one_pass;
 mod resolve;
