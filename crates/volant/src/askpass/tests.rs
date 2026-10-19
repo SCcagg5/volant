@@ -112,3 +112,21 @@ fn a_start_removes_only_what_a_dead_run_left(#[case] kind: &str, #[case] removed
         );
     }
 }
+
+/// A directory whose lock another run holds is that run's own, whatever its name says; one whose
+/// holder is gone is stale.
+#[test]
+fn a_directory_that_a_live_run_holds_the_lock_of_is_kept() {
+    let base = tempfile::tempdir().unwrap();
+    let path = base
+        .path()
+        .join(format!("volant-askpass-{}-abc", dead_pid()));
+    make_dir(&path, 0o700);
+    let holder = std::fs::File::open(&path).unwrap();
+    holder.try_lock().unwrap();
+    remove_stale_in(base.path(), effective_uid());
+    assert!(path.exists(), "a directory under a lock was removed");
+    drop(holder);
+    remove_stale_in(base.path(), effective_uid());
+    assert!(!path.exists(), "the directory of a gone holder stayed");
+}

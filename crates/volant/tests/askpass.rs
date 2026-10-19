@@ -84,8 +84,25 @@ impl Sandbox {
 
     /// A run of the controller against the host the fake `ssh` stands for.
     fn start(&self, play: &str, ending: &str) -> std::process::Child {
+        self.start_with(play, ending, false)
+    }
+
+    /// [`Sandbox::start`], with SIGHUP ignored in the controller from its first instruction when
+    /// `ignore_hup` is set: the state `nohup` leaves it in.
+    fn start_with(&self, play: &str, ending: &str, ignore_hup: bool) -> std::process::Child {
+        use std::os::unix::process::CommandExt as _;
         let path = format!("{}:/usr/bin:/bin", self.path("bin").display());
-        Command::new(env!("CARGO_BIN_EXE_volant"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_volant"));
+        if ignore_hup {
+            // SAFETY: only `signal`, which is async-signal-safe, runs between fork and exec.
+            unsafe {
+                command.pre_exec(|| {
+                    libc::signal(libc::SIGHUP, libc::SIG_IGN);
+                    Ok(())
+                });
+            }
+        }
+        command
             .args(["playbook", "-i"])
             .arg(self.path("inventory.ini"))
             .arg("--connection-password-file")
@@ -246,4 +263,21 @@ fn a_killed_run_leaves_a_private_directory_the_next_run_removes() {
     let next = sandbox.start("local.yml", "hang");
     assert_eq!(finish(next), Some(0));
     assert_eq!(sandbox.left(), Vec::<String>::new());
+}
+
+/// A hang-up that the run was started to ignore (`nohup`) does not stop it: only the end of the
+/// ssh call does, and the code is not the one of an interrupted run.
+#[test]
+fn an_ignored_hang_up_does_not_stop_the_run() {
+    let sandbox = Sandbox::new();
+    let mut child = sandbox.start_with("play.yml", "hang", true);
+    sandbox.wait_for("pid");
+    send("HUP", child.id());
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "the run ended on a signal it was told to ignore"
+    );
+    let code = finish(child);
+    assert!(code.is_some() && code != Some(99), "{code:?}");
 }
