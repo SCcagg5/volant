@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use rstest::rstest;
 
 #[path = "common/process.rs"]
+#[expect(dead_code, reason = "only the watched run is used here")]
 mod process;
 
 const AGENT: &str = include_str!("fixtures/frame_agent.py");
@@ -180,7 +181,7 @@ fn a_result_nobody_waits_for_ends_its_host(#[case] frame: &str) {
     let run = run(
         frame,
         frame,
-        30_000_000,
+        1_000_000,
         BAD_TASK,
         "bad good",
         Duration::from_secs(20),
