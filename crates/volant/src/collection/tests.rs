@@ -108,3 +108,25 @@ fn a_group_nobody_defined_names_itself() {
         Err(unresolved_group("ansible.builtin.nosuch"))
     );
 }
+
+/// A `with_<name>` is asked about unless `ansible.builtin` ships the lookup, under either of its
+/// two prefixes.
+#[test]
+fn only_the_names_the_keyword_table_lacks_are_asked_about() {
+    let task = |name: &str| PlayTask {
+        loop_with: Some(name.to_string()),
+        ..PlayTask::empty()
+    };
+    let tasks = [
+        task("dict"),
+        task("ansible.builtin.nested"),
+        task("ansible.legacy.together"),
+        task("flattened"),
+        task("community.general.dependent"),
+        task("xyz"),
+    ];
+    assert_eq!(
+        lookups_named(&tasks).into_iter().collect::<Vec<_>>(),
+        ["community.general.dependent", "flattened", "xyz"]
+    );
+}

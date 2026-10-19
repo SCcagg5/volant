@@ -71,6 +71,15 @@ pub(super) fn prepare(
     // playbook wrote binds author content; one over `{{ r.stdout_lines }}` binds data, and the
     // items of such a loop are never rendered again.
     let mut items_from_host = false;
+    // The groups and keys of `module_defaults`, and the lookups of a `with_` loop, that an include
+    // brought in while the play runs have not been asked about yet. A loop over a lookup nothing
+    // answers to is refused before its terms are read.
+    if !task.module_defaults.is_empty() || task.loop_with.is_some() {
+        plan.steps()
+            .resolved
+            .ensure([task], templar.bridge().map(|bridge| &**bridge))
+            .map_err(TemplateError)?;
+    }
     // An undefined variable in the loop is kept rather than raised, the way the reference's
     // `TaskExecutor.run` keeps `_loop_eval_error`: the task's `when`, read without an item,
     // decides first, and the error is raised only if the task would run. Any other loop error
@@ -95,14 +104,6 @@ pub(super) fn prepare(
         }
         Some(Err(e)) => return Err(e),
     };
-    // The groups and keys of `module_defaults` an include brought in while the play runs have
-    // not been asked about yet.
-    if !task.module_defaults.is_empty() {
-        plan.steps()
-            .resolved
-            .ensure([task], templar.bridge().map(|bridge| &**bridge))
-            .map_err(TemplateError)?;
-    }
     let mut items = Vec::new();
     // What `ansible_loop` reads: every item, kept only when the loop asks for `extended`.
     let options = if task.loop_items.is_some() {

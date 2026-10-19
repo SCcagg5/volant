@@ -161,7 +161,10 @@ fn hosts_lists_defaults_and_escalation_keywords_are_read() {
     "- hosts: all\n  tasks:\n    - name: T\n      command: id\n      become_method: runas\n",
     &["runas", "T"]
 )]
-#[case::no_module("- hosts: all\n  tasks:\n    - name: Nothing\n", &["no module"])]
+#[case::no_module(
+    "- hosts: all\n  tasks:\n    - name: Nothing\n",
+    &["no module/action detected in task."]
+)]
 #[case::two_modules(
     "- hosts: all\n  tasks:\n    - command: a\n      shell: b\n",
     &["conflicting action statements: command, shell"]
@@ -179,7 +182,19 @@ fn hosts_lists_defaults_and_escalation_keywords_are_read() {
 )]
 #[case::two_with_loops(
     "- hosts: all\n  tasks:\n    - debug:\n      with_fileglob: ['*']\n      with_first_found: [a]\n",
-    &["'with_fileglob' and 'with_first_found' cannot both be given"]
+    &["duplicate loop in task: first_found"]
+)]
+#[case::with_after_loop(
+    "- hosts: all\n  tasks:\n    - debug:\n      loop: [1]\n      with_list: [2]\n",
+    &["duplicate loop in task: list"]
+)]
+#[case::with_without_value(
+    "- hosts: all\n  tasks:\n    - debug:\n      with_flattened:\n",
+    &["you must specify a value when using with_flattened"]
+)]
+#[case::with_alone(
+    "- hosts: all\n  tasks:\n    - with_xyz: [1]\n",
+    &["no module/action detected in task."]
 )]
 #[case::hosts_int(
     "- hosts: [web, 3]\n  tasks: []\n",

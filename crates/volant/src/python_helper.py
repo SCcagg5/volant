@@ -771,6 +771,13 @@ def call(request):
         # Whether the plugin exists, for a call the controller does not make because a value it
         # would be given is undefined: ansible-core resolves the name before it looks at those.
         if resolve_only:
+            # What `Task.preprocess_data` asks of a `with_<name>` key: `name in lookup_loader`,
+            # which follows the collections' redirects and the `lookup_plugins/` directories.
+            if kind == "lookup":
+                from ansible.plugins.loader import lookup_loader
+
+                if name not in lookup_loader:
+                    return {"error": missing}
             return {"value": None}
         value = templar.evaluate_expression(
             trust_as_template(expression),
