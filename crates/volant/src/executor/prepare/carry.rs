@@ -21,8 +21,8 @@ use crate::executor::run::set_fact_names;
 
 /// What the items before the current one set, for one host.
 pub(super) struct Carry {
-    /// The host's variables before they resolved each other, kept to render again when a variable
-    /// is built from a carried name.
+    /// The host's variables before they resolved each other: where the templates of `rebuilt`
+    /// come from.
     merged: HostVars,
     facts: Map<String, Value>,
     /// The carried names whose value came from a managed host: they stay data.
@@ -30,8 +30,9 @@ pub(super) struct Carry {
     /// The carried names and the variables built from them, directly or through other
     /// variables: each name is followed once.
     reach: BTreeSet<String>,
-    /// A template variable of the host names a carried name.
-    derived: bool,
+    /// The templates, as the host wrote them, of the variables in `reach` that are not carried
+    /// names. An item renders them again and takes every other variable as it resolved.
+    rebuilt: Map<String, Value>,
 }
 
 impl Carry {
@@ -41,23 +42,22 @@ impl Carry {
             facts: Map::new(),
             data: BTreeSet::new(),
             reach: BTreeSet::new(),
-            derived: false,
+            rebuilt: Map::new(),
         }
     }
 
-    /// The variables of the next item: `base` when nothing was carried, with the carried facts
-    /// laid over it otherwise. When a template variable reads a carried name, the unresolved map
-    /// is the start instead, so that the pass that binds the loop variable renders it again.
+    /// The variables of the next item: `base`, with the carried facts laid over it. The
+    /// variables built from a carried name go back to their templates, so that the pass that
+    /// binds the loop variable renders them again. Only those are copied from the unresolved
+    /// map, because the rest of it is as large as the host's variables.
     pub(super) fn vars(&self, base: &HostVars) -> HostVars {
-        if self.facts.is_empty() {
-            return base.clone();
+        let mut vars = base.clone();
+        if !self.facts.is_empty() {
+            for (name, template) in &self.rebuilt {
+                vars.insert(name.clone(), template.clone());
+            }
+            self.lay_over(&mut vars);
         }
-        let mut vars = if self.derived {
-            self.merged.clone()
-        } else {
-            base.clone()
-        };
-        self.lay_over(&mut vars);
         vars
     }
 
@@ -75,19 +75,23 @@ impl Carry {
     /// Adds to `reach` every variable that reads a name already in it, until none is left.
     fn follow(&mut self) {
         loop {
-            let found: Vec<String> = self
+            // A name that came from a managed host is data: no render touches it.
+            let found: Vec<(String, Value)> = self
                 .merged
                 .map
                 .iter()
                 .filter(|(key, _)| !self.reach.contains(*key))
+                .filter(|(key, _)| !self.merged.untrusted.contains(*key))
                 .filter(|(_, value)| self.reach.iter().any(|name| mentions(value, name)))
-                .map(|(key, _)| key.clone())
+                .map(|(key, value)| (key.clone(), value.clone()))
                 .collect();
             if found.is_empty() {
                 return;
             }
-            self.derived = true;
-            self.reach.extend(found);
+            for (key, value) in found {
+                self.reach.insert(key.clone());
+                self.rebuilt.insert(key, value);
+            }
         }
     }
 
@@ -172,7 +176,7 @@ mod tests {
         let mut carry = Carry::new(merged);
         carry.reach.insert("x".into());
         carry.follow();
-        assert!(carry.derived);
+        assert!(carry.rebuilt.contains_key("ee"));
         assert!(carry.reach.contains("ee"));
         assert!(!carry.reach.contains("other"));
     }

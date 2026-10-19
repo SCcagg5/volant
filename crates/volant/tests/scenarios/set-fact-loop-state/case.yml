@@ -47,3 +47,4 @@ runs:
   - args: ["-i", "inventory.ini", "delegate_facts_seen.yml"]
   - args: ["-i", "inventory.ini", "break_when_reads_fact.yml"]
   - args: ["-i", "inventory.ini", "break_when_equal.yml"]
+  - args: ["-i", "inventory.ini", "derived_from_other_fact.yml"]
