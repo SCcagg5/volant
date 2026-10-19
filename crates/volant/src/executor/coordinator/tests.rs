@@ -34,6 +34,7 @@ fn coordinator<'a>(tx: &'a watch::Sender<Progress>, hosts: &'a [String]) -> Coor
         removed: HashSet::new(),
         ending: BTreeSet::new(),
         dismissed: BTreeSet::new(),
+        rendering: None,
     }
 }
 

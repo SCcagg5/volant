@@ -1,0 +1,10 @@
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: A plugin beside the playbook
+      debug:
+        msg: "{{ i }}:{{ item }}"
+      with_twice: [a, b]
+      loop_control:
+        label: "L-{{ item }}"
+        index_var: i

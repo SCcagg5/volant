@@ -1,0 +1,2 @@
+vf_base: &vf_base {a: 1}
+vf_derived: {<<: *vf_base, b: 2}

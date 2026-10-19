@@ -15,11 +15,12 @@ use crate::bridge::Bridge;
 
 use super::context::Context;
 use super::filters;
+use super::globals;
 use super::pymethods::mutable::{
     MutDict, MutList, is_literal, is_mutable, key, mutable, snapshot_answer,
 };
 use super::pymethods::percent;
-use super::vm::concat;
+use super::vm::{concat, note_emit};
 use super::{
     ATTR_KEY, CONCAT_KEY, CONST_KEY, CONTEXT_KEY, ITEM_KEY, MATTR_KEY, MITEM_KEY, MKLIST_KEY,
     MKMAP_KEY, REM_KEY, REMT_KEY, VAR_KEY,
@@ -40,6 +41,7 @@ pub(super) fn environment(base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) -> En
         if !value.is_undefined() && holds_undefined(value) {
             return Err(minijinja::Error::from(ErrorKind::UndefinedError));
         }
+        note_emit(out, value);
         if value.is_none() {
             return Ok(());
         }
@@ -53,6 +55,10 @@ pub(super) fn environment(base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) -> En
     filters::register(&mut env, base_dir, bridge);
     env.add_function(CONCAT_KEY, concat);
     env.add_function("range", range);
+    env.add_function("dict", globals::dict);
+    env.add_function("cycler", globals::cycler);
+    env.add_function("joiner", minijinja_contrib::globals::joiner);
+    env.add_function("undef", globals::undef);
     env.add_function(ITEM_KEY, chained_item);
     env.add_function(MITEM_KEY, mutable_item);
     env.add_function(MKLIST_KEY, |items: Rest<minijinja::Value>| {

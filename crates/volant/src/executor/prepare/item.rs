@@ -92,11 +92,35 @@ pub(in crate::executor) fn failure_text(err: &TemplateError) -> String {
     if err.0.starts_with(KEYWORD_ERROR)
         || err.0.starts_with(NOTIFY_FAILED)
         || err.0.starts_with("Task failed: ")
+        || is_loop_lookup_failure(err)
     {
         err.0.clone()
     } else {
         format!("Task failed: {}", err.0)
     }
+}
+
+/// A `with_` loop whose lookup raised. Measured on ansible-core 2.19.12: the message is the
+/// plugin's own sentence with no `Task failed: ` in front, and the error block shows
+/// `Origin: <unknown>` and the expression `invoke_lookup()` where a task's place would be.
+pub(in crate::executor) fn is_loop_lookup_failure(err: &TemplateError) -> bool {
+    err.0.starts_with("The lookup plugin '") && err.0.contains("' failed: ")
+}
+
+/// The result of a task that dies before it runs, worded as [`failure_text`] words it.
+pub(in crate::executor) fn failed_result(err: &TemplateError) -> TaskResult {
+    let mut result = TaskResult::failed_with(failure_text(err));
+    if is_loop_lookup_failure(err) {
+        result.0.insert(
+            crate::render::ERROR_KEY.into(),
+            Value::String(err.0.clone()),
+        );
+        result.0.insert(
+            crate::render::UNKNOWN_KEY.into(),
+            Value::String("invoke_lookup()".into()),
+        );
+    }
+    result
 }
 
 /// The pause the loop `items` belong to waits between two of them, if it has one.
@@ -340,7 +364,9 @@ pub(super) fn boolean_keyword(
 ) -> Result<bool, TemplateError> {
     let keyword =
         |detail: String| TemplateError(format!("Error processing keyword '{key}': {detail}"));
-    let rendered = templar.render(raw, vars).map_err(|e| keyword(e.0))?;
+    let rendered = templar
+        .render(raw, vars)
+        .map_err(|e| keyword(undefined_name(raw, e.0)))?;
     strict_boolean(&rendered).ok_or_else(|| {
         keyword(format!(
             "The value {} could not be converted to 'bool'.",
@@ -353,7 +379,7 @@ pub(super) fn boolean_keyword(
 /// `ansible/module_utils/parsing/convert_bool.py` (2.19.12), which a boolean keyword is read
 /// with: a real boolean; `1`, `1.0`, `0`, `0.0`; or one of `y yes on 1 true t` and
 /// `n no off 0 false f`, trimmed and in any case. Anything else is not a boolean.
-pub(super) fn strict_boolean(value: &Value) -> Option<bool> {
+pub(in crate::executor) fn strict_boolean(value: &Value) -> Option<bool> {
     let word = match value {
         Value::Bool(b) => return Some(*b),
         Value::Number(n) => n.to_string(),

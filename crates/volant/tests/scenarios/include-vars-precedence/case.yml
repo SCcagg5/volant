@@ -1,0 +1,2 @@
+# include_vars of a directory sits where include_vars of a file sits in the order of precedence.
+args: [-i, inv.ini, -e, "ev=extra", -e, "inv_v=extra", play.yml]

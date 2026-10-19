@@ -1,0 +1,7 @@
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - debug: {msg: "{{ item }}"}
+      with_subelements: [1, 2]
+      ignore_errors: true
+    - debug: {msg: after}

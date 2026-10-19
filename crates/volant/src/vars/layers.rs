@@ -7,10 +7,12 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value};
 
+use super::PENDING_PYTHON;
 use super::facts::no_facts;
 use super::load::{extend, extend_except};
 use super::magic::short_name;
 use super::{Added, HostFacts, Scope, VarStore};
+use crate::inventory::{LOCALHOST_NAMES, is_localhost};
 use crate::template::HOSTVARS_KEYS;
 
 /// One host's variables as `layered_for_host` hands them out.
@@ -94,21 +96,27 @@ impl VarStore {
     /// Hosts holding at least one untrusted name, for the `hostvars[other]` path. Read once per
     /// host and per task, under the store's lock, so it is kept rather than rebuilt: the set is
     /// the size of the inventory and every rebuild allocated a string per host inside the
-    /// critical section. Dropped by `forget_hostvars`, which every write to the facts calls.
+    /// critical section. A spelling of the controller is in the set when any spelling is. Dropped
+    /// by `forget_hostvars`, which every write to the facts calls.
     pub fn untrusted_hosts(&mut self) -> Arc<BTreeSet<String>> {
         if let Some(hosts) = &self.untrusted_hosts {
             return Arc::clone(hosts);
         }
-        let hosts: Arc<BTreeSet<String>> = Arc::new(
-            self.untrusted
-                .iter()
-                .filter(|(_, names)| !names.is_empty())
-                .map(|(host, _)| host)
-                .chain(self.gathered.keys())
-                .chain(&self.data_hosts)
-                .cloned()
-                .collect(),
-        );
+        let mut hosts: BTreeSet<String> = self
+            .untrusted
+            .iter()
+            .filter(|(_, names)| !names.is_empty())
+            .map(|(host, _)| host)
+            .chain(self.gathered.keys())
+            .chain(&self.data_hosts)
+            .cloned()
+            .collect();
+        // The three spellings of the controller read one host through `hostvars`, so what one of
+        // them holds, the others hold.
+        if hosts.iter().any(|host| is_localhost(host)) {
+            hosts.extend(LOCALHOST_NAMES.map(str::to_string));
+        }
+        let hosts = Arc::new(hosts);
         self.untrusted_hosts = Some(Arc::clone(&hosts));
         hosts
     }
@@ -268,6 +276,15 @@ impl VarStore {
     /// Inventory-level sources for one host, without play, facts, extra or magic variables.
     /// This is what other hosts see through `hostvars`.
     fn host_base(&self, host: &str) -> Map<String, Value> {
+        self.host_base_in(host, false)
+    }
+
+    /// `host_base`, and with `lazy` the implicit host's interpreter left as `PENDING_PYTHON`
+    /// for `settled` to fill in. Finding the controller's interpreter starts a Python, which a
+    /// run that never reads `hostvars['localhost']` must not pay for.
+    fn host_base_in(&self, host: &str, lazy: bool) -> Map<String, Value> {
+        // A spelling of the controller that the inventory lists under another one is that host.
+        let host = self.controller_alias(host).unwrap_or(host);
         let mut vars = Map::new();
         for files in &self.group_files {
             if let Some(all) = files.get("all") {
@@ -307,7 +324,12 @@ impl VarStore {
             // The reference also sets the controller's own interpreter there
             // (`sys.executable`), at the same layer, so the host runs Python tasks under it
             // and discovers nothing. Left unset when no interpreter resolves.
-            if let Some(python) = crate::runtime::resolve::controller_python() {
+            if lazy {
+                vars.insert(
+                    "ansible_python_interpreter".into(),
+                    Value::String(PENDING_PYTHON.to_string()),
+                );
+            } else if let Some(python) = crate::runtime::resolve::controller_python() {
                 vars.insert("ansible_python_interpreter".into(), Value::String(python));
             }
         }
@@ -322,8 +344,8 @@ impl VarStore {
     /// What other hosts see of one host: inventory sources, its facts, then extra vars, and its
     /// own identity. The reference carries `inventory_hostname` inside `hostvars[x]`, so a task
     /// naming another host can ask who that host is.
-    fn host_view(&self, host: &str) -> Map<String, Value> {
-        let mut base = self.host_base(host);
+    pub(super) fn host_view(&self, host: &str) -> Map<String, Value> {
+        let mut base = self.host_base_in(host, true);
         match self.gathered.get(host) {
             Some(gathered) => extend(&mut base, gathered),
             None => extend(&mut base, no_facts()),
@@ -360,111 +382,11 @@ impl VarStore {
     }
 
     /// `host_view`, counted for the test that proves only the written host's entry is rebuilt.
-    fn view_value(&mut self, host: &str) -> Value {
+    pub(super) fn view_value(&mut self, host: &str) -> Value {
         #[cfg(test)]
         {
             *self.views_built.entry(host.to_string()).or_default() += 1;
         }
         Value::Object(self.host_view(host))
-    }
-
-    /// The `hostvars` view every host of this run renders against, as one shared map: templates
-    /// read a host out of it rather than carrying a copy of it.
-    ///
-    /// `host` is the host about to render. An implicit `localhost` belongs to no group, so it is
-    /// not in the inventory-wide map, and `hostvars[inventory_hostname]` has to answer for it
-    /// all the same: such a host gets its own completed map, kept beside the shared one.
-    ///
-    /// A host whose facts changed since the map was built has its own entry rebuilt, and only
-    /// that one. The map is changed in place when nobody else holds it; a render still holding
-    /// the previous map keeps it whole, which is what it saw when it took it, and the store
-    /// then carries on with a copy.
-    pub fn hostvars_shared(&mut self, host: &str) -> Arc<Map<String, Value>> {
-        let base = if let Some(mut base) = self.hostvars.take() {
-            for name in std::mem::take(&mut self.stale) {
-                if base.contains_key(&name) {
-                    let view = self.view_value(&name);
-                    Arc::make_mut(&mut base).insert(name, view);
-                }
-            }
-            base
-        } else {
-            self.stale.clear();
-            let names = self.groups["all"].clone();
-            let mut map = Map::new();
-            for name in names {
-                let view = self.view_value(&name);
-                map.insert(name, view);
-            }
-            Arc::new(map)
-        };
-        self.hostvars = Some(Arc::clone(&base));
-        if base.contains_key(host) {
-            return base;
-        }
-        if let Some(completed) = self.hostvars_with.get(host) {
-            return Arc::clone(completed);
-        }
-        let mut map = (*base).clone();
-        map.insert(host.to_string(), self.view_value(host));
-        let completed = Arc::new(map);
-        self.hostvars_with
-            .insert(host.to_string(), Arc::clone(&completed));
-        completed
-    }
-
-    /// The values every host of a batch reads the same: `groups`, which only a refresh of the
-    /// inventory moves, and the three live host lists, which are fixed for as long as nobody drops out. Each is
-    /// the size of the inventory, so they are built once and handed to templates as one shared
-    /// object rather than copied into every host's map for every task.
-    ///
-    /// The deprecated `play_hosts` answers with the batch, not the play: measured on
-    /// ansible-core 2.19.12, `h2` in the first batch of a `serial: 2` run over three hosts reads
-    /// `['h2']` from it where `ansible_play_hosts` says `['h2', 'h3']`.
-    pub fn shared_values(&mut self, scope: &Scope) -> Arc<Map<String, Value>> {
-        if let Some((key, map)) = &self.shared
-            && key.0 == scope.play_hosts
-            && key.1 == scope.batch_hosts
-            && key.2 == scope.all_play_hosts
-        {
-            return Arc::clone(map);
-        }
-        // The lists moved: a host failed, went unreachable, or a new play began. A host no longer
-        // in them has no task left to read its kept facts; everyone else's entry stays.
-        let live: BTreeSet<&String> = scope.play_hosts.iter().chain(&scope.batch_hosts).collect();
-        self.host_facts.retain(|host, _| live.contains(host));
-        let batch = serde_json::to_value(&scope.batch_hosts).unwrap_or_default();
-        let mut map = Map::new();
-        map.insert(
-            "groups".to_string(),
-            serde_json::to_value(&self.groups).unwrap_or_default(),
-        );
-        map.insert(
-            "ansible_play_hosts".to_string(),
-            serde_json::to_value(&scope.play_hosts).unwrap_or_default(),
-        );
-        // Known gap: measured on ansible-core 2.19.12, `ansible_play_hosts_all` grows when
-        // `add_host` runs inside a `serial` play; here it stays the play's own list.
-        map.insert(
-            "ansible_play_hosts_all".to_string(),
-            serde_json::to_value(
-                self.play_hosts_all
-                    .as_ref()
-                    .unwrap_or(&scope.all_play_hosts),
-            )
-            .unwrap_or_default(),
-        );
-        map.insert("ansible_play_batch".to_string(), batch.clone());
-        map.insert("play_hosts".to_string(), batch);
-        let shared = Arc::new(map);
-        self.shared = Some((
-            (
-                scope.play_hosts.clone(),
-                scope.batch_hosts.clone(),
-                scope.all_play_hosts.clone(),
-            ),
-            Arc::clone(&shared),
-        ));
-        shared
     }
 }

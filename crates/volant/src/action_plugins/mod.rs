@@ -35,6 +35,7 @@ use serde_json::{Map, Value};
 use volant_protocol::TaskResult;
 use volant_protocol::modules::{ACTION_PLUGINS, resolved_name, short_name};
 
+use crate::config::HostNamedPaths;
 use crate::template::Templar;
 use crate::vars::HostVars;
 
@@ -367,6 +368,8 @@ pub(crate) struct Context<'a> {
     /// Where the task was written, for `src` search paths.
     pub origin: &'a crate::compile::Origin,
     pub playbook_dir: &'a Path,
+    /// What the task does with a controller file a managed host named.
+    pub host_named_paths: HostNamedPaths,
     /// Lines to show as `[WARNING]:` under this task.
     pub warnings: &'a mut Vec<String>,
     /// The item's rendered `environment`, and the task's `timeout` keyword, for a plugin run in
@@ -381,8 +384,8 @@ pub(crate) struct Context<'a> {
 }
 
 /// The plugin for `kind`. A written one given a shape it does not take hands the item to
-/// ansible-core's own before anything reaches the host; `src` named by a host value never does,
-/// so the written plugin's refusal of it stands.
+/// ansible-core's own before anything reaches the host; under `host_named_paths = refuse`, a `src`
+/// named by a host value never does, so the written plugin's refusal of it stands.
 pub(crate) fn start(kind: Kind, ctx: Context<'_>) -> Box<dyn Plugin + '_> {
     let unwritten = match kind {
         Kind::Copy => copy::unwritten(&ctx),
@@ -401,9 +404,11 @@ pub(crate) fn start(kind: Kind, ctx: Context<'_>) -> Box<dyn Plugin + '_> {
     // way to ansible-core's own, which computes the check result itself; so do `copy` and
     // `template` under `--diff`, which builds the diff. `package`, `service` and `dnf` only pick
     // the module, which is told about the modes itself. A `src` named by a host value is never
-    // followed by the bridged plugin, so outside check mode the written plugin's refusal stands.
+    // followed by the bridged plugin under `refuse`, so outside check mode the written plugin's
+    // refusal stands. The other two modes check the name in whichever plugin runs.
     let diffing = ctx.diff && matches!(kind, Kind::Copy | Kind::Template);
-    let trusted = !ctx.args_untrusted.contains("src");
+    let trusted =
+        ctx.host_named_paths != HostNamedPaths::Refuse || !ctx.args_untrusted.contains("src");
     if let Some(name) = named
         && (ctx.check_mode || ((unwritten || diffing) && trusted))
     {

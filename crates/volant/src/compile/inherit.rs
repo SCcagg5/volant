@@ -4,6 +4,7 @@
 use serde_json::{Map, Value};
 
 use crate::playbook::PlayTask;
+use crate::roles::{OwnVars, RoleVars};
 
 pub(super) fn extend(target: &mut Map<String, Value>, source: &Map<String, Value>) {
     for (key, value) in source {
@@ -11,10 +12,57 @@ pub(super) fn extend(target: &mut Map<String, Value>, source: &Map<String, Value
     }
 }
 
-pub(super) fn layered(under: &Map<String, Value>, over: &Map<String, Value>) -> Map<String, Value> {
+/// Lays what the rest of the play lends under one role's own values.
+///
+/// Measured on ansible-core 2.19.12: a role sees the `defaults` and `vars` every public role of the
+/// play holds, its own over them. `group` is what the roles of the same statement lend each
+/// other, a dependency and the role that asked for it, public or not; it is kept with the role's
+/// own values so that the next public statement can lay its variables under the role again
+/// without losing it.
+pub(crate) fn lay_under(
+    role: &mut RoleVars,
+    exported: &RoleVars,
+    group: Option<(Map<String, Value>, Map<String, Value>)>,
+) {
+    let own = role.own.get_or_insert_with(|| {
+        Box::new(OwnVars {
+            defaults: role.defaults.clone(),
+            vars: role.vars.clone(),
+            ..OwnVars::default()
+        })
+    });
+    if let Some((defaults, vars)) = group {
+        own.group_defaults = defaults;
+        own.group_vars = vars;
+    }
+    role.defaults = stacked(&exported.defaults, &own.group_defaults, &own.defaults);
+    role.vars = stacked(&exported.vars, &own.group_vars, &own.vars);
+}
+
+/// Three layers in one copy: `under`, then `middle`, then `over`.
+fn stacked(
+    under: &Map<String, Value>,
+    middle: &Map<String, Value>,
+    over: &Map<String, Value>,
+) -> Map<String, Value> {
     let mut out = under.clone();
+    extend(&mut out, middle);
     extend(&mut out, over);
     out
+}
+
+/// A keyword that may be a template, as the layer that wrote it says: the inner layer when it
+/// wrote the keyword in either form, the outer one otherwise.
+fn layered_keyword<T: Copy>(
+    inner: (Option<T>, &Option<String>),
+    outer: (Option<T>, &Option<String>),
+) -> (Option<T>, Option<String>) {
+    let (value, template) = if inner.0.is_some() || inner.1.is_some() {
+        inner
+    } else {
+        outer
+    };
+    (value, template.clone())
 }
 
 /// One task with the keywords of everything above it folded in. The inner value wins wherever it
@@ -35,12 +83,23 @@ pub(super) fn merge(outer: &PlayTask, inner: &PlayTask) -> PlayTask {
         .ignore_errors
         .clone()
         .or_else(|| outer.ignore_errors.clone());
-    task.timeout = inner.timeout.or(outer.timeout);
+    // The keywords that may be templates: the inner layer wins whichever form it is written in, a
+    // literal or a template, and takes both fields with it, so that an inner `false` hides an
+    // outer template and an inner template hides an outer `true`.
+    let (timeout, timeout_template) = layered_keyword(
+        (inner.timeout, &inner.deferred.timeout),
+        (outer.timeout, &outer.deferred.timeout),
+    );
+    task.timeout = timeout;
+    task.deferred.timeout = timeout_template;
     task.throttle = inner.throttle.clone().or_else(|| outer.throttle.clone());
     task.debugger = inner.debugger.clone().or_else(|| outer.debugger.clone());
     // All three-state for the same reason `ignore_errors` is: a play or a block that says one
     // thing and a task that says the other have to be told apart from a task that says nothing.
-    task.no_log = inner.no_log.or(outer.no_log);
+    (task.no_log, task.deferred.no_log) = layered_keyword(
+        (inner.no_log, &inner.deferred.no_log),
+        (outer.no_log, &outer.deferred.no_log),
+    );
     task.check_mode = inner
         .check_mode
         .clone()
@@ -48,10 +107,22 @@ pub(super) fn merge(outer: &PlayTask, inner: &PlayTask) -> PlayTask {
     task.diff = inner.diff.clone().or_else(|| outer.diff.clone());
     // Three-state for the same reason, and inherited the same way: `Block.fattributes` carries
     // all three, `Play.fattributes` carries `run_once` alone, and the innermost value wins.
-    task.run_once = inner.run_once.or(outer.run_once);
-    task.any_errors_fatal = inner.any_errors_fatal.or(outer.any_errors_fatal);
-    task.ignore_unreachable = inner.ignore_unreachable.or(outer.ignore_unreachable);
-    task.delegate_facts = inner.delegate_facts.or(outer.delegate_facts);
+    (task.run_once, task.deferred.run_once) = layered_keyword(
+        (inner.run_once, &inner.deferred.run_once),
+        (outer.run_once, &outer.deferred.run_once),
+    );
+    (task.any_errors_fatal, task.deferred.any_errors_fatal) = layered_keyword(
+        (inner.any_errors_fatal, &inner.deferred.any_errors_fatal),
+        (outer.any_errors_fatal, &outer.deferred.any_errors_fatal),
+    );
+    (task.ignore_unreachable, task.deferred.ignore_unreachable) = layered_keyword(
+        (inner.ignore_unreachable, &inner.deferred.ignore_unreachable),
+        (outer.ignore_unreachable, &outer.deferred.ignore_unreachable),
+    );
+    (task.delegate_facts, task.deferred.delegate_facts) = layered_keyword(
+        (inner.delegate_facts, &inner.deferred.delegate_facts),
+        (outer.delegate_facts, &outer.deferred.delegate_facts),
+    );
     task.delegate_to = inner
         .delegate_to
         .clone()
@@ -78,7 +149,10 @@ pub(super) fn merge(outer: &PlayTask, inner: &PlayTask) -> PlayTask {
         .clone()
         .or_else(|| outer.collections.clone());
     task.connect = inner.connect.over(&outer.connect);
-    task.r#become = inner.r#become.or(outer.r#become);
+    (task.r#become, task.deferred.r#become) = layered_keyword(
+        (inner.r#become, &inner.deferred.r#become),
+        (outer.r#become, &outer.deferred.r#become),
+    );
     task.become_user = inner
         .become_user
         .clone()

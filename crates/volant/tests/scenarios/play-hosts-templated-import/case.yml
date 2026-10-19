@@ -1,0 +1,6 @@
+# `import_playbook` splices plays whose `hosts` is a template: each import's `vars:` are the play's
+# variables, the play's own `vars:` lose to `-e`, and every play renders when it starts.
+runs:
+  - args: [-i, inventory.ini, main.yml]
+  - args: [-i, inventory.ini, main.yml, -e, pick=k1]
+  - args: [-i, inventory.ini, main.yml, --list-hosts]

@@ -1,0 +1,6 @@
+# Every line that prints the result of an include_vars of a vaulted file hides it, the retry lines included.
+runs:
+  - args: [-i, inv.ini, --vault-password-file, pw1, play.yml]
+  - args: [-i, inv.ini, --vault-password-file, pw1, -v, play.yml]
+  - args: [-i, inv.ini, --vault-password-file, pw1, -vvv, play.yml]
+  - args: [-i, inv.ini, --vault-password-file, pw1, --diff, play.yml]

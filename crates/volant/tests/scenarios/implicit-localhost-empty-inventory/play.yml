@@ -1,0 +1,10 @@
+- hosts: all
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: never
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} {{ 'localhost' in hostvars }} {{ groups['all'] }}"

@@ -1,0 +1,105 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    names: [a, b]
+    num: 5
+    pair: [1, 2]
+    text: "{% for i in [1, 2] %}{{ i }},{% endfor %}"
+    as_list: "{% set ns = namespace(r=[]) %}{% for i in [1, 2, 3] %}{% set ns.r = ns.r + [i] %}{% endfor %}{{ ns.r }}"
+    nothing: "{% if false %}x{% endif %}"
+    note: "{# nothing to see #}"
+    kept: "{% if true %}[1, 2]{% endif %}"
+    etc_hosts: |
+      127.0.0.1 localhost
+      {% for h in names %}
+      10.0.0.{{ loop.index }} {{ h }}
+      {% endfor %}
+      # end
+    folded: >
+      {% if true %}
+      one
+      two
+      {% endif %}
+    table:
+      a: "{% if true %}1{% endif %}"
+      b: ["{% for i in [1, 2] %}{{ i }}{% endfor %}", "{# c #}x"]
+  tasks:
+    - name: play variables
+      debug:
+        msg: "{{ [text, as_list, as_list | length, nothing | type_debug, note | type_debug, kept | type_debug, table] | to_json }}"
+    - name: block scalar variables
+      debug:
+        msg: "{{ [etc_hosts, etc_hosts | length, etc_hosts.splitlines() | length, folded] | to_json }}"
+    - name: set_fact
+      set_fact:
+        made_text: "{% for i in [1, 2] %}{{ i }},{% endfor %}"
+        made_list: "{% set a = [1, 2, 3] %}{{ a }}"
+        made_none: "{% if false %}x{% endif %}"
+    - name: read set_fact
+      debug:
+        msg: "{{ [made_text, made_list, made_list | length, made_none | type_debug] | to_json }}"
+    - name: task arguments
+      debug:
+        msg: |
+          a
+          {% if true %}
+          b
+          {% endif %}
+          c
+    - name: loop over a block
+      debug:
+        msg: "{{ item }}"
+      loop: "{% set a = [1, 2] %}{{ a }}"
+    - name: loop items that hold blocks
+      debug:
+        msg: "{{ item | to_json }}"
+      loop: ["{% if true %}p{% endif %}", "{# c #}q"]
+    - name: extra variables
+      debug:
+        msg: "{{ [xv_text, xv_list, xv_list | length] | to_json }}"
+    - name: copy content
+      copy:
+        dest: "{{ playbook_dir }}/out.txt"
+        content: |
+          first
+          {% for h in names %}
+          host-{{ h }}
+          {% endfor %}
+          last
+    - name: read it back
+      command: cat "{{ playbook_dir }}/out.txt"
+      register: out
+    - name: show it
+      debug:
+        msg: "{{ out.stdout_lines | to_json }}"
+    - name: a result is data
+      command: cat "{{ playbook_dir }}/payload.txt"
+      register: host_text
+    - name: it stays text
+      debug:
+        msg: "{{ host_text.stdout | to_json }}"
+    - name: whitespace control in block scalars
+      set_fact:
+        ws_keep: |
+          {{- num }}
+        ws_strip: |-
+          {{- num -}}
+        ws_after: |
+          {{ num -}}
+        ws_plus: |+
+          {{- num -}}
+
+        ws_fold: >
+          {{ pair -}}
+        ws_fold_strip: >-
+          {{- pair }}
+        ws_plain: |
+          {{ num }}
+        ws_text: |
+          {{- num }} apples
+    - name: read whitespace control
+      debug:
+        msg: "{{ [ws_keep, ws_strip, ws_after, ws_plus, ws_fold, ws_fold_strip, ws_plain, ws_text] | map('type_debug') | list | to_json }} {{ [ws_keep, ws_strip, ws_after, ws_plus, ws_fold, ws_fold_strip, ws_plain, ws_text] | to_json }}"
+    - name: literal comment start
+      debug:
+        msg: "{{ ['{#', '{#' ~ names[0]] | to_json }} x {{ '{#' }} y"

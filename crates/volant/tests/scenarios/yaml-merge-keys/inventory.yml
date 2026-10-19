@@ -1,0 +1,8 @@
+all:
+  vars:
+    inv_base: &inv_base {a: 1, b: 2}
+    inv_derived: {z: 0, <<: *inv_base, b: 9}
+  hosts:
+    h1:
+      ansible_connection: local
+      host_derived: {<<: *inv_base, h: 1}

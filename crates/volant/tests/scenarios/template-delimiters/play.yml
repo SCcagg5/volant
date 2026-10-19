@@ -1,0 +1,218 @@
+- hosts: all
+  gather_facts: false
+  vars:
+    T: "{{ playbook_dir }}/t"
+    x: val
+    items: [1, 2]
+  tasks:
+    - name: Set up
+      shell: |
+        mkdir -p {{ T }}
+        mkdir -p {{ playbook_dir }}/templates
+        printf '{''{ x }}\r\n{''% if 1 %}\r\nq\r\n{''% endif %}\r\n' > {{ playbook_dir }}/templates/crlf_normalised.j2
+        printf '{''{ x }}\r\n{''# c #}\r\n{''% if 1 %}\r\nz' > {{ playbook_dir }}/templates/plain_untouched.j2
+        printf 'old\n' > {{ T }}/var_start_end
+        printf 'old\n' > {{ T }}/var_start_only
+        printf 'old\n' > {{ T }}/var_end_only
+        printf 'old\n' > {{ T }}/block_start_end
+        printf 'old\n' > {{ T }}/comment
+        printf 'old\n' > {{ T }}/all_six
+        printf 'old\n' > {{ T }}/multi_char
+        printf 'old\n' > {{ T }}/shell_style
+        printf 'old\n' > {{ T }}/brackets_close
+        printf 'old\n' > {{ T }}/brace_end
+        printf 'old\n' > {{ T }}/star_comment
+        printf 'old\n' > {{ T }}/in_string
+        printf 'old\n' > {{ T }}/raw_custom
+        printf 'old\n' > {{ T }}/raw_default_is_text
+        printf 'old\n' > {{ T }}/plain_default_braces
+        printf 'old\n' > {{ T }}/crlf_normalised
+        printf 'old\n' > {{ T }}/plain_untouched
+        printf 'old\n' > {{ T }}/trim_lstrip
+        printf 'old\n' > {{ T }}/trim_off
+        printf 'old\n' > {{ T }}/whitespace_control
+        printf 'old\n' > {{ T }}/loop_macro
+        printf 'old\n' > {{ T }}/latex
+        printf 'old\n' > {{ T }}/crlf_newline_sequence
+      check_mode: false
+    - name: var_start_end
+      template:
+        src: var_start_end.j2
+        dest: "{{ T }}/var_start_end"
+        variable_start_string: '[['
+        variable_end_string: ']]'
+    - name: var_start_only
+      template:
+        src: var_start_only.j2
+        dest: "{{ T }}/var_start_only"
+        variable_start_string: '<|'
+    - name: var_end_only
+      template:
+        src: var_end_only.j2
+        dest: "{{ T }}/var_end_only"
+        variable_end_string: '|>'
+    - name: block_start_end
+      template:
+        src: block_start_end.j2
+        dest: "{{ T }}/block_start_end"
+        block_start_string: '<%'
+        block_end_string: '%>'
+    - name: comment
+      template:
+        src: comment.j2
+        dest: "{{ T }}/comment"
+        comment_start_string: '<#'
+        comment_end_string: '#>'
+    - name: all_six
+      template:
+        src: all_six.j2
+        dest: "{{ T }}/all_six"
+        variable_start_string: '[['
+        variable_end_string: ']]'
+        block_start_string: '[%'
+        block_end_string: '%]'
+        comment_start_string: '[#'
+        comment_end_string: '#]'
+    - name: multi_char
+      template:
+        src: multi_char.j2
+        dest: "{{ T }}/multi_char"
+        variable_start_string: '<!!'
+        variable_end_string: '!!>'
+        block_start_string: '@@'
+        block_end_string: '@@'
+    - name: shell_style
+      template:
+        src: shell_style.j2
+        dest: "{{ T }}/shell_style"
+        variable_start_string: '$('
+        variable_end_string: ')'
+    - name: brackets_close
+      template:
+        src: brackets_close.j2
+        dest: "{{ T }}/brackets_close"
+        variable_start_string: '[['
+        variable_end_string: ']]'
+    - name: brace_end
+      template:
+        src: brace_end.j2
+        dest: "{{ T }}/brace_end"
+        variable_start_string: '${'
+        variable_end_string: '}'
+    - name: star_comment
+      template:
+        src: star_comment.j2
+        dest: "{{ T }}/star_comment"
+        comment_start_string: '{*'
+        comment_end_string: '*}'
+    - name: in_string
+      template:
+        src: in_string.j2
+        dest: "{{ T }}/in_string"
+        variable_start_string: '[['
+        variable_end_string: ']]'
+        block_start_string: '[%'
+        block_end_string: '%]'
+    - name: raw_custom
+      template:
+        src: raw_custom.j2
+        dest: "{{ T }}/raw_custom"
+        variable_start_string: '[['
+        variable_end_string: ']]'
+        block_start_string: '[%'
+        block_end_string: '%]'
+    - name: raw_default_is_text
+      template:
+        src: raw_default_is_text.j2
+        dest: "{{ T }}/raw_default_is_text"
+        variable_start_string: '[['
+        variable_end_string: ']]'
+    - name: plain_default_braces
+      template:
+        src: plain_default_braces.j2
+        dest: "{{ T }}/plain_default_braces"
+        variable_start_string: '[['
+        variable_end_string: ']]'
+    - name: crlf_normalised
+      template:
+        src: crlf_normalised.j2
+        dest: "{{ T }}/crlf_normalised"
+        variable_start_string: '[['
+        variable_end_string: ']]'
+        newline_sequence: '\n'
+    - name: plain_untouched
+      template:
+        src: plain_untouched.j2
+        dest: "{{ T }}/plain_untouched"
+        variable_start_string: '[['
+        variable_end_string: ']]'
+        block_start_string: '[%'
+        block_end_string: '%]'
+        comment_start_string: '[#'
+        comment_end_string: '#]'
+        newline_sequence: '\r'
+    - name: trim_lstrip
+      template:
+        src: trim_lstrip.j2
+        dest: "{{ T }}/trim_lstrip"
+        block_start_string: '[%'
+        block_end_string: '%]'
+        comment_start_string: '[#'
+        comment_end_string: '#]'
+        variable_start_string: '[['
+        variable_end_string: ']]'
+        lstrip_blocks: true
+    - name: trim_off
+      template:
+        src: trim_off.j2
+        dest: "{{ T }}/trim_off"
+        block_start_string: '[%'
+        block_end_string: '%]'
+        trim_blocks: false
+    - name: whitespace_control
+      template:
+        src: whitespace_control.j2
+        dest: "{{ T }}/whitespace_control"
+        variable_start_string: '[['
+        variable_end_string: ']]'
+        block_start_string: '[%'
+        block_end_string: '%]'
+    - name: loop_macro
+      template:
+        src: loop_macro.j2
+        dest: "{{ T }}/loop_macro"
+        variable_start_string: '[['
+        variable_end_string: ']]'
+        block_start_string: '[%'
+        block_end_string: '%]'
+    - name: latex
+      template:
+        src: latex.j2
+        dest: "{{ T }}/latex"
+        variable_start_string: '\VAR{'
+        variable_end_string: '}'
+        block_start_string: '\BLOCK{'
+        block_end_string: '}'
+        comment_start_string: '\#{'
+        comment_end_string: '}'
+    - name: crlf_newline_sequence
+      template:
+        src: crlf_newline_sequence.j2
+        dest: "{{ T }}/crlf_newline_sequence"
+        variable_start_string: '[['
+        variable_end_string: ']]'
+        block_start_string: '[%'
+        block_end_string: '%]'
+        newline_sequence: '\r\n'
+    - name: Read back
+      slurp:
+        src: "{{ T }}/{{ item }}"
+      loop: [var_start_end, var_start_only, var_end_only, block_start_end, comment, all_six, multi_char, shell_style, brackets_close, brace_end, star_comment, in_string, raw_custom, raw_default_is_text, plain_default_braces, crlf_normalised, plain_untouched, trim_lstrip, trim_off, whitespace_control, loop_macro, latex, crlf_newline_sequence]
+      register: back
+      when: not ansible_check_mode
+    - name: Show
+      debug:
+        msg: "{{ item.item }}: {{ item.content | b64decode | to_json }}"
+      loop: "{{ back.results }}"
+      loop_control: {label: "{{ item.item }}"}
+      when: not ansible_check_mode

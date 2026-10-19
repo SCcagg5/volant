@@ -144,6 +144,8 @@ pub struct RunState {
     /// The inventory a `meta: refresh_inventory` read again, for the plays behind the one that
     /// asked: the command line takes it before the next play's hosts are resolved.
     pub refreshed: Option<Inventory>,
+    /// Whether a play with hosts has started: `hostvars` exists from then on, see `play_hosts`.
+    pub played: bool,
     pub verbosity: u8,
     /// Agents kept alive between plays, the way Ansible keeps its ssh connections open. Only
     /// the connecting user's own link per host is kept; see `keep_links`.

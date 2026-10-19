@@ -1,0 +1,3 @@
+# with_flattened walks a list with every nested list opened, and loop_control labels and counts it.
+args: [play.yml]
+needs: ["ansible-core"]

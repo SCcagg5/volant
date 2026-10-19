@@ -1,0 +1,7 @@
+g_int: &g 5
+g_alias: *g
+g_yes: &gy yes
+g_yes_alias: *gy
+g_unsafe: !unsafe 010
+g_unsafe_yes: !unsafe yes
+g_seq: [*g, *gy, x]

@@ -120,6 +120,26 @@
   vars: {v: True}
 - template: "{{ v }}"
   vars: {v: False}
+# Aliases, tags and plain scalars as PyYAML reads them, through `from_yaml`, which loads its text
+# with PyYAML's own loader. A date prints as `to_json` prints it: the value model has no date.
+# `from_yaml` knows neither `!unsafe` nor `!vault`: the vars loader's rows are in the scenarios.
+- {template: "{{ s | from_yaml }}", vars: {s: "a: &n 5\nb: *n"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: &n yes\nb: [*n, *n]"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: &k key\nm: {*k : 1}"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: &n 010\nb: *n"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: &n \"5\"\nb: *n"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: &n |\n  x\n  y\nb: *n"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !!str 5"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !!int \"5\""}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !!float 5"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !!bool \"yes\""}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !!null x"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: [1:30, 190:20:30, 1:30.5]"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: [+.5, -.5, .5, 5., 1.e+3]"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: [010, 08, 0o10, 0x1F, 1_000, 1e3, 1.0e+3]"}}
+- {template: "{{ s | from_yaml | to_json }}", vars: {s: "a: [2020-01-02, 2020-1-2, 2020-01-02 10:11:12, 2020-01-02T10:11:12Z, 2020-01-02t10:11:12.5+01:00]"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !custom x"}}
+- {template: "{{ s | from_yaml }}", vars: {s: "a: !!int abc"}}
 # Ansible filters
 - template: "{{ missing | default('fallback') }}"
 - template: "{{ empty | default('fallback') }}"
@@ -169,6 +189,172 @@
 - template: "{{ 'server1.example.com' | regex_search('^(\\w+)\\.', '\\1') }}"
 - template: "{{ 'nothing here' | regex_search('\\d+') }}"
 - template: "{{ 'a1b22c333' | regex_findall('\\d+') }}"
+# regex_findall: with no group the matches, with one group its text, with more a list of group texts
+- template: "{{ 'a1b2' | regex_findall('([a-z])[0-9]') }}"
+- template: "{{ 'a1b2' | regex_findall('([a-z])([0-9])') }}"
+- template: "{{ 'a1b2' | regex_findall('(?P<l>[a-z])(?P<d>[0-9])') }}"
+- template: "{{ 'a1b2' | regex_findall('(?P<l>[a-z])[0-9]') }}"
+- template: "{{ 'a1b2' | regex_findall('(([a-z])([0-9]))') }}"
+- template: "{{ 'a1b2' | regex_findall('(a)|(b)') }}"
+- template: "{{ 'a1' | regex_findall('(a)(1)(x)?') }}"
+- template: "{{ 'aaaa' | regex_findall('(a)(?:a)') }}"
+- template: "{{ 'a1b2' | regex_findall('([a-z])([0-9])') | map('join', '-') | list }}"
+- template: "{{ 123 | regex_findall('(\\d)') }}"
+- template: "{{ none | regex_findall('a') }}"
+- template: "{{ ['a'] | regex_findall('a') }}"
+# regex_findall: empty matches, as Python 3.7 and later report them
+- template: "{{ 'abc' | regex_findall('x*') }}"
+- template: "{{ 'ab12' | regex_findall('[a-z]*') }}"
+- template: "{{ 'ab12' | regex_findall('([a-z]*)(\\d*)') }}"
+- template: "{{ '' | regex_findall('(a)?') }}"
+- template: "{{ 'aaaa' | regex_findall('aa') }}"
+- template: "{{ 'ab' | regex_findall('a|') }}"
+# regex_findall: flags by name and by position, which is multiline first
+- template: "{{ 'aAbB' | regex_findall('[a-z]', ignorecase=true) }}"
+- template: "{{ 'aAbB' | regex_findall('([a-z])', false, true) }}"
+- template: "{{ t | regex_findall('^l(\\d)$') }}"
+  vars: {"t": "l1\nl2\nl3"}
+- template: "{{ t | regex_findall('^l(\\d)$', multiline=true) }}"
+  vars: {"t": "l1\nl2\nl3"}
+- template: "{{ t | regex_findall('^l(\\d)$', true) }}"
+  vars: {"t": "l1\nl2\nl3"}
+- template: "{{ t | regex_findall('b$') }}"
+  vars: {"t": "ab\n"}
+- template: "{{ t | regex_findall('(?m)^(\\w+)=(\\d+)$') }}"
+  vars: {"t": "a=1\nb=2\n"}
+# regex_search: groups by number or by name, None for a group that took no part, an error for one that does not exist
+- template: "{{ 'ab12' | regex_search('([a-z]+)([0-9]+)', '\\2', '\\1') }}"
+- template: "{{ 'ab12' | regex_search('([a-z]+)([0-9]+)', '\\0') }}"
+- template: "{{ 'ab12' | regex_search('(?P<w>[a-z]+)([0-9]+)', '\\g<w>', '\\2') }}"
+- template: "{{ 'ab' | regex_search('(a)|(b)', '\\1', '\\2') }}"
+- template: "{{ 'ab' | regex_search('(x)?ab', '\\1') }}"
+- template: "{{ 'ab' | regex_search('x', '\\1') }}"
+- template: "{{ 'ab12' | regex_search('([a-z]+)([0-9]+)', '\\3') }}"
+- template: "{{ 'ab12' | regex_search('(?P<w>[a-z]+)([0-9]+)', '\\g<nope>') }}"
+- template: "{{ 'ab12' | regex_search('(?P<w>[a-z]+)([0-9]+)', '\\g<2>') }}"
+- template: "{{ 'ab12' | regex_search('(?P<w>[a-z]+)([0-9]+)', 'w') }}"
+- template: "{{ 'ab' | regex_search('x') is none }}"
+- template: "{{ 'ab' | regex_search('a', foo=true) }}"
+- template: "{{ 12345 | regex_search('3.') }}"
+- template: "{{ t | regex_search('^(A)b', '\\1', ignorecase=true, multiline=true) }}"
+  vars: {"t": "x\nab"}
+- template: "{{ t | regex_search('^ab') }}"
+  vars: {"t": "x\nab"}
+- template: "{{ t | regex_search('^abc$') }}"
+  vars: {"t": "abc\n"}
+# regex_replace: the replacement is read as Python reads it
+- template: "{{ 'aab' | regex_replace('a', 'x', count=1) }}"
+- template: "{{ 'aab' | regex_replace('a', 'x', count=-1) }}"
+- template: "{{ 'aAb' | regex_replace('a', 'x', true) }}"
+- template: "{{ 'xy' | regex_replace('(x)(y)', '\\2\\1') }}"
+- template: "{{ 'xy' | regex_replace('(x)(y)', '\\g<2>\\g<1>') }}"
+- template: "{{ 'ab' | regex_replace('(?P<x>a)(?P<y>b)', '\\g<y>-\\g<x>') }}"
+- template: "{{ 'ab' | regex_replace('(a)(b)', '[\\g<0>]') }}"
+- template: "{{ 'ab' | regex_replace('(a)|(b)', '[\\2]') }}"
+- template: "{{ 'ab' | regex_replace('(a)', '\\1_') }}"
+- template: "{{ 'ab' | regex_replace('a', '\\n') }}"
+- template: "{{ 'ab' | regex_replace('(a)', '$1') }}"
+- template: "{{ 'ab' | regex_replace('(a)', '${1}') }}"
+- template: "{{ 'ab' | regex_replace('a', '$$') }}"
+- template: "{{ '$HOME/x' | regex_replace('^', '$USER:') }}"
+- template: "{{ 'ab' | regex_replace('(a)(b)', '\\3') }}"
+- template: "{{ 'ab' | regex_replace('(a)(b)', '\\g<3>') }}"
+- template: "{{ 'ab' | regex_replace('(a)(b)', '\\g<z>') }}"
+- template: "{{ 'ab' | regex_replace('(a)(b)', '\\g<1 >') }}"
+- template: "{{ 'ab' | regex_replace('a', '\\q') }}"
+- template: "{{ 'ab' | regex_replace('a', '\\g') }}"
+- template: "{{ 'ab' | regex_replace('a', '\\g<') }}"
+- template: "{{ 'ab' | regex_replace('a', '\\g<>') }}"
+- template: "{{ 'ab' | regex_replace('a', '\\1') }}"
+- template: "{{ 'ab' | regex_replace('a', none) }}"
+- template: "{{ 'ab' | regex_replace('a', '\\-') }}"
+# regex_replace: empty matches, which Python 3.7 and later also replace next to a match
+- template: "{{ 'abc' | regex_replace('x*', '-') }}"
+- template: "{{ 'abc' | regex_replace('b*', '-') }}"
+- template: "{{ 'ab cd' | regex_replace('(\\w*)', '<\\1>') }}"
+- template: "{{ 'abc' | regex_replace('', '-') }}"
+- template: "{{ '' | regex_replace('x*', '-') }}"
+- template: "{{ 'abc' | regex_replace('^', '> ') }}"
+- template: "{{ 'abc' | regex_replace('.*', 'X') }}"
+- template: "{{ 'ab' | regex_replace('(a)*', '<\\1>') }}"
+- template: "{{ t | regex_replace('^', '> ', multiline=true) }}"
+  vars: {"t": "a\nb\n"}
+- template: "{{ t | regex_replace('$', '<', multiline=true) }}"
+  vars: {"t": "a\nb\n"}
+- template: "{{ t | regex_replace('$', 'x') }}"
+  vars: {"t": "a\n"}
+- template: "{{ t | regex_replace('a$', 'x') }}"
+  vars: {"t": "a\n"}
+- template: "{{ t | regex_replace('\\s*$', '') }}"
+  vars: {"t": "a \n"}
+- template: "{{ t | regex_replace('^a', 'x') }}"
+  vars: {"t": "a\na"}
+- template: "{{ t | regex_replace('^a', 'x', multiline=true) }}"
+  vars: {"t": "a\na"}
+- template: "{{ 'ab cd' | regex_replace('\\b', '|') }}"
+- template: "{{ 'ab' | regex_replace('(?s).', 'x') }}"
+# regex_replace: values that are not text, and the other parameters
+- template: "{{ 12321 | regex_replace('2', 'x') }}"
+- template: "{{ none | regex_replace('2', 'x') }}"
+- template: "{{ true | regex_replace('r', 'x') }}"
+- template: "{{ 1.5 | regex_replace('\\.', ',') }}"
+- template: "{{ ['a'] | regex_replace('a', 'x') }}"
+- template: "{{ 'aaa' | regex_replace('a', 'x', mandatory_count=3) }}"
+- template: "{{ 'aaa' | regex_replace('a', 'x', mandatory_count=2) }}"
+- template: "{{ 'aaa' | regex_replace('a') }}"
+- template: "{{ 'aaa' | regex_replace() }}"
+# Python's pattern syntax where it differs from the regex crate's
+- template: "{{ 'a{b' | regex_replace('{', '') }}"
+- template: "{{ 'a{1' | regex_replace('a{1', 'x') }}"
+- template: "{{ 'aa' | regex_replace('a{,1}', 'x') }}"
+- template: "{{ 'a{ 1}' | regex_replace('a{ 1}', 'x') }}"
+- template: "{{ 'ab' | regex_replace('a{1,2,3}', 'x') }}"
+- template: "{{ 'a[b' | regex_replace('[[]', 'x') }}"
+- template: "{{ 'ab' | regex_replace('[[:alpha:]]', 'x') }}"
+- template: "{{ 'a&b' | regex_replace('[a&&b]', 'x') }}"
+- template: "{{ 'a~b' | regex_replace('[~~]', 'x') }}"
+- template: "{{ 'a<b' | regex_replace('\\<', 'x') }}"
+- template: "{{ 'ab' | regex_replace('b\\Z', 'x') }}"
+- template: "{{ 'ab' | regex_replace('b\\z', 'x') }}"
+- template: "{{ 'ab' | regex_replace('(?#comment)a', 'x') }}"
+- template: "{{ 'ab' | regex_replace('(?x) a b # note', 'x') }}"
+- template: "{{ 'AB' | regex_replace('(?i)ab', 'x') }}"
+- template: "{{ 'AB' | regex_replace('(?i:a)B', 'x') }}"
+- template: "{{ 'aB' | regex_replace('a(?i)b', 'x') }}"
+- template: "{{ 'ab' | regex_replace('(?-i)a', 'x') }}"
+- template: "{{ 'ab' | regex_replace('\\p{L}', 'x') }}"
+- template: "{{ 'ab' | regex_replace('\\e', 'x') }}"
+- template: "{{ 'ab' | regex_replace('(?<n>a)', 'x') }}"
+- template: "{{ 'ab' | regex_replace('[z-a]', 'x') }}"
+- template: "{{ 'ab' | regex_replace('a**', 'x') }}"
+- template: "{{ 'ab' | regex_replace('(', 'x') }}"
+- template: "{{ 'ab' | regex_replace(')', 'x') }}"
+- template: "{{ 'ab' | regex_replace('[a', 'x') }}"
+- template: "{{ 'ab' | regex_replace('*a', 'x') }}"
+- template: "{{ 'a1' | regex_replace('\\x61', 'x') }}"
+- template: "{{ 'a-b' | regex_replace('[\\w-]', 'x') }}"
+- template: "{{ 'a-b' | regex_replace('[\\w-z]', 'x') }}"
+- template: "{{ 'a]b' | regex_replace('[]a]', 'x') }}"
+# The tests take the same flags and coerce the value as the filters do
+- template: "{{ t is regex('ab$') }}"
+  vars: {"t": "ab\n"}
+- template: "{{ 12 is match('1') }}"
+- template: "{{ ['a'] is regex('a') }}"
+- template: "{{ 'ab' is match() }}"
+- template: "{{ 'aB' is match('Ab', true) }}"
+- template: "{{ t is search('^b', multiline=true) }}"
+  vars: {"t": "a\nb"}
+- template: "{{ 'ab' is regex('b', match_type='match') }}"
+- template: "{{ 'ab' is regex('b', match_type='nope') }}"
+- template: "{{ 'ab' is match('(') }}"
+- template: "{{ 'ab' is match('a', foo=1) }}"
+- template: "{{ ['ab', 'b'] | select('match', 'b') | list }}"
+- template: "{{ ['ab', 'b'] | map('regex_search', '(b)', '\\1') | list }}"
+# regex_escape
+- template: "{{ ['a.b'] | regex_escape() }}"
+- template: "{{ 1.5 | regex_escape() }}"
+- template: "{{ 'a.b' | regex_escape(none) }}"
+- template: "{{ 'a+b?' | regex_escape('posix_basic') }}"
 - template: "{{ missing_filter_input | some_unknown_filter }}"
   vars: {missing_filter_input: 1}
 # Ansible tests
@@ -493,6 +679,117 @@
 - template: "{% macro q(a) %}m{{ a }}{% endmacro %}{{ q(1) }}"
 - template: "{% macro query(a) %}m{{ a }}{% endmacro %}{{ query(2) }}"
 - template: "{{ lookup('varnames', '[', wantlist=True) }}"
+# `dict()` in every form Python's constructor takes. The errors are the reference's own.
+- template: "{{ dict() }}"
+- template: "{{ dict(M) }}"
+  vars: {M: {a: 1, b: 2}}
+- template: "{{ dict(a=1, b=2) }}"
+- template: "{{ dict(M, c=3) }}"
+  vars: {M: {a: 1, b: 2}}
+- template: "{{ dict(M, a=3) }}"
+  vars: {M: {a: 1, b: 2}}
+- template: "{{ dict(P) }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P) }}"
+  vars: {P: []}
+- template: "{{ dict(P | list) }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P, a=3) }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[a, 1], [a, 2]]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[a, [1, 2]], [b, {c: d}]]}
+- template: "{{ dict(K | zip(V)) }}"
+  vars: {K: [a, b], V: [1, 2]}
+- template: "{{ dict(K | zip(V)) }}"
+  vars: {K: [a, b, c], V: [1, 2]}
+- template: "{{ dict(K | zip(V) | list) }}"
+  vars: {K: [a, b], V: [1, 2]}
+- template: "{{ dict(M.items()) }}"
+  vars: {M: {a: 1, b: 2}}
+- template: "{{ dict(M | dict2items | map(attribute='key') | zip(M | dict2items | map(attribute='value'))) }}"
+  vars: {M: {a: 1, b: 2}}
+- template: "{{ dict(P | map('reverse')) }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P | batch(2)) }}"
+  vars: {P: [a, 1, b, 2]}
+- template: "{{ dict([['a', 1], ['b', 2]]) }}"
+- template: "{{ dict(['ab', 'cd']) }}"
+- template: "{{ dict(P) }}"
+  vars: {P: [{a: 1, b: 2}]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[1, 2], [true, 4]]}
+- template: "{{ dict(P) | dict2items }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P) | combine({'z': 1}) }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P)['b'] }}"
+  vars: {P: [[a, 1], [b, 2]]}
+- template: "{{ dict(P) is mapping }}"
+  vars: {P: [[a, 1]]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[a, 1, 2]]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[a]]}
+- template: "{{ dict(P) }}"
+  vars: {P: [a]}
+- template: "{{ dict(P) }}"
+  vars: {P: [1]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[[1, 2], 3]]}
+- template: "{{ dict(P) }}"
+  vars: {P: [[{a: 1}, 3]]}
+- template: "{{ dict(P) }}"
+  vars: {P: abcd}
+- template: "{{ dict(P) }}"
+  vars: {P: 5}
+- template: "{{ dict(P) }}"
+  vars: {P: null}
+- template: "{{ dict(P) }}"
+  vars: {P: true}
+- template: "{{ dict(P, P) }}"
+  vars: {P: []}
+- template: "{{ dict(1, 2) }}"
+- template: "{{ dict(nope) }}"
+- template: "{{ dict(a=nope) }}"
+# `cycler`, `joiner` and `undef`, the Jinja globals a template may call.
+- template: "{% set c = cycler('a', 'b') %}{{ c.next() }}{{ c.next() }}{{ c.next() }}"
+- template: "{% set c = cycler('a', 'b') %}{{ c.current }}{{ c.next() }}{{ c.current }}"
+- template: "{% set c = cycler(1, 2, 3) %}{{ c.next() }}{{ c.next() }}{{ c.reset() }}{{ c.next() }}"
+- template: "{% set c = cycler(*items) %}{% for i in range(5) %}{{ c.next() }}{% endfor %}"
+  vars: {items: [x, y]}
+- template: "{% set c = cycler('a', 'b') %}{% for i in range(4) %}{{ c.next() }}{% endfor %}"
+- template: "{{ cycler() }}"
+- template: "{% set j = joiner(',') %}{{ j() }}a{{ j() }}b{{ j() }}c"
+- template: "{% set j = joiner() %}{{ j() }}a{{ j() }}b"
+- template: "{% set j = joiner(' | ') %}{% for i in range(3) %}{{ j() }}{{ i }}{% endfor %}"
+- template: "{{ undef() }}"
+- template: "{{ undef(hint='x is needed') }}"
+- template: "{{ undef() | default('d') }}"
+- template: "{{ undef() is defined }}"
+- template: "{{ x }}"
+  vars: {x: "{{ undef(hint='x is needed') }}"}
+# Integers beyond 64 bits stay apart as keys; a mapping read through `dict` is still the mapping.
+- template: "{{ dict([[9223372036854775808, 'a'], [9223372036854775809, 'b']]) | length }}"
+- template: "{{ dict([[18446744073709551616, 'a'], [18446744073709551617, 'b']]) | length }}"
+- template: "{{ dict([[1, 'a'], [1.0, 'b'], [true, 'c'], [9223372036854775808, 'd']]) | length }}"
+- template: "{{ dict(vars) | length }}"
+  vars: {bad: "{{ nope }}"}
+# A merge key (`<<`) puts the merged pairs first and the explicit keys after them. An explicit key
+# takes the value of a merged key and keeps its place; in a list, an earlier mapping beats a later one.
+- template: "{{ d | to_json }}"
+  vars: {base: &base {a: 1, b: 2}, d: {z: 0, <<: *base, b: 9}}
+- template: "{{ d | to_json }}"
+  vars: {x: &x {k: x, only_x: 1}, y: &y {k: y, only_y: 2}, d: {<<: [*x, *y], own: 3}}
+- template: "{{ d | to_json }}"
+  vars: {inner: &inner {p: 1}, outer: &outer {<<: *inner, q: 2}, d: {<<: *outer, r: 3}}
+- template: "{{ d | to_json }}"
+  vars: {d: {a: 1, <<: {a: 2, b: 3}, <<: {b: 4}}}
+- template: "{{ d | to_json }}"
+  vars: {d: {'<<': {a: 1}, c: 2}}
+- template: "{{ d | to_json }}"
+  vars: {d: {<<: [], <<: {}, a: 1}}
 # A raw block writes text: it is rendered once, however it is read afterwards.
 - template: "{% raw %}{{ x }}{% endraw %}"
   vars: {x: 5}
@@ -1584,3 +1881,318 @@
 - template: "{{ ('%.70000d' % 5) | length }}"
 - template: "{{ ('%.70000f' | format(1.5)) | length }}"
 - template: "{{ ('{:.70000f}'.format(1.5)) | length }}"
+# Statement blocks and comments in a string: ansible-core renders any string that holds `{{`, `{%`
+# or `{#`, with trim_blocks on and lstrip_blocks off. A result that is one output node keeps its
+# type, no node at all is none, and text around nodes makes a string.
+- template: "{% for i in [1, 2] %}{{ i }},{% endfor %}"
+- template: "[{% for i in [1, 2] %}{{ i }}{% if not loop.last %}, {% endif %}{% endfor %}]"
+- template: "{% set a = [1, 2] %}{{ a }}"
+- template: "{% set ns = namespace(r=[]) %}{% for i in [1, 2, 3] %}{% set ns.r = ns.r + [i] %}{% endfor %}{{ ns.r }}"
+- template: "{% set d = {'k': 1} %}{{ d }}"
+- template: "{% if true %}[1, 2]{% endif %}"
+- template: "{% if true %}42{% endif %}"
+- template: "{% if false %}x{% endif %}"
+- template: "{% set a = 1 %}"
+- template: "{% set a = 1 %}{{ a }}"
+- template: "{% set a = 1 %}\n{{ a }}"
+- template: "{% if true %}{{ [1] }}{% endif %}"
+- template: "{% for i in [1, 2] %}{{ [i] }}{% endfor %}"
+- template: "{% if true %}{{ none }}{% endif %}"
+- template: "{% macro m(x) %}<{{ x }}>{% endmacro %}{{ m(5) }}"
+- template: "{% macro w() %}[{{ caller() }}]{% endmacro %}{% call w() %}in{% endcall %}"
+- template: "{# only a comment #}"
+- template: "a{# c #}b"
+- template: "a{# c #}\nb"
+- template: "{{ [1, 2] }}{# c #}"
+- template: "{# c #}{{ [1, 2] }}"
+- template: "x {# unterminated"
+- template: "echo ${#x[@]}"
+- template: "a  {%- if true -%}  b  {%- endif -%}  c"
+- template: "x\n  {%- if true %}\ny\n{%- endif %}\nz"
+- template: "a\n{% if true %}\nb\n{% endif %}\nc\n"
+- template: "{% for i in [1, 2] %}\nl{{ i }}\n{% endfor %}\n"
+- template: "a\n  {% if true %}\nb\n  {% endif %}\nc\n"
+- template: "{% if true %}x{% endif %}\n"
+- template: "127.0.0.1 localhost\n{% for h in hosts %}\n10.0.0.{{ loop.index }} {{ h }}\n{% endfor %}\n# end\n"
+  vars: {hosts: [a, b]}
+- template: "{{ [1, 2] }}\n"
+- template: "{{ [1, 2] }}\n\n"
+- template: "\n{{ [1, 2] }}"
+- template: "{{ [1, 2] }} "
+- template: "{% set a = [1, 2] %}\n{{ a }}\n"
+- template: "{{ v }}"
+  vars: {v: "{% for i in [1, 2] %}{{ i }},{% endfor %}"}
+- template: "{{ v }}"
+  vars: {v: "{% set a = [1, 2] %}{{ a }}"}
+- template: "{{ v }}"
+  vars: {v: "{% if false %}x{% endif %}"}
+- when: "{% if true %}true{% endif %}"
+# A `{#` inside a string literal is text, and a result that holds one is not rendered again.
+- template: "{{ '{#' }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ '{#' ~ s }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "a {{ '{#' }} b"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ 'a{#b' }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ ['{#'] }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ s ~ '#}' }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ v }}"
+  vars: {v: "{{ '{#' }}"}
+# An unterminated `{#` that ends the string is a comment with nothing in it. Anything after it is an error.
+- template: "{#"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{#\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{#+"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{#-"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "x {#"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "x {#\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "x{#-"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "x {#-"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "x{#+"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x }}{#"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "a\n{#"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{# "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "x {# "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{#x"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{# x"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "a {#+ b"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{#{#"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{# c #}{#"
+  vars: {x: 5, s: abc, l: [1, 2]}
+# Whitespace control around a lone expression: `{{-` strips the text before it, `-}}` the text after it.
+- template: "{{ x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x }}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x }} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x }}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x }}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x -}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x -}} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x -}}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x -}}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x }}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x }} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x }}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x }}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x -}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x -}} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x -}}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x -}}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x }}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x }} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x }}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x }}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x -}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x -}} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x -}}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{ x -}}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x }}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x }} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x }}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x }}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x -}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x -}} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x -}}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: " {{- x -}}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x }}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x }} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x }}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x }}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x -}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x -}} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x -}}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{ x -}}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x }}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x }} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x }}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x }}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x -}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x -}} "
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x -}}\n\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n{{- x -}}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- l }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ l -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "  {{- l -}}  \n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{-x}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x-}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{--x}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ - x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- - x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x - 1 }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x -}}{{ x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x }}{{- x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x -}} {{ x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{ x -}}\n{{ x }}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "\n {{- x }}\n{%- if true %}\ny{% endif %}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- x -}}{# c #}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{# c #}{{- x -}}"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- 's' -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- none -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{{- '' -}}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+- template: "{%- if true -%}{{- x -}}{%- endif -%}\n"
+  vars: {x: 5, s: abc, l: [1, 2]}
+# A variable whose value is a template is rendered when a template reads it, so a filter or an
+# operator sees the final value.
+- template: "{{ s }}"
+  vars: {c: 7, b: "{{ c }}", s: "{{ b | int + 1 }}"}
+- template: "{{ b | int }}"
+  vars: {c: 7, b: "{{ c }}"}
+- template: "{{ d3 }}"
+  vars: {c: 7, d1: "{{ c }}", d2: "{{ d1 }}", d3: "{{ d2 | int * 2 }}"}
+- template: "{{ url | length }}|{{ url | regex_replace('example', 'zz') }}|{{ url | b64encode }}"
+  vars: {host: example.org, url: "http://{{ host }}:8080/x"}
+- template: "{{ l | map('upper') | list }}"
+  vars: {host: example.org, l: ["{{ host }}"]}
+- template: "{{ d.k | int + d.n.m | int }}"
+  vars: {c: 7, d: {k: "{{ c }}", n: {m: "{{ c }}"}}}
+- template: "{{ e.k | int + 1 }}"
+  vars: {c: 7, d: {k: "{{ c }}"}, e: "{{ d }}"}
+- template: "{{ d.ok }}"
+  vars: {d: {bad: "{{ missing }}", ok: 1}}
+- when: "cond"
+  vars: {port_s: "{{ 8080 }}", cond: "{{ port_s | int > 8000 }}"}
+- template: "{{ u | default('dflt') }}"
+  vars: {u: "{{ missing }}"}
+- template: "{{ u is defined }}"
+  vars: {u: "{{ missing }}"}
+- template: "{{ u }}"
+  vars: {u: "{{ missing }}"}
+- template: "{{ u | upper }}"
+  vars: {u: "{{ v }}", v: "{{ missing }}"}
+- template: "{{ a }}"
+  vars: {a: "{{ a }}"}
+- template: "{{ a }}"
+  vars: {a: "{{ b }}", b: "{{ a }}"}
+- template: "{{ a | default('x') }}"
+  vars: {a: "{{ a | default('x') }}"}
+- template: "{{ a | default('x') }}"
+  vars: {a: "{{ 1 | nosuchfilter }}"}
+# What came from a host stays text through a variable that reads it.
+- template: "{{ d | length }}|{{ d | upper }}|{{ (d | length) ~ (d | upper) }}"
+  vars: {c: 7, d: "{{ reg }}"}
+  untrusted: {reg: "{{ c }}"}
+- template: "{{ e | length }}|{{ e }}"
+  vars: {c: 7, d: "{{ reg }}", e: "{{ d | upper }}"}
+  untrusted: {reg: "{{ c }}"}
+- template: "{{ '½'.isdecimal() }}"
+- template: "{{ '½'.isdigit() }}"
+- template: "{{ '½'.isnumeric() }}"
+- template: "{{ '²'.isdecimal() }}"
+- template: "{{ '²'.isdigit() }}"
+- template: "{{ '²'.isnumeric() }}"
+- template: "{{ '٣'.isdecimal() }}"
+- template: "{{ '٣'.isdigit() }}"
+- template: "{{ '٣'.isnumeric() }}"
+- template: "{{ '5'.isdecimal() }}"
+- template: "{{ '5'.isdigit() }}"
+- template: "{{ '5'.isnumeric() }}"
+- template: "{{ '一'.isnumeric() }}"

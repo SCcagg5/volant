@@ -1,0 +1,26 @@
+# What a play's `hosts` can read when it renders, and what it refuses. The render has no host: the
+# groups, the extra variables, the play's variables, its `vars_files` and a role's defaults are there,
+# an inventory variable, a `group_vars` file and the facts are not, and `hostvars` is not there
+# until a play has run.
+runs:
+  - args: [-i, inventory.ini, inventory_var.yml]
+  - args: [-i, inventory.ini, group_vars_var.yml]
+  - args: [-i, inventory.ini, facts.yml]
+  - args: [-i, inventory.ini, inventory_hostname.yml]
+  - args: [-i, inventory.ini, undefined.yml]
+  - args: [-i, inventory.ini, hostvars_first.yml]
+  - args: [-i, inventory.ini, empty_string.yml]
+  - args: [-i, inventory.ini, integer.yml]
+  - args: [-i, inventory.ini, boolean.yml]
+  - args: [-i, inventory.ini, mapping.yml]
+  - args: [-i, inventory.ini, list_in_list.yml]
+  - args: [-i, inventory.ini, default_for_unset.yml]
+  - args: [-i, inventory.ini, fact_default.yml]
+  - args: [-i, inventory.ini, play_hosts_all.yml]
+  - args: [-i, inventory.ini, role_default.yml]
+  - args: [-i, inventory.ini, vars_files_unset.yml]
+  - args: [-i, inventory.ini, vars_files_found.yml]
+  - args: [-i, inventory.ini, hostvars_second.yml]
+  - args: [-i, inventory.ini, hostvars_after_nothing.yml]
+  - args: [-i, inventory.ini, none_result.yml]
+  - args: [-i, inventory.ini, play_hosts_all.yml, --limit, 's1,w1']

@@ -29,6 +29,7 @@ pub(crate) use compiled::{
 pub(crate) use flatten::compile;
 pub(crate) use include::{
     Grafted, IncludeRequest, IncludeTarget, expand_include, graft, include_role_entry,
+    role_identity,
 };
 pub(crate) use model::{
     Compiled, Handler, IncludeKind, IncludeParams, Origin, Section, Step, StepKind, is_splice_point,
