@@ -1369,6 +1369,146 @@ fn su_answers_its_prompt_with_the_password(
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// [`fake_su_host`] with an `ssh` that wants a password. It logs its program name and arguments
+/// to `ssh.log` and its environment to `ssh.log.env`, and lets the command in only when it was
+/// started with `BatchMode=no` and its askpass answers the password in `expected`. Anything else
+/// is `Permission denied`, as `sshd` says it. `ssh-alt` is the same program under another name.
+fn fake_password_host(name: &str, expected: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = fake_su_host(name);
+    std::fs::write(dir.join("expected"), expected).unwrap();
+    let script = "#!/bin/sh\n\
+        echo \"$0 $*\" >> \"$FAKE_SSH_DIR/ssh.log\"\n\
+        env | sort >> \"$FAKE_SSH_DIR/ssh.log.env\"\n\
+        ask=\n\
+        case \" $* \" in *' BatchMode=no '*) ask=1;; esac\n\
+        given=\n\
+        [ -n \"$ask\" ] && [ -n \"$SSH_ASKPASS\" ] && given=$(\"$SSH_ASKPASS\" \"tester@fake-host's password: \")\n\
+        if [ \"$given\" != \"$(cat \"$FAKE_SSH_DIR/expected\")\" ]; then\n\
+          echo 'tester@fake-host: Permission denied (publickey,password).' >&2\n\
+          exit 255\n\
+        fi\n\
+        while [ $# -gt 0 ] && [ \"$1\" != -- ]; do shift; done\n\
+        [ $# -gt 1 ] || exit 0\n\
+        exec sh -c \"$2\"\n";
+    for file in ["ssh", "ssh-alt"] {
+        let path = dir.join("bin").join(file);
+        std::fs::write(&path, script).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    dir
+}
+
+/// A password variable reaches `ssh` only through `SSH_ASKPASS`, in the reference's name order and
+/// over the password file: at `-vvvv` no output, argument or environment holds it.
+#[rstest]
+#[case::password("ansible_password=s3cret-conn-pw", &[], 0, "changed: [box]")]
+#[case::ssh_pass("ansible_ssh_pass=s3cret-conn-pw", &[], 0, "changed: [box]")]
+#[case::ssh_password("ansible_ssh_password=s3cret-conn-pw", &[], 0, "changed: [box]")]
+#[case::ssh_pass_over_password(
+    "ansible_password=wrong-conn-pw ansible_ssh_pass=s3cret-conn-pw", &[], 0, "changed: [box]"
+)]
+#[case::password_under_ssh_pass(
+    "ansible_password=s3cret-conn-pw ansible_ssh_pass=wrong-conn-pw", &[], 4, "Permission denied"
+)]
+#[case::wrong_password("ansible_password=wrong-conn-pw", &[], 4, "Permission denied")]
+#[case::empty_password("ansible_password=''", &[], 4, "Permission denied")]
+#[case::no_password("", &[], 4, "Permission denied")]
+#[case::variable_over_file(
+    "ansible_password=s3cret-conn-pw", &["wrong-conn-pw"], 0, "changed: [box]"
+)]
+#[case::wrong_variable_over_file(
+    "ansible_password=wrong-conn-pw", &["s3cret-conn-pw"], 4, "Permission denied"
+)]
+#[case::file_alone("", &["s3cret-conn-pw"], 0, "changed: [box]")]
+#[case::own_ssh_program(
+    "ansible_password=s3cret-conn-pw ansible_ssh_executable={dir}/bin/ssh-alt", &[], 0, "changed: [box]"
+)]
+fn a_connection_password_variable_reaches_ssh_through_askpass_only(
+    #[case] vars: &str,
+    #[case] file: &[&str],
+    #[case] code: i32,
+    #[case] says: &str,
+) {
+    // One directory per case: the cases run side by side under `cargo test`.
+    let name = {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (vars, file).hash(&mut hasher);
+        format!("pw-{:x}", hasher.finish())
+    };
+    let dir = fake_password_host(&name, "s3cret-conn-pw");
+    let vars = vars.replace("{dir}", &dir.display().to_string());
+    std::fs::write(
+        dir.join("inv.ini"),
+        format!(
+            "box ansible_host=fake-host ansible_user=tester ansible_remote_tmp={} {vars}\n",
+            dir.join("remote").display()
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("play.yml"),
+        "- hosts: box\n  gather_facts: false\n  tasks:\n    - command: id -un\n",
+    )
+    .unwrap();
+    let (inv, play, agents, dir_text) = (
+        dir.join("inv.ini").display().to_string(),
+        dir.join("play.yml").display().to_string(),
+        dir.join("agents").display().to_string(),
+        dir.display().to_string(),
+    );
+    let mut args = vec!["playbook", "-vvvv", "-i", &inv];
+    let file_text;
+    if let Some(password) = file.first() {
+        std::fs::write(dir.join("conn.pw"), password).unwrap();
+        file_text = dir.join("conn.pw").display().to_string();
+        args.extend(["--connection-password-file", &file_text]);
+    }
+    args.push(&play);
+    let out = volant_within_with_path(
+        &args,
+        DEFAULT_DEADLINE,
+        Some(&dir.join("bin")),
+        &[("VOLANT_AGENT_DIR", &agents), ("FAKE_SSH_DIR", &dir_text)],
+    );
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.status.code(), Some(code), "{text}");
+    assert!(text.contains(says), "{text}");
+    let ran = |file: &str| std::fs::read_to_string(dir.join(file)).unwrap_or_default();
+    let (log, env) = (ran("ssh.log"), ran("ssh.log.env"));
+    assert!(!log.is_empty(), "the fake ssh never ran: {text}");
+    for password in ["s3cret-conn-pw", "wrong-conn-pw"] {
+        for (what, seen) in [
+            ("the output", &text),
+            ("an argument of ssh", &log),
+            ("the environment of ssh", &env),
+        ] {
+            assert!(!seen.contains(password), "{password} is in {what}:\n{seen}");
+        }
+    }
+    if vars.contains("ssh_executable") {
+        assert!(
+            log.lines().all(|line| line.contains("/bin/ssh-alt ")),
+            "a call went to another program than the host named: {log}"
+        );
+    }
+    if let Some(offered) = env
+        .lines()
+        .find_map(|line| line.strip_prefix("VOLANT_ASKPASS_FILE="))
+    {
+        assert!(
+            !Path::new(offered).exists(),
+            "the password file outlived the run: {offered}"
+        );
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// A `python3` on `PATH` with no ansible-core behind it, so a probe that needs the controller to
 /// have none reads the same on a machine that has one.
 fn fake_python3_without_ansible(name: &str) -> std::path::PathBuf {

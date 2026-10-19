@@ -332,7 +332,11 @@ impl LinkFacts {
             ..LinkFacts::default()
         };
         if let crate::transport::Transport::Ssh(target) = transport {
-            facts.private_key = target.private_key.as_ref().map(|k| k.display().to_string());
+            facts.private_key = target
+                .own
+                .private_key
+                .as_ref()
+                .map(|k| k.display().to_string());
             facts.remote_user.clone_from(&target.user);
             facts.ssh_common_args = words(&target.common_args);
             facts.ssh_extra_args = words(&target.extra_args);

@@ -163,6 +163,9 @@ fn every_host_setting_is_stripped_from_gathered_facts() {
         bypasses.is_empty(),
         "read by name outside `host_setting`: {bypasses:?}"
     );
+    // The connection settings are read through the tables of `transport::names`, which the
+    // pattern above cannot see.
+    read.extend(crate::transport::connection_variables().map(str::to_string));
     for known in [
         "ansible_host",
         "ansible_become_password",

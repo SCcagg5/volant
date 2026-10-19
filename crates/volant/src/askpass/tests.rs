@@ -38,6 +38,50 @@ fn a_missing_file_gives_no_answer() {
     );
 }
 
+/// A variable's password gets a private file, one per password, in a 0700 directory that goes
+/// with the run's guard; an empty one offers nothing.
+#[cfg(unix)]
+#[test]
+fn a_variable_password_gets_a_private_file_that_goes_with_the_run() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let guard = install(None).unwrap();
+    let password = "variable-pw-only-this-test";
+    let path_of = |password| {
+        let env = environment(Source::Variable(password)).unwrap();
+        assert!(
+            env.iter().all(|(key, value)| !key.contains(password)
+                && !value.to_string_lossy().contains(password)),
+            "the password is in the environment: {env:?}"
+        );
+        env.iter()
+            .find(|(key, _)| *key == FILE_ENV)
+            .map(|(_, value)| PathBuf::from(value))
+    };
+    let path = path_of(password).expect("an askpass file");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), password);
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        path_of(password),
+        Some(path.clone()),
+        "one file for one password"
+    );
+    assert_ne!(path_of("another"), Some(path.clone()));
+    assert!(offers(Source::Variable(password)));
+    assert!(!offers(Source::Variable("")));
+    assert!(environment(Source::Variable("")).unwrap().is_empty());
+    let dir = path.parent().unwrap().to_path_buf();
+    assert_eq!(
+        std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    drop(guard);
+    assert!(!path.exists(), "the password file outlived the run");
+    assert!(!dir.exists(), "the password directory outlived the run");
+}
+
 #[cfg(unix)]
 /// The process number is the first field after the prefix, a real one.
 #[rstest::rstest]

@@ -434,16 +434,14 @@ async fn run_all(
             return Ok(1);
         }
     };
-    // The signals first: a run stopped from here on removes the password file on its way out.
+    // The signals first: a run stopped from here on removes the password files on its way out.
     let (stop_tx, stop_rx) = watch::channel(false);
     let abort = Arc::new(Abort::new(stop_tx));
     spawn_signal_watcher(Arc::clone(&abort));
     crate::askpass::remove_stale();
-    // Held to the end of the run: the directory with the file the `ssh` calls ask for the
-    // password is removed when it drops.
-    let _connection_password = connection_password
-        .map(|password| crate::askpass::install(&password))
-        .transpose()?;
+    // Held to the end of the run: the directory with the files the `ssh` calls ask for a
+    // password, those of a host variable's passwords too, is removed when it drops.
+    let _askpass = crate::askpass::install(connection_password.as_deref())?;
     let defaults = ConnectionDefaults {
         remote_user: args.user.clone().or(config.remote_user),
         connection: args.connection.clone(),
