@@ -567,3 +567,33 @@ fn an_open_older_directory_is_kept() {
     assert!(open.exists(), "a directory others can write is not removed");
     assert!(!closed.exists(), "a closed one of this user is");
 }
+
+/// The same with a real ACL entry for another user, where `setfacl` can set one.
+#[test]
+fn a_real_acl_entry_for_another_user_on_remote_tmp_is_refused() {
+    let remote = Remote::new();
+    assert_eq!(remote.upload(&good_agent("abc")).status.code(), Some(0));
+    let set = Command::new("setfacl")
+        .args(["-m", &format!("u:{OTHER_UID}:rwx")])
+        .arg(remote.shared())
+        .stderr(Stdio::null())
+        .status();
+    if !set.is_ok_and(|status| status.success()) {
+        eprintln!("skipped: `setfacl` is missing, or the file system has no ACLs");
+        return;
+    }
+    let probe = remote.probe();
+    assert_eq!(
+        probe.status.code(),
+        Some(EXIT_UNSAFE),
+        "{:?}",
+        captured(&probe)
+    );
+    let upload = remote.upload(&good_agent("two"));
+    assert_eq!(
+        upload.status.code(),
+        Some(EXIT_UNSAFE),
+        "{:?}",
+        captured(&upload)
+    );
+}
