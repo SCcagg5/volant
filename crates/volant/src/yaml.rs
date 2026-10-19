@@ -441,6 +441,12 @@ fn unwrapped(s: &str, filter: &str) -> Option<String> {
 /// Converts a node to JSON. `!vault` and `!unsafe` load as data, see `vault_data` and
 /// `unsafe_data`.
 pub fn to_json(node: &Yaml) -> anyhow::Result<Value> {
+    convert(node, false)
+}
+
+/// [`to_json`]. `inside_unsafe` is set below a `!unsafe`, whose own conversion wraps every string
+/// once: a nested `!unsafe` must not wrap them again, which doubled each string at every level.
+fn convert(node: &Yaml, inside_unsafe: bool) -> anyhow::Result<Value> {
     Ok(match node {
         Yaml::Value(Scalar::Null) => Value::Null,
         Yaml::Value(Scalar::Boolean(b)) => Value::Bool(*b),
@@ -448,16 +454,19 @@ pub fn to_json(node: &Yaml) -> anyhow::Result<Value> {
         Yaml::Value(Scalar::FloatingPoint(f)) => serde_json::Number::from_f64(f.into_inner())
             .map_or_else(|| Value::String(f.to_string()), Value::Number),
         Yaml::Value(Scalar::String(s)) => Value::String(s.to_string()),
-        Yaml::Sequence(items) => {
-            Value::Array(items.iter().map(to_json).collect::<anyhow::Result<_>>()?)
-        }
+        Yaml::Sequence(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| convert(item, inside_unsafe))
+                .collect::<anyhow::Result<_>>()?,
+        ),
         Yaml::Mapping(map) => {
             let mut out = Map::new();
             for (k, v) in map {
                 let k = k
                     .as_str()
                     .ok_or_else(|| anyhow!("mapping keys must be strings"))?;
-                out.insert(k.to_string(), to_json(v)?);
+                out.insert(k.to_string(), convert(v, inside_unsafe)?);
             }
             Value::Object(out)
         }
@@ -466,7 +475,12 @@ pub fn to_json(node: &Yaml) -> anyhow::Result<Value> {
             _ => bail!("!vault takes a string"),
         },
         Yaml::Tagged(tag, inner) if tag.handle == "!" && tag.suffix == "unsafe" => {
-            unsafe_data(to_json(inner)?)
+            let value = convert(inner, true)?;
+            if inside_unsafe {
+                value
+            } else {
+                unsafe_data(value)
+            }
         }
         Yaml::Tagged(tag, _) => bail!("unsupported YAML tag {}{}", tag.handle, tag.suffix),
         Yaml::Alias(_) => bail!("YAML aliases are not supported yet"),
