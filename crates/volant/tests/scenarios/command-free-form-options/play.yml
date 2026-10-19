@@ -1,0 +1,102 @@
+- hosts: h1
+  gather_facts: false
+  vars:
+    here: "{{ playbook_dir }}/files"
+    shown: "{{ r | dict2items | rejectattr('key', 'in', ['delta', 'end', 'start']) | list | items2dict }}"
+  tasks:
+    - name: creates, the file exists
+      command: echo hi creates={{ here }}/present
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: creates, the file is missing
+      command: echo hi creates={{ here }}/missing
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: removes, the file exists
+      command: echo hi removes={{ here }}/present
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: removes, the file is missing
+      command: echo hi removes={{ here }}/missing
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: creates with a glob
+      command: echo hi creates={{ here }}/pres*
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: a quoted value with a space, read from chdir
+      command: echo hi chdir={{ here }} creates="a b"
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: a quoted chdir
+      command: pwd chdir='{{ here }}'
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: shell chdir
+      shell: pwd chdir={{ here }}
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: shell executable
+      shell: echo $0 executable=/bin/bash
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: a templated value with spaces
+      command: echo hi creates={{ here ~ '/present' }}
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: both guards
+      command: echo hi creates={{ here }}/missing removes={{ here }}/present
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: a word that is not an option stays in the command
+      command: echo foo=bar
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: cmd is not an option
+      command: cmd=echo creates={{ here }}/present
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: an escaped equals sign
+      command: echo a\=b creates={{ here }}/missing
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: stdin
+      command: cat stdin=hello
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: the module name with its namespace
+      ansible.legacy.command: echo hi creates={{ here }}/present
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: the action form
+      action: shell echo hi removes={{ here }}/missing
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: the mapping form
+      command: {cmd: echo hi, creates: "{{ here }}/present"}
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: the same option in args
+      command: echo hi
+      args: {creates: "{{ here }}/present"}
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: the line wins over args
+      command: echo hi creates={{ here }}/missing
+      args: {creates: "{{ here }}/present"}
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: raw drops the options and keeps executable
+      raw: echo $0 creates={{ here }}/present executable=/bin/bash
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: script
+      script: files/s.sh "a b" c=d removes={{ here }}/present chdir={{ here }}
+      register: r
+    - debug: {msg: "{{ shown }}"}
+    - name: a folded line
+      command: >
+        echo folded
+        creates={{ here }}/present
+      register: r
+    - debug: {msg: "{{ shown }}"}

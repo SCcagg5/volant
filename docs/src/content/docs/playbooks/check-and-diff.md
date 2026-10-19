@@ -13,7 +13,7 @@ A task in check mode never changes a host, whichever path runs it.
 
 | Task | What happens |
 |---|---|
-| `command`, `shell`, `raw` | Skipped, as in the reference. |
+| `command`, `shell`, `raw` | Skipped, as in the reference. A `command` or `shell` with `creates` or `removes`, in the line or in `args:`, is checked: `ok` when the guard stops it, `changed` when it would run. |
 | `stat`, `setup`, `package_facts`, `service_facts` | Answered by the agent. They only read, so check and diff change nothing. |
 | `file`, `lineinfile`, `systemd`, `user`, `group`, `apt` | Handed back to the module's Python code on the host, which knows what it would have changed and how to word the diff. |
 | `copy`, `template`, `fetch`, `unarchive` and other action plugins | Run by ansible-core's own plugin through the controller's Python helper, which computes the check result and the diff itself. |

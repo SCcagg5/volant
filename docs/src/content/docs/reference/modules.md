@@ -15,6 +15,8 @@ The agent runs these on the host, without Python. The arguments column lists wha
 
 Ansible declares `chdir`, `creates` and `removes` as paths and expands `~` and `$VAR` in them before using the value, and `command` and `shell` do the same, from the task's `environment` and then the agent's own. The words of a `command` are expanded as Ansible expands them, from the task's `environment` and then the agent's own, so `command: /bin/echo $HOME` prints the home directory unless `expand_argument_vars` is false. A `shell` task has its shell do the expanding, and `expand_argument_vars` is refused there, as it is in Ansible.
 
+In the free-form line of `command`, `shell`, `raw` and `script`, the words `creates=`, `removes=`, `chdir=`, `executable=`, `stdin=` and `strip_empty_ends=` are read as options, and any other `key=value` word stays in the command: `command: echo hi creates=/etc/passwd` skips the task, and `echo foo=bar` prints `foo=bar`. An option in `args:` that the line also names takes the line's value. A line with an unbalanced quote or Jinja block fails when the playbook loads, as it does in Ansible.
+
 | Module | Free-form | Arguments | What it does |
 |---|---|---|---|
 | `async_status` | no | `jid`, `mode` | Report on a job started with `async`, or remove its status file. |
