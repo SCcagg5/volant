@@ -77,6 +77,7 @@ pub(in crate::executor) fn host_vars(
         let layers = store.layered_for_host(host, &scope);
         HostVars {
             map: layers.map,
+            base: std::sync::Arc::default(),
             hostvars,
             shared: layers.shared,
             facts: layers.facts,
