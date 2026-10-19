@@ -1,0 +1,12 @@
+- name: before
+  hosts: all
+  gather_facts: false
+  tasks:
+    - debug: {msg: before}
+- import_playbook: sub.yml
+  when: go | default(true) | bool
+- name: after
+  hosts: all
+  gather_facts: false
+  tasks:
+    - debug: {msg: after}
