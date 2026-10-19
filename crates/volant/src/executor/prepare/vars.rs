@@ -54,38 +54,6 @@ pub(in crate::executor) fn host_vars(
     )
 }
 
-/// [`host_vars`] before the variables resolve each other: every layer merged, the names that came
-/// from a managed host marked, and the engine's own search path in place. A looped `set_fact`
-/// keeps this form, because a variable built from a fact it sets has to render again.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the driver's whole context, read for one host's variables"
-)]
-pub(in crate::executor) fn merged_vars(
-    host: &str,
-    plan: &PlayPlan,
-    task_vars: &Map<String, Value>,
-    role: Option<usize>,
-    include_params: Option<&IncludeParams>,
-    live: &Progress,
-    store: &Mutex<VarStore>,
-    origin: &Origin,
-    playbook_dir: &Path,
-) -> HostVars {
-    delegate_merged_vars(
-        host,
-        Named::ByTheRun,
-        plan,
-        task_vars,
-        role,
-        include_params,
-        live,
-        store,
-        origin,
-        playbook_dir,
-    )
-}
-
 /// Where the name of a host view came from.
 #[derive(Clone, Copy)]
 pub(super) enum Named {
@@ -119,7 +87,7 @@ pub(in crate::executor) fn delegate_host_vars(
     origin: &Origin,
     playbook_dir: &Path,
 ) -> HostVars {
-    let merged = delegate_merged_vars(
+    let merged = merged_vars(
         host,
         named,
         plan,
@@ -134,12 +102,14 @@ pub(in crate::executor) fn delegate_host_vars(
     resolved(merged, templar)
 }
 
-/// [`delegate_host_vars`] before the variables resolve each other.
+/// [`delegate_host_vars`] before the variables resolve each other: every layer merged, the names
+/// that came from a managed host marked, and the engine's own search path in place. A looped
+/// `set_fact` keeps this form, because a variable built from a fact it sets has to render again.
 #[expect(
     clippy::too_many_arguments,
     reason = "the driver's whole context, read for one host's variables"
 )]
-fn delegate_merged_vars(
+pub(in crate::executor) fn merged_vars(
     host: &str,
     named: Named,
     plan: &PlayPlan,

@@ -65,6 +65,7 @@ pub(super) fn prepare(
     let (base, mut carry) = if carries {
         let merged = merged_vars(
             host,
+            Named::ByTheRun,
             plan,
             &task.vars,
             step.role,
