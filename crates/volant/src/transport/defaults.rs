@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use serde_json::{Map, Value};
 
+use super::names::{self, first_set};
 use crate::vars::host_setting;
 
 /// Connection settings from `ansible.cfg` and the command line; host variables override them.
@@ -149,12 +150,46 @@ pub enum Transport {
     Ssh(SshTarget),
 }
 
+/// A password a host variable gave. It prints as `<redacted>`, so a derived `Debug` on a type
+/// that holds one cannot put it in a log or a `-vvvv` line.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct Secret(String);
+
+impl Secret {
+    pub fn new(text: impl Into<String>) -> Self {
+        Self(text.into())
+    }
+
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<redacted>")
+    }
+}
+
+/// The settings of a host that only its own variables give.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct HostOwn {
+    /// The connection password a host variable gave. `None` leaves the one of the command line,
+    /// if any; an empty one offers no password at all.
+    pub password: Option<Secret>,
+    /// The `ssh` program, `ssh` unless `ansible_ssh_executable` names another.
+    pub executable: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SshTarget {
     pub address: String,
     pub port: Option<u16>,
     pub user: Option<String>,
     pub private_key: Option<PathBuf>,
+    /// What the host's own variables add to the command line's: its password and its `ssh`.
+    /// Boxed so the two variants of a `Transport` stay close in size.
+    pub own: Box<HostOwn>,
     pub common_args: Vec<String>,
     pub extra_args: Vec<String>,
     pub host_key_checking: bool,
@@ -254,12 +289,34 @@ pub(super) fn as_map(vars: &std::collections::BTreeMap<String, Value>) -> Map<St
     vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
 }
 
-/// `ansible_port`, whether the inventory typed it as a number or quoted it as a string.
+/// `ansible_ssh_port` or `ansible_port`, whether the inventory typed it as a number or quoted
+/// it as a string.
 pub(super) fn port_of(vars: &Map<String, Value>) -> Option<u16> {
-    let value = host_setting(vars, "ansible_port")?;
+    let value = first_set(vars, &names::PORT)?;
     match value {
         Value::Number(_) => value.as_u64().and_then(|p| u16::try_from(p).ok()),
         Value::String(s) => s.trim().parse().ok(),
         _ => None,
     }
+}
+
+/// `ansible_ssh_timeout` or `ansible_timeout`: the seconds `ssh` waits for the connection, a
+/// number or a quoted number. Anything else fails the host by name, the value in the message.
+pub(super) fn timeout_of(
+    host_name: &str,
+    vars: &Map<String, Value>,
+) -> anyhow::Result<Option<Duration>> {
+    let Some(value) = first_set(vars, &names::TIMEOUT) else {
+        return Ok(None);
+    };
+    let seconds = match value {
+        Value::Number(_) => value.as_u64(),
+        Value::String(text) => text.trim().parse().ok(),
+        _ => None,
+    };
+    seconds.map(|seconds| Some(Duration::from_secs(seconds))).ok_or_else(|| {
+        anyhow::anyhow!(
+            "host '{host_name}': the connection timeout must be a whole number of seconds, found {value}"
+        )
+    })
 }

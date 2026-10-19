@@ -433,11 +433,9 @@ async fn run_all(
             return Ok(1);
         }
     };
-    // Held to the end of the run: the file the `ssh` calls ask for the password is removed
-    // when it drops.
-    let _connection_password = connection_password
-        .map(|password| crate::askpass::install(&password))
-        .transpose()?;
+    // Held to the end of the run: the files the `ssh` calls ask for a password are removed
+    // when it drops, those of a host variable's passwords too.
+    let _askpass = crate::askpass::install(connection_password.as_deref())?;
     let defaults = ConnectionDefaults {
         remote_user: args.user.clone().or(config.remote_user),
         connection: args.connection.clone(),

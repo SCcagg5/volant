@@ -2,49 +2,105 @@
 //! The connection password, handed to `ssh` through `SSH_ASKPASS`. The run writes the password
 //! to a private file; every `ssh` it starts is told to run this program as its askpass, which
 //! prints the file's text. The password is never in an argument list, in the environment of
-//! the program or in anything sent to the host: only the file's path is.
+//! the program or in anything sent to the host: only the file's path is. A password a host
+//! names in `ansible_password` or one of its aliases takes the same way, in a file of its own.
 
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 /// The environment variable that turns this program into an askpass for one `ssh` call.
 const FILE_ENV: &str = "VOLANT_ASKPASS_FILE";
 
+/// The file that holds the password of `-k` or `--connection-password-file`.
 static FILE: OnceLock<PathBuf> = OnceLock::new();
 
-/// Keeps the password file alive; the file is removed when this is dropped.
-pub struct Installed(#[expect(dead_code, reason = "held for its Drop")] tempfile::NamedTempFile);
+/// The files that hold the passwords hosts named in a variable, by password. A file is made the
+/// first time an `ssh` call needs it and is removed with [`Installed`].
+static OWN: Mutex<Option<HashMap<String, tempfile::TempPath>>> = Mutex::new(None);
 
-/// Stores the connection password in a file only this user can read, and makes every `ssh`
-/// the run starts ask this program for it.
-pub fn install(password: &str) -> std::io::Result<Installed> {
+/// Which password an `ssh` call offers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Source<'a> {
+    /// The one the command line gave, if it gave one.
+    Run,
+    /// The one a host variable gave. An empty one offers nothing, as in the reference: the
+    /// variable is set, so no other password is tried in its place.
+    Variable(&'a str),
+}
+
+/// Keeps the password files alive. They are removed when this is dropped.
+pub struct Installed(
+    #[expect(dead_code, reason = "held for its Drop")] Option<tempfile::NamedTempFile>,
+);
+
+impl Drop for Installed {
+    fn drop(&mut self) {
+        OWN.lock().unwrap_or_else(PoisonError::into_inner).take();
+    }
+}
+
+fn private_file(password: &str) -> std::io::Result<tempfile::NamedTempFile> {
     use std::io::Write as _;
     let mut file = tempfile::Builder::new()
         .prefix("volant-askpass-")
         .tempfile()?;
     file.write_all(password.as_bytes())?;
     file.flush()?;
+    Ok(file)
+}
+
+/// Stores the connection password of the command line, if there is one, in a file only this
+/// user can read, and makes every `ssh` the run starts ask this program for it. The value that
+/// comes back has to live to the end of the run: it also removes the files of the passwords
+/// that hosts name in a variable.
+pub fn install(password: Option<&str>) -> std::io::Result<Installed> {
+    let Some(password) = password else {
+        return Ok(Installed(None));
+    };
+    let file = private_file(password)?;
     FILE.set(file.path().to_path_buf())
         .map_err(|_| std::io::Error::other("a connection password is already installed"))?;
-    Ok(Installed(file))
+    Ok(Installed(Some(file)))
 }
 
-/// Whether the run has a connection password to offer.
-pub fn installed() -> bool {
-    FILE.get().is_some()
+/// Whether an `ssh` call with this source has a password to offer.
+pub fn offers(source: Source<'_>) -> bool {
+    match source {
+        Source::Run => FILE.get().is_some(),
+        Source::Variable(password) => !password.is_empty(),
+    }
 }
 
-/// The environment an `ssh` of this run is started with, empty when there is no password.
-pub fn environment() -> Vec<(&'static str, OsString)> {
-    let (Some(file), Ok(me)) = (FILE.get(), std::env::current_exe()) else {
-        return Vec::new();
+/// The environment an `ssh` call of this run is started with, empty when it has no password.
+pub fn environment(source: Source<'_>) -> std::io::Result<Vec<(&'static str, OsString)>> {
+    let file = match source {
+        Source::Run => FILE.get().cloned(),
+        Source::Variable("") => None,
+        Source::Variable(password) => Some(own_file(password)?),
     };
-    vec![
+    let (Some(file), Ok(me)) = (file, std::env::current_exe()) else {
+        return Ok(Vec::new());
+    };
+    Ok(vec![
         ("SSH_ASKPASS", me.into_os_string()),
         ("SSH_ASKPASS_REQUIRE", "force".into()),
-        (FILE_ENV, file.clone().into_os_string()),
-    ]
+        (FILE_ENV, file.into_os_string()),
+    ])
+}
+
+/// The file that holds `password`, made on first use.
+fn own_file(password: &str) -> std::io::Result<PathBuf> {
+    let mut files = OWN.lock().unwrap_or_else(PoisonError::into_inner);
+    let files = files.get_or_insert_with(HashMap::new);
+    if let Some(path) = files.get(password) {
+        return Ok(path.to_path_buf());
+    }
+    let path = private_file(password)?.into_temp_path();
+    let shown = path.to_path_buf();
+    files.insert(password.to_string(), path);
+    Ok(shown)
 }
 
 /// What `ssh` is told when it asks `prompt`: the password for a prompt that ends in

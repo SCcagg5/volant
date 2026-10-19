@@ -12,13 +12,15 @@ use crate::agent::{AgentLink, AgentSource};
 use crate::inventory::Host;
 use crate::vars::host_setting;
 
-use super::control::{control_path_for, user_sets_control};
+use super::control::{SSH_PROGRAM, control_path_for, user_sets_control};
 use super::defaults::{
     BecomeMethod, ConnectError, ConnectionDefaults, ConnectionKeywords, ConnectionNotFound,
-    Escalation, KNOWN_CONNECTIONS, SshTarget, Transport, as_map, port_of, setting_args,
+    Escalation, HostOwn, KNOWN_CONNECTIONS, Secret, SshTarget, Transport, as_map, port_of,
+    setting_args, timeout_of,
 };
 use super::escalation::check_local_escalation;
 use super::escalation::{local_argv, preamble};
+use super::names::{self, first_set, secret_text};
 use super::shell::validate_remote_tmp;
 
 impl Transport {
@@ -49,20 +51,39 @@ impl Transport {
                 .and_then(Value::as_str)
                 .map(str::to_string)
         };
+        // The first of a setting's names the host sets, see `names`.
+        let first_text = |names: &[&str]| {
+            first_set(vars, names)
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        };
         let connection = setting_text("ansible_connection")
             .or_else(|| keywords.connection.clone())
             .or_else(|| defaults.connection.clone());
         match connection.as_deref().unwrap_or("ssh") {
             "local" => Ok(Transport::Local),
             "ssh" => Ok(Transport::Ssh(SshTarget {
-                address: setting_text("ansible_host").unwrap_or_else(|| host_name.to_string()),
+                address: first_text(&names::HOST).unwrap_or_else(|| host_name.to_string()),
                 port: port_of(vars).or(keywords.port),
-                user: setting_text("ansible_user")
+                user: first_text(&names::USER)
                     .or_else(|| keywords.user.clone())
                     .or_else(|| defaults.remote_user.clone()),
-                private_key: setting_text("ansible_ssh_private_key_file")
+                private_key: first_text(&names::PRIVATE_KEY)
                     .map(PathBuf::from)
                     .or_else(|| defaults.private_key.clone()),
+                own: Box::new(HostOwn {
+                    password: first_set(vars, &names::PASSWORD)
+                        .map(|value| {
+                            secret_text(value).map(Secret::new).ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "host '{host_name}': the connection password must be text or a number"
+                                )
+                            })
+                        })
+                        .transpose()?,
+                    executable: first_text(&names::EXECUTABLE)
+                        .unwrap_or_else(|| SSH_PROGRAM.to_string()),
+                }),
                 common_args: setting_args(
                     host_name,
                     vars,
@@ -76,7 +97,7 @@ impl Transport {
                     &defaults.ssh_extra_args,
                 )?,
                 host_key_checking: defaults.host_key_checking,
-                connect_timeout: defaults.connect_timeout,
+                connect_timeout: timeout_of(host_name, vars)?.unwrap_or(defaults.connect_timeout),
                 // Blank reads as unset, which is what the configuration arms do with the same
                 // value: an empty `remote_tmp` puts the agent cache at `/volant-agent-<version>`,
                 // the upload fails on permissions, and the host is reported unreachable over a
