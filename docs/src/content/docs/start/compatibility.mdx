@@ -63,5 +63,6 @@ A file that only a dynamic `include_tasks` or `include_role` names is read when 
 | `with_dict` and the other `with_*` forms | Only `with_items`, `with_first_found` and `with_fileglob` have a loop. | Rewrite with `loop` and a filter, such as `loop: "{{ users \| dict2items }}"`. |
 | `apt`, `user`, `group` or `file` under `--check` or `--diff` on a host with no Python | These modules answer through Python on the host when the run asks for a check or a diff. | Install Python on the host, or run the play without `--check` and `--diff`. |
 | `gather_subset` | Not supported yet. | Remove it: the play gets every fact. |
+| `!!binary`, a duplicate anchor, an integer beyond 64 bits, or a date or a set as a typed value | The value model has no bytes, no date, no set and no wider integer. A date loads as its ISO text, a `!!set`, `!!omap` or `!!pairs` as the mapping or list it is written as, a wider integer as a string. `!!binary` stops the load, and a second `&anchor` of the same name is accepted. | Write the value as a plain string, list or mapping, and give each anchor its own name. |
 
 If a playbook behaves differently under Volant and `ansible-playbook` without being reported as unsupported, that is a bug. Please [open a compatibility report](https://github.com/lorica-labs/volant/issues/new?template=compat.yml) with a minimal playbook.
