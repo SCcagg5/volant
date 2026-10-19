@@ -54,6 +54,21 @@ A value also answers a handful of Python methods: `.split()`, `.startswith()` an
 
 `difference`, `intersect` and `union` build a Python `set` in ansible-core, whose order is its own: small integers happen to come out sorted, and strings come out in an order that changes with `PYTHONHASHSEED` from one run to the next. Volant sorts the result when every element is an integer, which matches every integer case measured, and otherwise keeps the order in which the elements first appeared. On strings, that order is not guaranteed to match a given run of ansible-core.
 
+## Regular expressions
+
+`regex_replace`, `regex_search`, `regex_findall` and the tests `match`, `search` and `regex` read Python `re` patterns. Volant rewrites the pattern for the Rust `regex` crate and walks the matches the way Python 3.7 and later does. Group handling, empty matches, replacement strings (`\1`, `\g<name>`, a literal `$`) and the arguments, including the flags by position, follow ansible-core.
+
+Some Python syntax has no counterpart in the Rust crate. A pattern that uses it fails with an error that names the construct, where ansible-core runs it:
+
+- look-ahead and look-behind: `(?=`, `(?!`, `(?<=`, `(?<!`
+- a back reference inside the pattern: `\1`, `(?P=name)`
+- possessive quantifiers (`a++`), atomic groups (`(?>`) and conditional groups (`(?(1)a|b)`)
+- `\N{name}`, the flags `(?a)` and `(?L)`, and `(?x:` as a scoped flag
+- a lazy repeat or an empty alternative before another one (`a*?`, `|a`) when an empty match needs a longer one tried at the same place
+- `$` in a pattern without `multiline`, on a text that has more than one line and ends with a newline
+
+Two differences stay. A match with several groups is a list of lists here and a list of tuples in ansible-core, which shows only when the value is printed as text. MiniJinja reads `'\\'` in a string literal as one backslash, where ansible-core keeps two.
+
 ## Rendering a template file
 
 The `template` module and `lookup('template')` share one render, and it differs from a task argument's render in one way: it renders the file's text **once**. A task argument goes through further passes, which is how a value that still holds `{{ ... }}` after rendering can be read as a template again. A template file does not get that second pass, so a value a managed host contributed lands in the written file as plain text and never runs as a template of its own.
