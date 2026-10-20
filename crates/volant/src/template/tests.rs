@@ -276,6 +276,41 @@ fn hostvars_hides_the_unlisted_controller_from_iteration(
     assert_eq!(t.render(source, vars).unwrap(), want, "{source}");
 }
 
+/// `ansible_playbook_python` is the controller's Python, beats a variable of the same name, and
+/// is undefined when no interpreter resolves, as ansible-core 2.19.12 defines it as a magic
+/// variable.
+#[rstest::rstest]
+#[case::read_by_name(Some("/ctl/python3"), json!({}), "{{ ansible_playbook_python }}", json!("/ctl/python3"))]
+#[case::in_text(Some("/ctl/python3"), json!({}), "{{ ansible_playbook_python }} -m x", json!("/ctl/python3 -m x"))]
+#[case::through_a_variable(Some("/ctl/python3"), json!({"py": "{{ ansible_playbook_python }}"}), "{{ py }}", json!("/ctl/python3"))]
+#[case::beats_an_extra_var(Some("/ctl/python3"), json!({"ansible_playbook_python": "/x"}), "{{ ansible_playbook_python }}", json!("/ctl/python3"))]
+#[case::defined(Some("/ctl/python3"), json!({}), "{{ ansible_playbook_python is defined }}", json!(true))]
+#[case::undefined_without_one(None, json!({}), "{{ ansible_playbook_python is defined }}", json!(false))]
+#[case::default_without_one(None, json!({}), "{{ ansible_playbook_python | default('none') }}", json!("none"))]
+fn ansible_playbook_python_is_the_controller_python(
+    #[case] controller: Option<&str>,
+    #[case] own: Value,
+    #[case] source: &str,
+    #[case] want: Value,
+) {
+    crate::runtime::resolve::set_test_python(controller);
+    assert_eq!(
+        templar().render(source, &vars(own)).unwrap(),
+        want,
+        "{source}"
+    );
+}
+
+/// Reading `ansible_playbook_python` with no interpreter to name fails as any undefined name.
+#[test]
+fn ansible_playbook_python_with_no_interpreter_fails_when_read() {
+    crate::runtime::resolve::set_test_python(None);
+    let err = templar()
+        .render("{{ ansible_playbook_python }}", &Map::new())
+        .expect_err("nothing resolves");
+    assert!(err.is_undefined(), "{}", err.0);
+}
+
 /// The context hands out the shared view itself, builds it once, ranks inventory-wide names over
 /// a fact and lists a shared name once.
 #[test]
