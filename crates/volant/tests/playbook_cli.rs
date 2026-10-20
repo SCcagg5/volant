@@ -7613,3 +7613,48 @@ fn group_names_read_through_three_variables_stay_data(
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A host name and a group name that hold template syntax in the inventory are text in every read
+/// of `groups`, `hostvars` and `group_names`, through variables and after a refresh of the
+/// inventory. ansible-core 2.19.12 prints the name as it is and creates no file.
+#[rstest]
+#[case::group(
+    "  children:\n    \"{{ lookup('pipe','touch MARK') }}\":\n      hosts:\n        h1:\n"
+)]
+#[case::host("    \"{{lookup('pipe','touch MARK')}}\":\n      ansible_connection: local\n")]
+#[case::lone_brace("  children:\n    \"a{b\":\n      hosts:\n        h1:\n")]
+fn an_inventory_name_with_template_syntax_stays_text(
+    #[case] names: &str,
+    #[values("", "    - meta: refresh_inventory\n")] refresh: &str,
+) {
+    let (dir, marker) = trust_dir("inventory-names", "");
+    let names = names.replace("MARK", &marker.display().to_string());
+    let inventory = format!("all:\n  hosts:\n    h1:\n      ansible_connection: local\n{names}");
+    std::fs::write(dir.join("inv.yml"), inventory).expect("an inventory");
+    let play = format!(
+        "- hosts: h1\n  gather_facts: false\n  vars:\n    a: \"{{{{ groups | list }}}}\"\n    b: \"{{{{ a | map('upper') | list }}}}\"\n    c: \"{{{{ hostvars | list }}}}\"\n    d: \"{{{{ group_names }}}}\"\n  tasks:\n{refresh}    - debug:\n        msg: \"a={{{{ a | to_json }}}} c={{{{ c | to_json }}}} d={{{{ d | to_json }}}}\"\n"
+    );
+    std::fs::write(dir.join("pb.yml"), play).expect("the playbook");
+    let out = volant_within(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.yml").to_str().expect("a path"),
+            dir.join("pb.yml").to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(60),
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stdout}{stderr}");
+    assert!(
+        !marker.exists(),
+        "a name from the inventory ran on the controller:\n{stdout}{stderr}"
+    );
+    let shown = names.split('"').nth(1).unwrap_or("a{b");
+    assert!(
+        stdout.contains(shown),
+        "{shown} is not shown as text:\n{stdout}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
