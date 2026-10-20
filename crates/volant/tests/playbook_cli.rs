@@ -7663,6 +7663,9 @@ fn an_inventory_name_with_template_syntax_stays_text(
 /// the chain gives its words and runs nothing. The names of the inventory around it resolve.
 #[test]
 fn a_host_name_read_through_a_filter_stays_text() {
+    if python::reference_python().is_none() {
+        return;
+    }
     let (dir, marker) = trust_dir("filter-name", "h1 ansible_connection=local\n");
     let play = format!(
         "- hosts: h1\n  gather_facts: false\n  vars:\n    gk: \"{{{{ groups.all | list }}}}\"\n    up: \"{{{{ gk | map('upper') | list }}}}\"\n    first: \"{{{{ gk | sort | first }}}}\"\n    last: \"{{{{ gk | sort | last }}}}\"\n  tasks:\n    - command: cat {}\n      register: r\n    - add_host: {{name: \"{{{{ r.stdout }}}}\", ansible_connection: local}}\n    - debug:\n        msg: \"first={{{{ first }}}} up={{{{ up | length }}}} last={{{{ last }}}}\"\n",
@@ -7687,6 +7690,9 @@ fn a_host_name_read_through_a_filter_stays_text() {
 /// resolving to the right value, through one variable and through two with a filter after them.
 #[test]
 fn a_group_named_from_a_host_value_reads_through_variables() {
+    if python::reference_python().is_none() {
+        return;
+    }
     let (dir, _) = trust_dir(
         "filter-group-by",
         "h1 ansible_connection=local\nh2 ansible_connection=local\n",
