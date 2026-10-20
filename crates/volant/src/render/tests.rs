@@ -58,6 +58,33 @@ fn the_playbook_and_task_path_lines_show_at_vv(#[case] level: u8, #[case] shown:
     }
 }
 
+/// The failure path shows below `-vv` and only with the setting on: from `-vv` on the banner
+/// carries it already.
+#[rstest]
+#[case::off(false, 0, true, 0)]
+#[case::on(true, 0, true, 1)]
+#[case::on_v(true, 1, true, 1)]
+#[case::on_vv(true, 2, true, 0)]
+#[case::no_file(true, 0, false, 0)]
+fn the_failure_path_shows_below_vv_when_asked(
+    #[case] on: bool,
+    #[case] level: u8,
+    #[case] has_origin: bool,
+    #[case] lines: usize,
+) {
+    let origin = crate::playbook::Origin {
+        path: "/abs/p.yml".into(),
+        line: 4,
+        col: 3,
+    };
+    let out = capture_at(false, level, |r| {
+        r.set_path_on_failure(on);
+        r.failure_path(has_origin.then_some(&origin));
+    });
+    assert_eq!(out.lines().count(), lines, "{out}");
+    assert!(lines == 0 || out == "task path: /abs/p.yml:4\n", "{out}");
+}
+
 /// The source lines under `Origin:`, read the way Python's text mode reads them, and what
 /// shows when the file cannot be read.
 #[rstest]
