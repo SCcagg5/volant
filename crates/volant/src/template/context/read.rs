@@ -95,7 +95,7 @@ impl Deferred {
 impl Context {
     /// The untrusted names a render nested in this one starts from. Such a render tracks host
     /// text, so when this one does not, the inventory's names and the shared lists are data there.
-    pub(in crate::template) fn untrusted_for_nested(&self) -> std::collections::BTreeSet<String> {
+    pub(in crate::template) fn untrusted_for_nested(&self) -> BTreeSet<String> {
         let mut names = self.untrusted.clone();
         if !self.tracked {
             names.extend(INVENTORY_NAMES.map(String::from));
