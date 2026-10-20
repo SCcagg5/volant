@@ -14,8 +14,10 @@ use super::{ALLITEMS_KEY, Context, Hostvars, LOOP_KEY, LoopView, Memo};
 
 /// Names of the map that hold the inventory's own names: the host's name, its short name and its
 /// groups. Together with the shared layer they are what a name added to the inventory during the
-/// run, from text a host sent, reaches a template through. `hostvars` is not among them: a
-/// variable of another host may hold a template of its own, which a read renders.
+/// run reaches a template through. A caller that does not track which names hold host text cannot
+/// tell a read of them from a read of host text, so a variable that reads one is left as written.
+/// `hostvars` is not among them: a variable of another host may hold a template of its own,
+/// which a read renders.
 const INVENTORY_NAMES: [&str; 3] = [
     "inventory_hostname",
     "inventory_hostname_short",
@@ -33,6 +35,17 @@ fn engine_owned(key: &str) -> bool {
 const MAX_RESOLVING: usize = 64;
 
 impl Context {
+    /// The untrusted names a render nested in this one starts from. Such a render tracks host
+    /// text, so when this one does not, the inventory's names and the shared lists are data there.
+    pub(in crate::template) fn untrusted_for_nested(&self) -> std::collections::BTreeSet<String> {
+        let mut names = self.untrusted.clone();
+        if !self.tracked {
+            names.extend(INVENTORY_NAMES.map(String::from));
+            names.extend(self.shared.iter().flat_map(|s| s.keys().cloned()));
+        }
+        names
+    }
+
     fn fail(&self, error: TemplateError) {
         self.failure
             .lock()
@@ -96,17 +109,20 @@ impl Context {
 
     /// Whether rendering `key` reads nothing but what the playbook wrote: every name its text
     /// looks up is an author-written variable, itself read the same way, or a name a managed
-    /// host sent, whose trust is tracked. A name of the inventory, the shared lists, `hostvars`
-    /// and any lookup by text are not: what they hold can come from a host in a form no tracking
-    /// sees, so a variable that reads one is left as written. The rule holds for a variable that
-    /// reads one that reads one, at any depth.
+    /// host sent, whose trust is tracked. The inventory's names and the shared lists are tracked
+    /// too when the caller gave its set of untrusted names: one that holds host text is in it,
+    /// and a read of it taints the render. Without that set, and for any lookup by text, what
+    /// they hold can come from a host in a form no tracking sees, so a variable that reads one
+    /// is left as written. The rule holds for a variable that reads one that reads one, at any
+    /// depth.
     fn reads_author_text_only(&self, key: &str, seen: &mut Vec<String>) -> bool {
         if self.untrusted.contains(key) {
             return true;
         }
         if engine_owned(key)
-            || INVENTORY_NAMES.contains(&key)
-            || self.shared.as_ref().is_some_and(|s| s.contains_key(key))
+            || (!self.tracked
+                && (INVENTORY_NAMES.contains(&key)
+                    || self.shared.as_ref().is_some_and(|s| s.contains_key(key))))
         {
             return false;
         }
