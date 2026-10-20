@@ -1235,7 +1235,7 @@ const EVERY_LIST: &[&str] = &[
     "play_hosts",
 ];
 
-const EVERY_LIST_AND_GROUPS: &[&str] = &[
+const EVERY_LIST_AND_GROUP_NAMES: &[&str] = &[
     "ansible_play_batch",
     "ansible_play_hosts",
     "ansible_play_hosts_all",
@@ -1254,7 +1254,7 @@ const NAME_ROWS: &[NameRow] = &[
         &["x}{y"],
         "a{b}",
         &["a{b}"],
-        EVERY_LIST_AND_GROUPS,
+        EVERY_LIST_AND_GROUP_NAMES,
         true,
     ),
     name_row(
