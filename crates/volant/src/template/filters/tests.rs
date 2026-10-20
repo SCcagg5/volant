@@ -603,3 +603,17 @@ fn a_pattern_without_a_rust_counterpart_is_refused_by_name() {
         assert!(err.contains(reason), "{template}: {err}");
     }
 }
+
+/// Python refuses a decimal text of more than 4300 digits, and the filter answers its default.
+/// Past that size a power of two base is exact in Python and answers the default here.
+#[test]
+fn int_refuses_a_text_past_the_digit_limit() {
+    let nines = |count: usize| format!("{{{{ '{}' | int(default=-1) }}}}", "9".repeat(count));
+    assert_eq!(text(&nines(4301)), "-1");
+    assert_eq!(text(&nines(4300)), "9".repeat(4300));
+    let hex = format!(
+        "{{{{ '{}' | int(base=16, default=-1) }}}}",
+        "f".repeat(4301)
+    );
+    assert_eq!(text(&hex), "-1");
+}
