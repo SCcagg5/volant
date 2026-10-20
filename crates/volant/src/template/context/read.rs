@@ -35,6 +35,17 @@ fn engine_owned(key: &str) -> bool {
 const MAX_RESOLVING: usize = 64;
 
 impl Context {
+    /// The untrusted names a render nested in this one starts from. Such a render tracks host
+    /// text, so when this one does not, the inventory's names and the shared lists are data there.
+    pub(in crate::template) fn untrusted_for_nested(&self) -> std::collections::BTreeSet<String> {
+        let mut names = self.untrusted.clone();
+        if !self.tracked {
+            names.extend(INVENTORY_NAMES.map(String::from));
+            names.extend(self.shared.iter().flat_map(|s| s.keys().cloned()));
+        }
+        names
+    }
+
     fn fail(&self, error: TemplateError) {
         self.failure
             .lock()
