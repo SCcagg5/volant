@@ -90,10 +90,14 @@ fn outlive_the_hangup() {
 /// The blake3 hash of the file this process runs from, which the controller compares with the
 /// agent it would upload before reusing a cached one.
 fn own_hash() -> io::Result<String> {
-    hash_of_self(
-        std::path::Path::new("/proc/self/exe"),
-        std::env::args_os().next(),
-    )
+    // Only Linux has the link. Elsewhere a path of that name could be another program's, as it
+    // is under Wine, where it names the Wine loader.
+    let proc_exe = if cfg!(target_os = "linux") {
+        "/proc/self/exe"
+    } else {
+        ""
+    };
+    hash_of_self(std::path::Path::new(proc_exe), std::env::args_os().next())
 }
 
 /// `proc_exe` is the running file even when another upload has renamed a new one over its path
