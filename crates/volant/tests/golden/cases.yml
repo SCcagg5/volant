@@ -810,6 +810,21 @@
 - template: "{{ r }}|{% raw %}{{ r }}{% endraw %}"
   untrusted: {r: "{% raw %}{{ x }}{% endraw %}{{ x }}"}
   vars: {x: 5}
+# Braces a computation builds are text: a template that read no stored template renders once.
+- template: "{{ x ~ '{{ 1 + 1 }}' }}"
+  vars: {x: a}
+- template: "{{ x | replace('a', '{{ 7 * 6 }}') }}"
+  vars: {x: a}
+- template: "{{ '{{ .Values.' ~ n ~ ' }}' }}"
+  vars: {n: web}
+- template: "{{ '{{ ' ~ n ~ '_port }}' }}"
+  vars: {n: web, web_port: 80}
+- template: "{{ y }}"
+  vars: {x: a, y: "{{ x ~ '{{ 1 + 1 }}' }}"}
+- template: "{{ z }}"
+  vars: {x: a, y: "{{ x ~ '{{ 1 + 1 }}' }}", z: "{{ y }}"}
+- template: "{{ a }}-{{ d.k }}"
+  vars: {n: 7, c: "{{ n }}", a: "{{ c }}", d: {k: "{{ n }}"}}
 # Python str methods: arguments, keywords and the errors of wrong ones.
 - template: "{{ 'a,b,c'.split(',') }}"
 - template: "{{ 'a,b,c'.split(',', 1) }}"

@@ -3,7 +3,7 @@
 //! the sink that records a read of one.
 
 use std::collections::{BTreeSet, HashMap};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use minijinja::value::{Enumerator, Object};
@@ -76,6 +76,7 @@ impl Object for LoopView {
     }
 }
 
+use read::Deferred;
 pub(super) use read::take_failure;
 
 #[derive(Debug)]
@@ -189,8 +190,8 @@ pub(super) struct Context {
     /// Set when a pass left text that must stay as it is: see `Templar::render_in`. Not data:
     /// nothing is refused because of it.
     literal: AtomicBool,
-    /// How many names the render has read, to tell a pass that read none.
-    reads: AtomicUsize,
+    /// The reads that handed out a template unrendered, to tell a pass whose markers are its own.
+    deferred: Arc<Deferred>,
     memo: Memo,
     /// The mutable form of each plain list or mapping read while one string renders, by the
     /// address of the plain one, which it keeps alive. Emptied before the next string.
@@ -245,13 +246,13 @@ impl Context {
 }
 
 /// Starts a render over `ctx`: clears the mark of the last one and what it changed in lists and
-/// mappings, and returns the reads so far.
+/// mappings, and returns the deferred reads so far.
 pub(super) fn begin(ctx: &minijinja::Value) -> usize {
     set_literal(ctx, false);
     if let Some(root) = ctx.downcast_object_ref::<Context>() {
         root.forget_changes();
     }
-    reads(ctx)
+    deferred(ctx)
 }
 
 /// Records that the render over `ctx` left text that no further pass may render.
@@ -261,10 +262,10 @@ pub(super) fn set_literal(ctx: &minijinja::Value, on: bool) {
     }
 }
 
-/// How many names the renders over `ctx` have read so far.
-pub(super) fn reads(ctx: &minijinja::Value) -> usize {
+/// How many reads of the renders over `ctx` handed out a template unrendered so far.
+pub(super) fn deferred(ctx: &minijinja::Value) -> usize {
     ctx.downcast_object_ref::<Context>()
-        .map_or(0, |root| root.reads.load(Ordering::Relaxed))
+        .map_or(0, |root| root.deferred.count())
 }
 
 /// Whether the render over `ctx` left such text.
@@ -335,7 +336,7 @@ impl Object for Context {
         if key == CONTEXT_KEY {
             return Some(minijinja::Value::from_dyn_object(Arc::clone(self)));
         }
-        self.reads.fetch_add(1, Ordering::Relaxed);
+        self.deferred.again(key);
         // Before the memo, never after: a second read of the same name is answered from the
         // cache and would otherwise leave the render looking clean.
         // A `hostvars` the map carries as a plain value lists its hosts on any read, so a host
@@ -409,6 +410,7 @@ pub(super) struct Hostvars {
     /// Whether one of the host names came from a managed host: listing them taints the render.
     keys_untrusted: bool,
     tainted: Tainted,
+    deferred: Arc<Deferred>,
     memo: Memo,
 }
 
@@ -419,23 +421,15 @@ impl Object for Hostvars {
         if self.untrusted_hosts.contains(key) {
             self.tainted.store(true, Ordering::Relaxed);
         }
-        self.memo.get(key, || {
+        let found = self.memo.get(key, || {
             self.hosts.get(key).map(|entry| {
-                let mut entry = crate::vars::settled(entry).into_owned();
-                // A magic variable beats the host's own value of the name, here as in a task, and
-                // every host has it. The lookup is made once per process, and only when an entry
-                // is read.
-                if let Some(map) = entry.as_object_mut() {
-                    match crate::runtime::resolve::controller_python() {
-                        Some(python) => {
-                            map.insert(read::PLAYBOOK_PYTHON.to_string(), python.into())
-                        }
-                        None => map.remove(read::PLAYBOOK_PYTHON),
-                    };
-                }
+                let entry = read::with_playbook_python(crate::vars::settled(entry).into_owned());
+                self.deferred.mark_host(key, &entry);
                 super::bigint::to_template(&entry)
             })
-        })
+        });
+        self.deferred.again_host(key);
+        found
     }
 
     fn enumerate(self: &Arc<Self>) -> Enumerator {
@@ -489,7 +483,7 @@ pub(super) fn context_tracking(
         untrusted_hosts: vars.untrusted_hosts.cloned().unwrap_or_default(),
         tainted: Arc::clone(&tainted),
         literal: AtomicBool::new(false),
-        reads: AtomicUsize::new(0),
+        deferred: Arc::new(Deferred::default()),
         memo: Memo::default(),
         mutables: Mutex::default(),
         mutated: AtomicBool::new(false),
