@@ -258,12 +258,14 @@ pub(crate) fn holds(value: &Value) -> bool {
     }
 }
 
-/// `serde_json::to_value`, with every bytes value in `value` read as its text.
+/// `bigint::to_json`, with every bytes value in `value` read as its text first.
 pub(crate) fn to_json(value: &Value) -> Result<serde_json::Value, String> {
-    if holds(value) {
-        return serde_json::to_value(settle(value)?).map_err(|e| e.to_string());
-    }
-    serde_json::to_value(value).map_err(|e| e.to_string())
+    let json = if holds(value) {
+        super::super::bigint::to_json(&settle(value)?)
+    } else {
+        super::super::bigint::to_json(value)
+    };
+    json.map_err(|e| e.to_string())
 }
 
 /// `value` with each bytes value, however deep, replaced by its text.
