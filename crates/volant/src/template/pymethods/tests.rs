@@ -439,6 +439,30 @@ fn sorting_a_wide_integer_is_exact() {
             ),
             "float,float,int,float".to_string(),
         ),
+        (
+            format!(
+                "{{% set l = ['{wide}' | int, '-{wide}' | int] %}}{{% set _ = l.sort() %}}{{{{ l | map('string') | join(',') }}}}"
+            ),
+            format!("-{wide},{wide}"),
+        ),
+        (
+            format!(
+                "{{% set l = ['-{wide}' | int, '{wide}' | int, '-{wide}' | int] %}}{{% set _ = l.sort() %}}{{{{ l | map('string') | join(',') }}}}"
+            ),
+            format!("-{wide},-{wide},{wide}"),
+        ),
+        (
+            format!(
+                "{{% set l = ['{wide}' | int, true, '-{wide}' | int, false] %}}{{% set _ = l.sort() %}}{{{{ l | map('type_debug') | join(',') }}}}"
+            ),
+            "int,bool,bool,int".to_string(),
+        ),
+        (
+            format!(
+                "{{% set l = ['inf' | float, '{wide}' | int, '-inf' | float, '-{wide}' | int] %}}{{% set _ = l.sort() %}}{{{{ l | map('string') | join(',') }}}}"
+            ),
+            format!("-inf,-{wide},{wide},inf"),
+        ),
     ] {
         assert_eq!(t.render(&template, &vars), Ok(json!(want)), "{template}");
     }
