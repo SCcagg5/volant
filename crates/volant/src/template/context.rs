@@ -181,6 +181,9 @@ pub(super) struct Context {
     pub(super) shared: Option<Arc<Map<String, Value>>>,
     pub(super) facts: Option<Arc<Map<String, Value>>>,
     pub(super) untrusted: BTreeSet<String>,
+    /// Whether the caller tracks which names hold host text: `untrusted` is then complete. Without
+    /// it, a read of the inventory's names cannot be told from a read of host text.
+    pub(super) tracked: bool,
     pub(super) untrusted_hosts: BTreeSet<String>,
     tainted: Tainted,
     /// Set when a pass left text that must stay as it is: see `Templar::render_in`. Not data:
@@ -453,6 +456,15 @@ impl Object for Hostvars {
 }
 
 pub(super) fn context_of(templar: &Templar, vars: Vars<'_>) -> (minijinja::Value, Tainted) {
+    context_tracking(templar, vars, vars.untrusted.is_some())
+}
+
+/// `context_of` for a caller that supplies `untrusted` itself and says whether it is complete.
+pub(super) fn context_tracking(
+    templar: &Templar,
+    vars: Vars<'_>,
+    tracked: bool,
+) -> (minijinja::Value, Tainted) {
     let tainted: Tainted = Arc::new(AtomicBool::new(false));
     let ctx = minijinja::Value::from_object(Context {
         vars: vars.map.clone(),
@@ -461,6 +473,7 @@ pub(super) fn context_of(templar: &Templar, vars: Vars<'_>) -> (minijinja::Value
         shared: vars.shared.cloned(),
         facts: vars.facts.cloned(),
         untrusted: vars.untrusted.cloned().unwrap_or_default(),
+        tracked,
         untrusted_hosts: vars.untrusted_hosts.cloned().unwrap_or_default(),
         tainted: Arc::clone(&tainted),
         literal: AtomicBool::new(false),
