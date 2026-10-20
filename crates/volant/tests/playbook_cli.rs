@@ -7708,9 +7708,8 @@ fn a_group_named_from_a_host_value_reads_through_variables() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A name a managed host printed, put in the inventory by `add_host` or `group_by` on six routes,
-/// stays text in `groups`, `group_names`, `hostvars`, `set_fact`, `lookup('vars')` and
-/// `inventory_hostname` of a later play, through variables and a filter. No file appears.
+/// A name a host printed, added by `add_host` or `group_by` on six routes, stays text in every
+/// read of the inventory's names, through variables, a filter and a later play. No file appears.
 #[rstest]
 #[case::host_name("    - add_host: {name: \"{{ r.stdout }}\", ansible_connection: local}\n")]
 #[case::host_name_in_a_loop(

@@ -1507,9 +1507,8 @@ fn unsafe_text_and_facts_are_data_through_a_nested_variable() {
     }
 }
 
-/// A read renders a variable that reads the inventory's names when the store tracks which of them
-/// hold host text, and leaves it as written when the store does not. A lookup by text is never
-/// rendered, at any depth.
+/// A variable over the inventory's names renders when the store tracks which hold host text, and
+/// stays as written when it does not; a lookup by text never renders, at any depth.
 #[test]
 fn a_nested_read_renders_only_variables_that_read_author_text() {
     let t = templar();
