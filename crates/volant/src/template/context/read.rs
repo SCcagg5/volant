@@ -2,8 +2,9 @@
 //! How a render reads one name of the host's variables: a value that holds a template of the
 //! playbook is rendered when a template reads it, and what a host wrote is left as data.
 
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 
@@ -31,6 +32,63 @@ fn engine_owned(key: &str) -> bool {
 /// Names being resolved at once before a read is called a loop. The reference stops at Python's
 /// recursion limit, and a chain this long is never an intended one.
 const MAX_RESOLVING: usize = 64;
+
+/// In front of a host's name among the names of `Deferred`: no variable has a name like that.
+const HOST_PREFIX: &str = "hostvars/";
+
+/// The reads of a render that handed a template out unrendered: a variable the render does not
+/// resolve, or a host whose variables hold one. A result with a template marker is rendered again
+/// only when such a read gave it the marker: a marker the pass built from names and text that
+/// hold none (`'{{ ' ~ name`, `replace('a', '{{ x }}')`) is text, as the reference leaves it.
+#[derive(Debug, Default)]
+pub(super) struct Deferred {
+    count: AtomicUsize,
+    /// The names that did, so that a read answered from the memo counts as the first one did. A
+    /// host's name has `HOST_PREFIX` in front.
+    names: Mutex<BTreeSet<String>>,
+    any: AtomicBool,
+}
+
+impl Deferred {
+    pub(super) fn count(&self) -> usize {
+        self.count.load(Ordering::Relaxed)
+    }
+
+    fn mark(&self, name: String) {
+        self.names.lock().expect("template deferred").insert(name);
+        self.any.store(true, Ordering::Relaxed);
+    }
+
+    /// A read of the variable `key` that handed out its template.
+    fn note(&self, key: &str) {
+        self.mark(key.to_string());
+        self.count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A host whose variables `entry` hold a template: each read of it counts.
+    pub(super) fn mark_host(&self, host: &str, entry: &Value) {
+        if holds_template(entry) {
+            self.mark(format!("{HOST_PREFIX}{host}"));
+        }
+    }
+
+    /// A read of a name that already handed a template out counts again, whatever answers it.
+    pub(super) fn again(&self, key: &str) {
+        if self.any.load(Ordering::Relaxed) && self.has(key) {
+            self.count.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    pub(super) fn again_host(&self, host: &str) {
+        if self.any.load(Ordering::Relaxed) && self.has(&format!("{HOST_PREFIX}{host}")) {
+            self.count.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn has(&self, name: &str) -> bool {
+        self.names.lock().expect("template deferred").contains(name)
+    }
+}
 
 impl Context {
     fn fail(&self, error: TemplateError) {
@@ -64,6 +122,7 @@ impl Context {
         // The render under way keeps what it has read so far; the nested one starts clean so that
         // it can tell whether this variable's own text came from a host.
         let before = self.tainted.swap(false, Ordering::Relaxed);
+        let deferred = self.deferred.count();
         let mut from_host = false;
         let rendered = self
             .templar
@@ -71,6 +130,10 @@ impl Context {
         from_host |= self.tainted.load(Ordering::Relaxed);
         self.tainted.store(before || from_host, Ordering::Relaxed);
         self.resolving.lock().expect("template resolving").pop();
+        // What the variable's own render left unrendered is left for the reader too.
+        if self.deferred.count() != deferred {
+            self.deferred.mark(key.to_string());
+        }
         if earlier_failed {
             *self.failure.lock().expect("template failure") = earlier;
             self.failed.store(true, Ordering::Relaxed);
@@ -156,6 +219,7 @@ impl Context {
                 untrusted_hosts: self.untrusted_hosts.clone(),
                 keys_untrusted: self.untrusted.contains(HOSTVARS_KEYS),
                 tainted: Arc::clone(&self.tainted),
+                deferred: Arc::clone(&self.deferred),
                 memo: Memo::default(),
             });
             return Some((view, true));
@@ -186,12 +250,11 @@ impl Context {
             return Some((view, true));
         }
         if let Some(value) = self.vars.get(key) {
-            if !untrusted
-                && !engine_owned(key)
-                && holds_template(value)
-                && self.reads_author_text_only(key, &mut Vec::new())
-            {
-                return Some(self.resolve(key, value));
+            if !untrusted && !engine_owned(key) && holds_template(value) {
+                if self.reads_author_text_only(key, &mut Vec::new()) {
+                    return Some(self.resolve(key, value));
+                }
+                self.deferred.note(key);
             }
             return Some((crate::template::bigint::to_template(value), true));
         }
