@@ -84,10 +84,6 @@ use crate::modules::Context;
 
 /// What a native did with a task.
 pub enum NativeRun {
-    #[cfg_attr(
-        not(any(unix, feature = "test-natives")),
-        expect(dead_code, reason = "returned by the natives of a Linux build")
-    )]
     Done(TaskResult),
     /// This case is outside the native subset. Returned before anything on the host changed;
     /// the dispatcher then runs the task's Python payload, which does the real work.
