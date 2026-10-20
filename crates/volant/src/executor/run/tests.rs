@@ -2760,6 +2760,21 @@ fn the_playbook_interpreter_wins_and_a_missing_one_says_so() {
         );
     }
     {
+        for (named, want) in [
+            ("{{ nopy }}", "Task failed: 'nopy' is undefined"),
+            (
+                "{{ root }}/bin/{{ name }}",
+                "Task failed: The task includes an option with an undefined variable.",
+            ),
+        ] {
+            let failure = chosen_interpreter(Some(named), &["/usr/bin/python3".to_string()])
+                .expect_err("a template that did not render is not a path");
+            let msg = failure.0.get("msg").and_then(Value::as_str).unwrap_or("");
+            assert!(msg.starts_with(want), "{named}: {msg}");
+            assert!(failure.failed(), "{failure:?}");
+        }
+    }
+    {
         let failure = chosen_interpreter(None, &[]).expect_err("nothing to run a module under");
         let msg = failure.0.get("msg").and_then(Value::as_str).unwrap_or("");
         assert!(

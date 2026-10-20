@@ -240,6 +240,11 @@ impl Context {
             });
             return Some((view, true));
         }
+        // Before every layer: a magic variable beats a variable of the same name, which a play
+        // or `-e` can set. This one is answered only when a template reads it.
+        if key == PLAYBOOK_PYTHON {
+            return playbook_python();
+        }
         // Before the host's own map, never after: these are the inventory-wide values, and
         // they used to be merged into that map last, so they beat a fact of the same name.
         // A loop variable or a registered name that collides with one of them is not here
@@ -280,6 +285,17 @@ impl Context {
         let value = self.base.as_ref()?.get(key)?;
         Some((crate::template::bigint::to_template(value), true))
     }
+}
+
+/// The magic variable that names the interpreter running the controller's Python code.
+pub(super) const PLAYBOOK_PYTHON: &str = "ansible_playbook_python";
+
+/// `ansible_playbook_python`, the reference's `sys.executable`: the controller's own Python.
+/// Looking it up can start a Python probe, so it is answered here, when a template reads it,
+/// and never stored with the other magic variables. Undefined when no interpreter resolves.
+fn playbook_python() -> Option<(minijinja::Value, bool)> {
+    let python = crate::runtime::resolve::controller_python()?;
+    Some((minijinja::Value::from(python), true))
 }
 
 /// The strings of `value` that hold a template.

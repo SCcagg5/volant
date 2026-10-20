@@ -14065,5 +14065,371 @@
       "template": "{{ ('{:.70000f}'.format(1.5)) | length }}"
     },
     "result": 70002
+  },
+  {
+    "case": {
+      "template": "{{ 'x' | int(base=99) }}"
+    },
+    "result": 0
+  },
+  {
+    "case": {
+      "template": "{{ '101' | int(base=2) }}"
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ '12' | int(base=2) }}"
+    },
+    "result": 12
+  },
+  {
+    "case": {
+      "template": "{{ '17' | int(base=8) }}"
+    },
+    "result": 15
+  },
+  {
+    "case": {
+      "template": "{{ '1f' | int(base=16) }}"
+    },
+    "result": 31
+  },
+  {
+    "case": {
+      "template": "{{ '0x1f' | int(base=16) }}"
+    },
+    "result": 31
+  },
+  {
+    "case": {
+      "template": "{{ '0x1f' | int(base=10) }}"
+    },
+    "result": 0
+  },
+  {
+    "case": {
+      "template": "{{ 'zz' | int(base=36) }}"
+    },
+    "result": 1295
+  },
+  {
+    "case": {
+      "template": "{{ 'ZZ' | int(base=36) }}"
+    },
+    "result": 1295
+  },
+  {
+    "case": {
+      "template": "{{ '0x1f' | int(base=0) }}"
+    },
+    "result": 31
+  },
+  {
+    "case": {
+      "template": "{{ '0b101' | int(base=0) }}"
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ '017' | int(base=0) }}"
+    },
+    "result": 17
+  },
+  {
+    "case": {
+      "template": "{{ '1f' | int(base=0) }}"
+    },
+    "result": 0
+  },
+  {
+    "case": {
+      "template": "{{ '10' | int(base=1) }}"
+    },
+    "result": 10
+  },
+  {
+    "case": {
+      "template": "{{ '10' | int(base=37) }}"
+    },
+    "result": 10
+  },
+  {
+    "case": {
+      "template": "{{ '10' | int(base=-1) }}"
+    },
+    "result": 10
+  },
+  {
+    "case": {
+      "template": "{{ '10' | int(base='16') }}"
+    },
+    "result": 10
+  },
+  {
+    "case": {
+      "template": "{{ '10' | int(base=none) }}"
+    },
+    "result": 10
+  },
+  {
+    "case": {
+      "template": "{{ '10' | int(base=2.0) }}"
+    },
+    "result": 10
+  },
+  {
+    "case": {
+      "template": "{{ '1f' | int(base=16.0) }}"
+    },
+    "result": 0
+  },
+  {
+    "case": {
+      "template": "{{ '0x1f' | int(base=false) }}"
+    },
+    "result": 31
+  },
+  {
+    "case": {
+      "template": "{{ '0x1f' | int(base=true) }}"
+    },
+    "result": 0
+  },
+  {
+    "case": {
+      "template": "{{ 'x' | int(default=5, base=99) }}"
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ 'x' | int(5, 99) }}"
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ 'x' | int(default=5, base='z') }}"
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ 'x' | int(base=2, default=none) }}"
+    },
+    "result": null
+  },
+  {
+    "case": {
+      "template": "{{ '1f' | int(0, 16) }}"
+    },
+    "result": 31
+  },
+  {
+    "case": {
+      "template": "{{ '10' | int(2, base=3) }}"
+    },
+    "result": 3
+  },
+  {
+    "case": {
+      "template": "{{ 'x' | int(default=5) }}"
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ 'x' | int(none) }}"
+    },
+    "result": null
+  },
+  {
+    "case": {
+      "template": "{{ 'x' | int(default='y') }}"
+    },
+    "result": "y"
+  },
+  {
+    "case": {
+      "template": "{{ 5 | int(base=99) }}"
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ 5.7 | int(base=2) }}"
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ true | int(base=99) }}"
+    },
+    "result": 1
+  },
+  {
+    "case": {
+      "template": "{{ none | int(7, 99) }}"
+    },
+    "result": 7
+  },
+  {
+    "case": {
+      "template": "{{ [1] | int(base=2) }}"
+    },
+    "result": 0
+  },
+  {
+    "case": {
+      "template": "{{ '5.7' | int(base=99) }}"
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ '1e3' | int(base=16) }}"
+    },
+    "result": 483
+  },
+  {
+    "case": {
+      "template": "{{ '1e3' | int(base=2) }}"
+    },
+    "result": 1000
+  },
+  {
+    "case": {
+      "template": "{{ '1_0' | int(base=2) }}"
+    },
+    "result": 2
+  },
+  {
+    "case": {
+      "template": "{{ '1_0' | int }}"
+    },
+    "result": 10
+  },
+  {
+    "case": {
+      "template": "{{ '1__0' | int(base=10) }}"
+    },
+    "result": 0
+  },
+  {
+    "case": {
+      "template": "{{ '0x_1f' | int(base=16) }}"
+    },
+    "result": 31
+  },
+  {
+    "case": {
+      "template": "{{ '-1f' | int(base=16) }}"
+    },
+    "result": -31
+  },
+  {
+    "case": {
+      "template": "{{ ' 1f ' | int(base=16) }}"
+    },
+    "result": 31
+  },
+  {
+    "case": {
+      "template": "{{ 'ffffffffffffffffffff' | int(base=16) }}"
+    },
+    "result": 1208925819614629174706175
+  },
+  {
+    "case": {
+      "template": "{{ '-ffffffffffffffffffff' | int(base=16) }}"
+    },
+    "result": -1208925819614629174706175
+  },
+  {
+    "case": {
+      "template": "{{ '0b11' | int(base=16) }}"
+    },
+    "result": 2833
+  },
+  {
+    "case": {
+      "template": "{{ '1e20' | int }}"
+    },
+    "result": 100000000000000000000
+  },
+  {
+    "case": {
+      "template": "{{ 1e20 | int }}"
+    },
+    "result": 100000000000000000000
+  },
+  {
+    "case": {
+      "template": "{{ -1e30 | int }}"
+    },
+    "result": -1000000000000000019884624838656
+  },
+  {
+    "case": {
+      "template": "{{ '1e300' | int }}"
+    },
+    "result": 1000000000000000052504760255204420248704468581108159154915854115511802457988908195786371375080447864043704443832883878176942523235360430575644792184786706982848387200926575803737830233794788090059368953234970799945081119038967640880074652742780142494579258788820056842838115669472196386865459400540160
+  },
+  {
+    "case": {
+      "template": "{{ '1e400' | int }}"
+    },
+    "result": 0
+  },
+  {
+    "case": {
+      "template": "{{ 'inf' | int }}"
+    },
+    "result": 0
+  },
+  {
+    "case": {
+      "template": "{{ 'nan' | int }}"
+    },
+    "result": 0
+  },
+  {
+    "case": {
+      "template": "{{ 'nan' | float | int }}"
+    },
+    "result": 0
+  },
+  {
+    "case": {
+      "template": "{{ 'inf' | float | int }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The filter plugin 'ansible.builtin.int' failed: cannot convert float infinity to integer"
+  },
+  {
+    "case": {
+      "template": "{{ '10' | int(foo=1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The filter plugin 'ansible.builtin.int' failed: do_int() got an unexpected keyword argument 'foo'"
+  },
+  {
+    "case": {
+      "template": "{{ '10' | int(1, 2, 3) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The filter plugin 'ansible.builtin.int' failed: do_int() takes from 1 to 3 positional arguments but 4 were given"
+  },
+  {
+    "case": {
+      "template": "{{ '10' | int(1, default=3) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The filter plugin 'ansible.builtin.int' failed: do_int() got multiple values for argument 'default'"
+  },
+  {
+    "case": {
+      "template": "{{ undefined_var | int(base=2) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': 'undefined_var' is undefined"
   }
 ]

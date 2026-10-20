@@ -423,7 +423,18 @@ impl Object for Hostvars {
         }
         let found = self.memo.get(key, || {
             self.hosts.get(key).map(|entry| {
-                let entry = crate::vars::settled(entry);
+                let mut entry = crate::vars::settled(entry).into_owned();
+                // A magic variable beats the host's own value of the name, here as in a task, and
+                // every host has it. The lookup is made once per process, and only when an entry
+                // is read.
+                if let Some(map) = entry.as_object_mut() {
+                    match crate::runtime::resolve::controller_python() {
+                        Some(python) => {
+                            map.insert(read::PLAYBOOK_PYTHON.to_string(), python.into())
+                        }
+                        None => map.remove(read::PLAYBOOK_PYTHON),
+                    };
+                }
                 self.deferred.mark_host(key, &entry);
                 super::bigint::to_template(&entry)
             })
