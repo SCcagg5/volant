@@ -1643,8 +1643,8 @@ fn unsafe_text_and_facts_are_data_through_a_nested_variable() {
     }
 }
 
-/// A read renders a variable only when all it reads is author-written: a chain over inventory
-/// names, shared lists, `hostvars` or a lookup by text stays as written, at any depth.
+/// A variable over the inventory's names renders when the store tracks which hold host text, and
+/// stays as written when it does not; a lookup by text never renders, at any depth.
 #[test]
 fn a_nested_read_renders_only_variables_that_read_author_text() {
     let t = templar();
@@ -1665,41 +1665,92 @@ fn a_nested_read_renders_only_variables_that_read_author_text() {
         "b": "{{ c }}",
         "s": "{{ b | int + 1 }}",
     }));
-    let shared = Arc::new(vars(json!({
+    let clean = Arc::new(vars(json!({
+        "groups": {"all": ["h1"], "web": ["h2"]},
+        "ansible_play_hosts_all": ["h1", "h2"],
+    })));
+    let brace = Arc::new(vars(json!({
         "groups": {"all": ["h1"], "{{ 1 + 1 }}": ["h2"]},
         "ansible_play_hosts_all": ["h1", "{{ 1 + 1 }}"],
     })));
-    let untrusted = BTreeSet::new();
-    let vars = || Vars {
-        map: &map,
-        hostvars: None,
-        shared: Some(&shared),
-        facts: None,
-        untrusted: Some(&untrusted),
-        untrusted_hosts: None,
-        base: None,
-    };
+    let none = BTreeSet::new();
+    let data: BTreeSet<String> = ["groups", "ansible_play_hosts_all"]
+        .map(String::from)
+        .into();
+    let raw = |name: &str| map[name].as_str().unwrap().len();
+    // Where the store tracks the names and none holds host text, a read of them is the author's.
+    fn view<'a>(
+        map: &'a Map<String, Value>,
+        shared: &'a Arc<Map<String, Value>>,
+        untrusted: Option<&'a BTreeSet<String>>,
+    ) -> Vars<'a> {
+        Vars {
+            map,
+            hostvars: None,
+            shared: Some(shared),
+            facts: None,
+            untrusted,
+            untrusted_hosts: None,
+            base: None,
+        }
+    }
     assert_eq!(
-        t.render("{{ __volant_with_terms[0] | length }}", vars()),
+        t.render(
+            "{{ __volant_with_terms[0] | length }}",
+            view(&map, &clean, Some(&none))
+        ),
         Ok(json!(11))
     );
-    // Left as written, so a filter reads the text of the variable and nothing is evaluated.
-    for (text, raw) in [
-        ("{{ gk | length }}", "{{ gn | list }}"),
-        ("{{ gl | length }}", "{{ gk | last }}"),
-        ("{{ pl | length }}", "{{ ph | list | last }}"),
-        ("{{ lp | length }}", "{{ lk | length }}"),
-        ("{{ lb | length }}", "{{ la | length }}"),
+    let (resolved, tainted) = t.resolve_vars_tainted(view(&map, &clean, Some(&none)));
+    assert_eq!(resolved["gk"], json!(["all", "web"]));
+    assert_eq!(resolved["gl"], json!("web"));
+    assert_eq!(resolved["pl"], json!("h2"));
+    assert!(!tainted.contains("gk"), "{tainted:?}");
+    assert_eq!(
+        t.render("{{ gk | length }}", view(&map, &clean, Some(&none))),
+        Ok(json!(2))
+    );
+    // A name that holds a template is data: the chain keeps the text, tainted, and renders none.
+    let (resolved, tainted) = t.resolve_vars_tainted(view(&map, &brace, Some(&data)));
+    assert_eq!(resolved["gk"], json!(["all", "{{ 1 + 1 }}"]));
+    assert_eq!(resolved["gl"], json!("{{ 1 + 1 }}"));
+    assert_eq!(resolved["pl"], json!("{{ 1 + 1 }}"));
+    assert!(
+        ["gk", "gl", "pl"].iter().all(|n| tainted.contains(*n)),
+        "{tainted:?}"
+    );
+    // The store gave no set: nothing says which names are host text, so a read stays as written.
+    for (text, name) in [
+        ("{{ gk | length }}", "gk"),
+        ("{{ gl | length }}", "gl"),
+        ("{{ pl | length }}", "pl"),
     ] {
-        assert_eq!(t.render(text, vars()), Ok(json!(raw.len())), "{text}");
+        assert_eq!(
+            t.render(text, view(&map, &brace, None)),
+            Ok(json!(raw(name))),
+            "{text}"
+        );
     }
-    let (resolved, _) = t.resolve_vars_tainted(vars());
+    let (resolved, _) = t.resolve_vars_tainted(view(&map, &brace, None));
     for name in ["gk", "gl", "pl"] {
         assert_ne!(resolved[name], json!(2), "{name}");
     }
+    // A lookup by text is left as written in every case.
+    for shared in [&clean, &brace] {
+        for (text, name) in [("{{ lp | length }}", "lp"), ("{{ lb | length }}", "lb")] {
+            for untrusted in [None, Some(&none)] {
+                assert_eq!(
+                    t.render(text, view(&map, shared, untrusted)),
+                    Ok(json!(raw(name))),
+                    "{text}"
+                );
+            }
+        }
+    }
     // Author-written names still chain, and a path built from the host's name is the playbook's.
+    let (resolved, _) = t.resolve_vars_tainted(view(&map, &clean, None));
     assert_eq!(resolved["s"], json!(8));
-    assert_eq!(t.render("{{ s }}", vars()), Ok(json!(8)));
+    assert_eq!(t.render("{{ s }}", view(&map, &clean, None)), Ok(json!(8)));
     assert_eq!(resolved["dir"], json!("/srv/h1"));
 }
 
