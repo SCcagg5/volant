@@ -217,6 +217,24 @@ jobs:
           ./volant runtime install --collections community.general
           ./volant playbook -i runtime-clean/inventory.yml runtime-clean/collection.yml
 
+  # The static controller in an image built FROM scratch: no libc, no shell, no /etc/passwd.
+  scratch:
+    needs: runtime-binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2
+        with:
+          tool: just
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: runtime-clean
+          path: dist
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends busybox-static
+      - run: just scratch-test dist/volant
+
   # The glibc controller as a release builds it: cargo-zigbuild, with the glibc floor of the
   # release in the target. aarch64 is built here too and checked on its ELF tables.
   glibc-floor:

@@ -263,14 +263,14 @@ agent-musl:
 # recipes under `bash -uc`, without pipefail (see line 1), so this one is a script with the
 # options it needs. `env -u VOLANT_AGENT_DIR` and the empty directory are the test: the
 # controller has to use the agent it carries, with no other agent to fall back on.
-smoke tag:
+smoke tag target="x86_64-unknown-linux-musl":
     #!/usr/bin/env bash
     set -euo pipefail
     work="$(mktemp -d)"
     trap 'rm -rf "$work"' EXIT
     cd "$work"
-    curl -fsSL -O "https://github.com/lorica-labs/volant/releases/download/{{tag}}/volant-x86_64-unknown-linux-musl.tar.xz"
-    tar -xJf volant-x86_64-unknown-linux-musl.tar.xz --strip-components=1
+    curl -fsSL -O "https://github.com/lorica-labs/volant/releases/download/{{tag}}/volant-{{target}}.tar.xz"
+    tar -xJf volant-{{target}}.tar.xz --strip-components=1
     printf 'h1 ansible_connection=local\n' > inv.ini
     printf -- '- hosts: h1\n  gather_facts: false\n  tasks:\n    - command: /bin/true\n' > site.yml
     env -u VOLANT_AGENT_DIR ./volant playbook -i inv.ini site.yml
@@ -389,6 +389,24 @@ link-check +items:
         esac
     done
     exit "$failed"
+
+# Run a static controller in a container built FROM scratch, which holds the controller and a
+# static busybox only. The image is built here and never pushed. The recipe runs one playbook on
+# `connection: local` that runs programs by argv, so it proves the controller and the agent it
+# embeds need no libc, no shell and no /etc/passwd. The controller must match this machine's
+# architecture. busybox-static on Debian and Ubuntu gives the busybox.
+scratch-test controller busybox="/bin/busybox":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    file -b "{{busybox}}" | grep -Eq 'statically linked|static-pie linked' || { echo "{{busybox}} is not a static busybox"; exit 1; }
+    work="$(mktemp -d)"
+    image="volant-scratch-test:$$"
+    trap 'docker rmi -f "$image" > /dev/null 2>&1 || true; rm -rf "$work"' EXIT
+    cp tests/scratch/Dockerfile tests/scratch/inventory.ini tests/scratch/site.yml "$work/"
+    install -m 755 "{{controller}}" "$work/volant"
+    install -m 755 "{{busybox}}" "$work/busybox"
+    docker build -q -t "$image" "$work" > /dev/null
+    docker run --rm --network none "$image" playbook -i /inventory.ini /site.yml
 
 # Tests that need an sshd on localhost and a key in VOLANT_SSH_TEST_KEY (see CONTRIBUTING). The
 # native module tests among them change the machine they run on: they go to the host
