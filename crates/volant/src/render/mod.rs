@@ -14,7 +14,8 @@ mod result;
 
 pub(crate) use error::source_context;
 pub use error::{
-    CHAIN_KEY, ERROR_KEY, ErrorBlock, UNKNOWN_KEY, cause, concat_message, shorten, task_failed,
+    CHAIN_KEY, ERROR_KEY, ErrorBlock, UNKNOWN_KEY, cause, concat_message, lead, shorten,
+    task_failed,
 };
 pub(crate) use recap_json::ansible_json;
 use recap_json::dumps_indented;
