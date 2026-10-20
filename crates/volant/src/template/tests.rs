@@ -276,6 +276,68 @@ fn hostvars_hides_the_unlisted_controller_from_iteration(
     assert_eq!(t.render(source, vars).unwrap(), want, "{source}");
 }
 
+/// `ansible_playbook_python` is the controller's Python, beats a variable of the same name and
+/// is undefined when no interpreter resolves, as in ansible-core 2.19.12.
+#[rstest::rstest]
+#[case::read_by_name(Some("/ctl/python3"), json!({}), "{{ ansible_playbook_python }}", json!("/ctl/python3"))]
+#[case::in_text(Some("/ctl/python3"), json!({}), "{{ ansible_playbook_python }} -m x", json!("/ctl/python3 -m x"))]
+#[case::through_a_variable(Some("/ctl/python3"), json!({"py": "{{ ansible_playbook_python }}"}), "{{ py }}", json!("/ctl/python3"))]
+#[case::beats_an_extra_var(Some("/ctl/python3"), json!({"ansible_playbook_python": "/x"}), "{{ ansible_playbook_python }}", json!("/ctl/python3"))]
+#[case::defined(Some("/ctl/python3"), json!({}), "{{ ansible_playbook_python is defined }}", json!(true))]
+#[case::undefined_without_one(None, json!({}), "{{ ansible_playbook_python is defined }}", json!(false))]
+#[case::default_without_one(None, json!({}), "{{ ansible_playbook_python | default('none') }}", json!("none"))]
+fn ansible_playbook_python_is_the_controller_python(
+    #[case] controller: Option<&str>,
+    #[case] own: Value,
+    #[case] source: &str,
+    #[case] want: Value,
+) {
+    crate::runtime::resolve::set_test_python(controller);
+    assert_eq!(
+        templar().render(source, &vars(own)).unwrap(),
+        want,
+        "{source}"
+    );
+}
+
+/// `hostvars` gives every host the controller's Python, over a value the host sets, as in
+/// ansible-core 2.19.12; with no interpreter the name is undefined for all.
+#[rstest::rstest]
+#[case::replaced(json!({"ansible_playbook_python": "/inv"}), Some("/ctl/python3"), json!("/ctl/python3"))]
+#[case::added(json!({}), Some("/ctl/python3"), json!("/ctl/python3"))]
+#[case::dropped_without_one(json!({"ansible_playbook_python": "/inv"}), None, json!("none"))]
+#[case::absent_without_one(json!({}), None, json!("none"))]
+fn hostvars_gives_the_controller_python_to_every_host(
+    #[case] host: Value,
+    #[case] controller: Option<&str>,
+    #[case] want: Value,
+) {
+    crate::runtime::resolve::set_test_python(controller);
+    let hosts = Arc::new(vars(json!({ "h1": host })));
+    let own = Map::new();
+    let vars = Vars {
+        map: &own,
+        hostvars: Some(&hosts),
+        shared: None,
+        facts: None,
+        untrusted: None,
+        untrusted_hosts: None,
+        base: None,
+    };
+    let source = "{{ hostvars['h1'].ansible_playbook_python | default('none') }}";
+    assert_eq!(templar().render(source, vars).unwrap(), want);
+}
+
+/// Reading `ansible_playbook_python` with no interpreter to name fails as any undefined name.
+#[test]
+fn ansible_playbook_python_with_no_interpreter_fails_when_read() {
+    crate::runtime::resolve::set_test_python(None);
+    let err = templar()
+        .render("{{ ansible_playbook_python }}", &Map::new())
+        .expect_err("nothing resolves");
+    assert!(err.is_undefined(), "{}", err.0);
+}
+
 /// The context hands out the shared view itself, builds it once, ranks inventory-wide names over
 /// a fact and lists a shared name once.
 #[test]
@@ -1514,8 +1576,8 @@ fn unsafe_text_and_facts_are_data_through_a_nested_variable() {
     }
 }
 
-/// A read renders a variable only when all it reads is author-written: a chain over inventory
-/// names, shared lists, `hostvars` or a lookup by text stays as written, at any depth.
+/// A variable over the inventory's names renders when the store tracks which hold host text, and
+/// stays as written when it does not; a lookup by text never renders, at any depth.
 #[test]
 fn a_nested_read_renders_only_variables_that_read_author_text() {
     let t = templar();
@@ -1536,41 +1598,92 @@ fn a_nested_read_renders_only_variables_that_read_author_text() {
         "b": "{{ c }}",
         "s": "{{ b | int + 1 }}",
     }));
-    let shared = Arc::new(vars(json!({
+    let clean = Arc::new(vars(json!({
+        "groups": {"all": ["h1"], "web": ["h2"]},
+        "ansible_play_hosts_all": ["h1", "h2"],
+    })));
+    let brace = Arc::new(vars(json!({
         "groups": {"all": ["h1"], "{{ 1 + 1 }}": ["h2"]},
         "ansible_play_hosts_all": ["h1", "{{ 1 + 1 }}"],
     })));
-    let untrusted = BTreeSet::new();
-    let vars = || Vars {
-        map: &map,
-        hostvars: None,
-        shared: Some(&shared),
-        facts: None,
-        untrusted: Some(&untrusted),
-        untrusted_hosts: None,
-        base: None,
-    };
+    let none = BTreeSet::new();
+    let data: BTreeSet<String> = ["groups", "ansible_play_hosts_all"]
+        .map(String::from)
+        .into();
+    let raw = |name: &str| map[name].as_str().unwrap().len();
+    // Where the store tracks the names and none holds host text, a read of them is the author's.
+    fn view<'a>(
+        map: &'a Map<String, Value>,
+        shared: &'a Arc<Map<String, Value>>,
+        untrusted: Option<&'a BTreeSet<String>>,
+    ) -> Vars<'a> {
+        Vars {
+            map,
+            hostvars: None,
+            shared: Some(shared),
+            facts: None,
+            untrusted,
+            untrusted_hosts: None,
+            base: None,
+        }
+    }
     assert_eq!(
-        t.render("{{ __volant_with_terms[0] | length }}", vars()),
+        t.render(
+            "{{ __volant_with_terms[0] | length }}",
+            view(&map, &clean, Some(&none))
+        ),
         Ok(json!(11))
     );
-    // Left as written, so a filter reads the text of the variable and nothing is evaluated.
-    for (text, raw) in [
-        ("{{ gk | length }}", "{{ gn | list }}"),
-        ("{{ gl | length }}", "{{ gk | last }}"),
-        ("{{ pl | length }}", "{{ ph | list | last }}"),
-        ("{{ lp | length }}", "{{ lk | length }}"),
-        ("{{ lb | length }}", "{{ la | length }}"),
+    let (resolved, tainted) = t.resolve_vars_tainted(view(&map, &clean, Some(&none)));
+    assert_eq!(resolved["gk"], json!(["all", "web"]));
+    assert_eq!(resolved["gl"], json!("web"));
+    assert_eq!(resolved["pl"], json!("h2"));
+    assert!(!tainted.contains("gk"), "{tainted:?}");
+    assert_eq!(
+        t.render("{{ gk | length }}", view(&map, &clean, Some(&none))),
+        Ok(json!(2))
+    );
+    // A name that holds a template is data: the chain keeps the text, tainted, and renders none.
+    let (resolved, tainted) = t.resolve_vars_tainted(view(&map, &brace, Some(&data)));
+    assert_eq!(resolved["gk"], json!(["all", "{{ 1 + 1 }}"]));
+    assert_eq!(resolved["gl"], json!("{{ 1 + 1 }}"));
+    assert_eq!(resolved["pl"], json!("{{ 1 + 1 }}"));
+    assert!(
+        ["gk", "gl", "pl"].iter().all(|n| tainted.contains(*n)),
+        "{tainted:?}"
+    );
+    // The store gave no set: nothing says which names are host text, so a read stays as written.
+    for (text, name) in [
+        ("{{ gk | length }}", "gk"),
+        ("{{ gl | length }}", "gl"),
+        ("{{ pl | length }}", "pl"),
     ] {
-        assert_eq!(t.render(text, vars()), Ok(json!(raw.len())), "{text}");
+        assert_eq!(
+            t.render(text, view(&map, &brace, None)),
+            Ok(json!(raw(name))),
+            "{text}"
+        );
     }
-    let (resolved, _) = t.resolve_vars_tainted(vars());
+    let (resolved, _) = t.resolve_vars_tainted(view(&map, &brace, None));
     for name in ["gk", "gl", "pl"] {
         assert_ne!(resolved[name], json!(2), "{name}");
     }
+    // A lookup by text is left as written in every case.
+    for shared in [&clean, &brace] {
+        for (text, name) in [("{{ lp | length }}", "lp"), ("{{ lb | length }}", "lb")] {
+            for untrusted in [None, Some(&none)] {
+                assert_eq!(
+                    t.render(text, view(&map, shared, untrusted)),
+                    Ok(json!(raw(name))),
+                    "{text}"
+                );
+            }
+        }
+    }
     // Author-written names still chain, and a path built from the host's name is the playbook's.
+    let (resolved, _) = t.resolve_vars_tainted(view(&map, &clean, None));
     assert_eq!(resolved["s"], json!(8));
-    assert_eq!(t.render("{{ s }}", vars()), Ok(json!(8)));
+    assert_eq!(t.render("{{ s }}", view(&map, &clean, None)), Ok(json!(8)));
     assert_eq!(resolved["dir"], json!("/srv/h1"));
 }
 

@@ -8,11 +8,13 @@ use minijinja::value::{Kwargs, Rest};
 use minijinja::{Environment, Error, ErrorKind, State, Value};
 
 mod collections;
+mod int;
 mod json;
 mod regex;
 mod text;
 
 use collections::{SetFilter, combine, dict2items, extract, flatten, items2dict, set_filter};
+use int::to_int;
 pub(crate) use json::python_json;
 use json::{from_json, from_yaml, to_json, to_nice_json};
 use regex::{regex_escape, regex_findall, regex_replace, regex_search, regex_test};
@@ -359,34 +361,6 @@ fn to_bool(value: Value) -> bool {
         }
         _ => false,
     }
-}
-
-fn to_int(value: Value, default_value: Option<i64>) -> Result<Value, Error> {
-    use super::bigint::integer;
-    let fallback = default_value.unwrap_or(0);
-    let truncated = |f: f64| Value::from(f.trunc() as i64);
-    Ok(match json(&value) {
-        serde_json::Value::Number(n) => n
-            .as_i64()
-            .map(Value::from)
-            .or_else(|| integer(&n.to_string()))
-            .unwrap_or_else(|| n.as_f64().map_or(Value::from(fallback), truncated)),
-        serde_json::Value::Bool(b) => Value::from(i64::from(b)),
-        serde_json::Value::String(s) => {
-            let text = s.trim();
-            // Python's int() of text refuses more than 4300 digits; the filter then answers
-            // its default, as it does for any text int() refuses.
-            let parsed = integer(text).map(|n| {
-                if text.trim_start_matches(['-', '+']).len() > 4300 {
-                    Value::from(fallback)
-                } else {
-                    n
-                }
-            });
-            parsed.unwrap_or_else(|| text.parse().map_or(Value::from(fallback), truncated))
-        }
-        _ => Value::from(fallback),
-    })
 }
 
 fn to_float(value: Value, default_value: Option<f64>) -> Value {
