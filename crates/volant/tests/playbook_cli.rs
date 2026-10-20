@@ -5896,6 +5896,66 @@ fn the_implicit_localhost_runs_under_the_controller_python() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `ansible_playbook_python` names the controller's interpreter, so an inventory can point a host's
+/// own `ansible_python_interpreter` at it. An interpreter naming a variable with no value fails
+/// the task naming that variable, and a task that sends no module still runs.
+#[test]
+fn ansible_playbook_python_names_the_controller_python() {
+    let Some(python) = python::reference_python().map(|p| p.display().to_string()) else {
+        return;
+    };
+    let dir = probe_dir("playbook-python");
+    std::fs::write(
+        dir.join("inv.ini"),
+        "h1 ansible_connection=local ansible_python_interpreter=\"{{ ansible_playbook_python }}\"
+h2 ansible_connection=local ansible_python_interpreter=\"{{ nopy }}\"
+",
+    )
+    .expect("an inventory");
+    std::fs::write(
+        dir.join("play.yml"),
+        "- hosts: all
+  gather_facts: false
+  tasks:
+    - ping:
+      ignore_errors: true
+    - raw: /bin/true
+    - debug:
+        msg: \"{{ ansible_playbook_python }} {{ ansible_python_interpreter }}\"
+      when: inventory_hostname == 'h1'
+",
+    )
+    .expect("the play");
+    let out = volant_within_env(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.ini").to_str().expect("a path"),
+            dir.join("play.yml").to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(60),
+        &[("VOLANT_PYTHON", &python)],
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stdout.contains(&format!("\"msg\": \"{python} {python}\"")),
+        "the variable does not name the controller's Python:
+{stdout}{stderr}"
+    );
+    assert!(
+        stdout.contains("ok: [h1]") && stdout.contains("'nopy' is undefined"),
+        "the interpreter was not read as a variable:
+{stdout}{stderr}"
+    );
+    assert!(
+        !stdout.contains("starting {{"),
+        "a template was run as a path:
+{stdout}{stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// An inventory with no host warns once, as ansible-core 2.19.12 does, unless `localhost_warning`
 /// is off.
 #[rstest::rstest]
