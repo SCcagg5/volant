@@ -15,6 +15,7 @@ pub(crate) mod facts_read;
 pub mod inventory;
 pub mod keywords;
 pub(crate) mod listing;
+pub(crate) mod locations;
 pub mod playbook;
 pub mod preflight;
 pub(crate) mod profile;

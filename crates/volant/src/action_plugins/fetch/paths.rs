@@ -5,11 +5,11 @@ use std::path::{Component, Path, PathBuf};
 
 /// `dest` as the reference reads it: `~` for the controller's home, relative to the playbook.
 pub(super) fn absolute(dest: &str, playbook_dir: &Path) -> PathBuf {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    match (dest.strip_prefix('~'), home) {
-        (Some(rest), Some(home)) if rest.is_empty() || rest.starts_with('/') => {
-            PathBuf::from(format!("{}{rest}", home.display()))
-        }
+    match (
+        crate::locations::after_tilde(dest),
+        crate::locations::home(),
+    ) {
+        (Some(rest), Some(home)) => home.join(rest),
         _ => playbook_dir.join(dest),
     }
 }

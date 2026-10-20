@@ -19,10 +19,6 @@ pub struct Source {
     text: String,
 }
 
-/// The source the reference reads when none is given, and the one it says nothing about when
-/// it is missing.
-const DEFAULT_SOURCE: &str = "/etc/ansible/hosts";
-
 impl Source {
     pub fn new(given: &str) -> Self {
         let text = if given.contains(',') || given.is_empty() {
@@ -33,9 +29,10 @@ impl Source {
         Self { text }
     }
 
-    /// The reference's default source, `/etc/ansible/hosts`.
+    /// The source the reference reads when none is given, `/etc/ansible/hosts`, and the one it
+    /// says nothing about when it is missing.
     pub fn default_source() -> Self {
-        Self::new(DEFAULT_SOURCE)
+        Self::new(&crate::locations::default_inventory().to_string_lossy())
     }
 
     /// The source as the reference's messages show it.
@@ -69,11 +66,11 @@ impl Source {
 /// `unfrackpath(path, follow=False)`: `~` expanded, made absolute, `.` and `..` folded away
 /// without resolving links.
 fn unfrack(given: &str) -> PathBuf {
-    let home = std::env::var_os("HOME").filter(|h| !h.is_empty());
-    let expanded = match (given.strip_prefix('~'), home) {
-        (Some(rest), Some(home)) if rest.is_empty() || rest.starts_with('/') => {
-            PathBuf::from(home).join(rest.trim_start_matches('/'))
-        }
+    let expanded = match (
+        crate::locations::after_tilde(given),
+        crate::locations::home(),
+    ) {
+        (Some(rest), Some(home)) => home.join(rest),
         _ => PathBuf::from(given),
     };
     let absolute = std::path::absolute(&expanded).unwrap_or(expanded);
@@ -411,7 +408,9 @@ impl Chain<'_, '_> {
                 }
             }
         }
-        if parsed || (source.text == DEFAULT_SOURCE && !source.path().exists()) {
+        if parsed
+            || (source.path() == crate::locations::default_inventory() && !source.path().exists())
+        {
             return Ok(parsed);
         }
         for (plugin, err) in failures {

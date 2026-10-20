@@ -33,8 +33,8 @@ pub(super) fn spec(text: &str) -> (String, Source) {
 /// `unfrackpath`: `~` expanded, made absolute, `.` and `..` folded away.
 pub(super) fn absolute(path: &Path) -> PathBuf {
     let mut full = path.to_path_buf();
-    if let (Ok(rest), Some(home)) = (path.strip_prefix("~"), std::env::var_os("HOME")) {
-        full = Path::new(&home).join(rest);
+    if let (Ok(rest), Some(home)) = (path.strip_prefix("~"), crate::locations::home()) {
+        full = home.join(rest);
     }
     let full = std::path::absolute(&full).unwrap_or(full);
     let mut out = PathBuf::new();

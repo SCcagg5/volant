@@ -195,14 +195,15 @@ pub(super) fn options_dump(args: &PlaybookArgs, config: &Config, forks: usize) -
     lines
 }
 
-/// The `-M` directories as the reference reads them: each argument split on `:`, empty parts
+/// The `-M` directories as the reference reads them: each argument split on `:` (`;` on
+/// Windows), empty parts
 /// dropped, every path made absolute. A later `-M` goes in front of the earlier ones (the
 /// option prepends), and the order inside one argument stays.
 pub(super) fn module_path_dirs(args: &PlaybookArgs) -> Vec<PathBuf> {
     args.module_path
         .iter()
         .rev()
-        .flat_map(|list| list.split(':'))
+        .flat_map(|list| list.split(crate::locations::LIST_SEPARATOR))
         .filter(|part| !part.is_empty())
         .map(|part| std::path::absolute(part).unwrap_or_else(|_| PathBuf::from(part)))
         .collect()

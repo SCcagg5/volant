@@ -28,7 +28,7 @@ pub(super) fn current() -> Located {
         std::env::var_os("ANSIBLE_CONFIG").as_deref(),
         Path::new("."),
         home.as_deref(),
-        Path::new("/etc/ansible/ansible.cfg"),
+        &crate::locations::system_config(),
     )
 }
 

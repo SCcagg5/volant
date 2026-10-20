@@ -3,54 +3,49 @@
 
 use std::path::{Path, PathBuf};
 
-/// A home-relative directory first, then the two system ones: the reference's own default for
+use crate::locations;
+
+/// A home-relative directory first, then the system ones: the reference's own default for
 /// `roles_path`, read off the list a missing role prints.
 pub(super) fn default_roles_path() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Some(home) = home() {
-        paths.push(home.join(".ansible/roles"));
+        paths.push(home.join(".ansible").join("roles"));
     }
-    paths.push(PathBuf::from("/usr/share/ansible/roles"));
-    paths.push(PathBuf::from("/etc/ansible/roles"));
+    paths.extend(locations::system_content_dirs("roles"));
     paths
 }
 
 pub(super) fn default_collections_path() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Some(home) = home() {
-        paths.push(home.join(".ansible/collections"));
+        paths.push(home.join(".ansible").join("collections"));
     }
-    paths.push(PathBuf::from("/usr/share/ansible/collections"));
+    paths.extend(locations::system_content_dirs("collections"));
     paths
 }
 
-/// The user's home directory. `HOME` everywhere the engine runs a playbook, `USERPROFILE` on the
-/// Windows controller, where reading `HOME` alone drops the `~/.ansible` entry from the search
-/// path and a role installed there stops being found.
+/// The user's home directory, as [`locations::home`] has it.
 pub(super) fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
+    locations::home()
 }
 
 /// `path` with a leading `~` or `~/` replaced by the home directory, anchored on `base` when it
 /// is still relative.
 pub(super) fn expand_home(path: &str, base: &Path) -> PathBuf {
-    match (path.strip_prefix('~'), home()) {
-        (Some(rest), Some(home)) if rest.is_empty() || rest.starts_with('/') => {
-            home.join(rest.trim_start_matches('/'))
-        }
+    match (locations::after_tilde(path), home()) {
+        (Some(rest), Some(home)) => home.join(rest),
         _ => base.join(path),
     }
 }
 
-/// A colon-separated list of directories, as every Ansible path setting is written. Relative
-/// entries are anchored against `base`, which is the configuration file's directory for a value
-/// read from one and the working directory for one read from the environment.
+/// A list of directories, as every Ansible path setting is written: colon-separated, and
+/// separated by [`locations::LIST_SEPARATOR`] on Windows. Relative entries are anchored against
+/// `base`, which is the configuration file's directory for a value read from one and the working
+/// directory for one read from the environment.
 pub(super) fn path_list(value: &str, base: &Path) -> Vec<PathBuf> {
     value
-        .split(':')
+        .split(locations::LIST_SEPARATOR)
         .map(str::trim)
         .filter(|p| !p.is_empty())
         .map(|p| base.join(p))

@@ -82,10 +82,10 @@ pub(super) fn host_named_paths(value: &str, origin: &str) -> anyhow::Result<supe
     })
 }
 
-/// `[volant] host_named_dest_dirs`: a colon-separated list of absolute directories, refused when
-/// an entry is empty, relative, written with `~` or `..`, or the root directory (which would
-/// hold every path). An empty value is an empty list. Nothing is looked up here: a directory
-/// that does not exist yet is checked when a `fetch` uses it.
+/// `[volant] host_named_dest_dirs`: a colon-separated list (semicolon-separated on Windows) of
+/// absolute directories, refused when an entry is empty, relative, written with `~` or `..`, or
+/// the root directory (which would hold every path). An empty value is an empty list. Nothing is
+/// looked up here: a directory that does not exist yet is checked when a `fetch` uses it.
 pub(super) fn host_named_dest_dirs(
     value: &str,
     origin: &str,
@@ -94,8 +94,9 @@ pub(super) fn host_named_dest_dirs(
     if value.is_empty() {
         return Ok(Vec::new());
     }
+    let separated = if cfg!(windows) { "semicolon" } else { "colon" };
     value
-        .split(':')
+        .split(crate::locations::LIST_SEPARATOR)
         .map(|entry| {
             let entry = entry.trim();
             let path = std::path::Path::new(entry);
@@ -108,7 +109,7 @@ pub(super) fn host_named_dest_dirs(
                 .any(|part| part == std::path::Component::ParentDir)
             {
                 "has a '..' component"
-            } else if path.components().count() == 1 {
+            } else if path.parent().is_none() {
                 "is the root directory"
             } else {
                 return Ok(path.to_path_buf());
@@ -116,7 +117,7 @@ pub(super) fn host_named_dest_dirs(
             Err(crate::stats::Refusal::at(
                 5,
                 format!(
-                    "Config 'VOLANT_HOST_NAMED_DEST_DIRS' from '{origin}' has an invalid value: '{value}'; expected a colon-separated list of absolute directories (entry '{entry}' {why})"
+                    "Config 'VOLANT_HOST_NAMED_DEST_DIRS' from '{origin}' has an invalid value: '{value}'; expected a {separated}-separated list of absolute directories (entry '{entry}' {why})"
                 ),
             ))
         })

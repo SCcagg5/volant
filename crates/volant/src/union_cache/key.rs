@@ -30,9 +30,9 @@ impl Place {
     }
 }
 
-/// `$XDG_CACHE_HOME/volant/unions`, else `~/.cache/volant/unions`.
+/// `unions` in the cache directory of [`crate::locations::cache_root`].
 pub fn cache_dir() -> Option<PathBuf> {
-    crate::agent::embedded::cache_root().map(|root| root.join("unions"))
+    crate::locations::cache_root().map(|root| root.join("unions"))
 }
 
 /// The first candidate `find_python` would try that exists, without asking it whether it has
@@ -92,7 +92,7 @@ pub fn key(
     let env: Vec<(OsString, OsString)> = std::env::vars_os().collect();
     let mut files = configs(
         std::env::var_os("ANSIBLE_CONFIG").as_deref(),
-        std::env::var_os("HOME").as_deref().map(Path::new),
+        crate::locations::home().as_deref(),
         Path::new("."),
     );
     files.extend(plugin_files(plugin_dirs, SystemTime::now())?);
@@ -281,7 +281,7 @@ pub(super) fn configs(
     if let Some(home) = home {
         candidates.push(home.join(".ansible.cfg"));
     }
-    candidates.push(PathBuf::from("/etc/ansible/ansible.cfg"));
+    candidates.push(crate::locations::system_config());
     candidates
         .into_iter()
         .filter_map(|path| config_stamp(&path).map(|text| (path, text)))

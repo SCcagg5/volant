@@ -57,25 +57,16 @@ impl Embedded {
     }
 }
 
-/// `$XDG_CACHE_HOME/volant/agents/<version>`, or `~/.cache/volant/agents/<version>`. The version
+/// `agents/<version>` in the cache directory of [`crate::locations::cache_root`]. The version
 /// keeps two installed controllers from taking turns rewriting each other's agents.
 fn cache_dir() -> Result<PathBuf, String> {
-    let base = cache_root()
-        .ok_or("neither XDG_CACHE_HOME nor HOME names an absolute directory to extract them to")?;
+    let base = crate::locations::cache_root().ok_or_else(|| {
+        format!(
+            "{} names an absolute directory to extract them to",
+            crate::locations::cache_variables()
+        )
+    })?;
     Ok(base.join("agents").join(env!("CARGO_PKG_VERSION")))
-}
-
-/// `$XDG_CACHE_HOME/volant`, or `~/.cache/volant`, when either names an absolute directory: a
-/// relative one would put the cache in whatever directory the run started in.
-pub(crate) fn cache_root() -> Option<PathBuf> {
-    let absolute = |var: &str| {
-        std::env::var_os(var)
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-    };
-    absolute("XDG_CACHE_HOME")
-        .or_else(|| absolute("HOME").map(|home| home.join(".cache")))
-        .map(|base| base.join("volant"))
 }
 
 /// Writes `bytes` to `dir/name` with mode 0755, unless an executable file with exactly those

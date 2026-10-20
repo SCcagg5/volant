@@ -19,25 +19,16 @@ use std::process::{Command, Stdio};
 pub(crate) const INSTEAD: &str =
     "set VOLANT_PYTHON to an interpreter that has ansible-core 2.19.12";
 
-/// The directory the runtimes are installed in: `<data>/volant/runtime`, where `<data>` is
-/// `$XDG_DATA_HOME` or `~/.local/share`, and `~/Library/Application Support` on macOS. Relative
-/// values are ignored, as for the cache.
+/// The directory the runtimes are installed in: `runtime` in the data directory of
+/// [`crate::locations::data_root`].
 pub(crate) fn runtimes_dir() -> Result<PathBuf, String> {
-    let absolute = |var: &str| {
-        std::env::var_os(var)
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-    };
-    let data = if cfg!(target_os = "macos") {
-        absolute("HOME").map(|home| home.join("Library").join("Application Support"))
-    } else {
-        absolute("XDG_DATA_HOME").or_else(|| absolute("HOME").map(|home| home.join(".local/share")))
-    };
-    data.map(|data| data.join("volant").join("runtime"))
+    crate::locations::data_root()
+        .map(|data| data.join("runtime"))
         .ok_or_else(|| {
+            let (named, to_set) = crate::locations::data_variables();
             format!(
-                "neither XDG_DATA_HOME nor HOME names an absolute directory to install the \
-                 Python runtime in: set HOME, or {INSTEAD}"
+                "{named} names an absolute directory to install the Python runtime in: set \
+                 {to_set}, or {INSTEAD}"
             )
         })
 }
