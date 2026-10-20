@@ -172,6 +172,54 @@ fn the_volant_section_can_turn_connection_sharing_off() {
     }
 }
 
+/// The reference reads `show_task_path_on_failure` as a callback option: `y`, `t` and `1` count
+/// as true in any case, every other word as false, and a variable that is set wins over the file
+/// even when it is empty.
+#[test]
+fn the_failure_path_switch_reads_the_spellings_of_the_reference() {
+    assert!(!Config::default().show_task_path_on_failure);
+    for (word, on) in [
+        ("true", true),
+        ("TRUE", true),
+        ("Yes", true),
+        ("on", true),
+        ("y", true),
+        ("t", true),
+        ("1", true),
+        ("false", false),
+        ("no", false),
+        ("0", false),
+        ("2", false),
+        ("maybe", false),
+    ] {
+        let text = format!("[defaults]\nshow_task_path_on_failure = {word}\n");
+        assert_eq!(cfg(&text, ".").show_task_path_on_failure, on, "{word}");
+    }
+    let saved_config = std::env::var("ANSIBLE_CONFIG").ok();
+    let dir = std::env::temp_dir().join(format!("volant-taskpath-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a scratch dir");
+    let file = dir.join("ansible.cfg");
+    std::fs::write(&file, "[defaults]\nshow_task_path_on_failure = true\n").expect("the file");
+    unsafe { std::env::set_var("ANSIBLE_CONFIG", &file) };
+    assert!(Config::load().unwrap().show_task_path_on_failure);
+    for (word, on) in [("no", false), ("", false), ("maybe", false), ("T", true)] {
+        unsafe { std::env::set_var("ANSIBLE_SHOW_TASK_PATH_ON_FAILURE", word) };
+        assert_eq!(
+            Config::load().unwrap().show_task_path_on_failure,
+            on,
+            "{word:?}"
+        );
+    }
+    unsafe {
+        std::env::remove_var("ANSIBLE_SHOW_TASK_PATH_ON_FAILURE");
+        match saved_config {
+            Some(v) => std::env::set_var("ANSIBLE_CONFIG", v),
+            None => std::env::remove_var("ANSIBLE_CONFIG"),
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn defaults_section_is_read_and_paths_are_anchored() {
     let c = cfg(
