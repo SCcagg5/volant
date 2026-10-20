@@ -188,6 +188,19 @@ fn defaults_section_is_read_and_paths_are_anchored() {
     assert_eq!(c.timeout, Duration::from_secs(3));
 }
 
+/// A `roles_path` entry comes out absolute with `.` and `..` folded out, as `os.path.abspath`
+/// leaves it in ansible-core 2.19.12; the role search and `ansible_search_path` are built from it.
+#[rstest::rstest]
+#[case::dot_slash("./roles", "/etc/x/roles")]
+#[case::bare("roles", "/etc/x/roles")]
+#[case::parent("../shared/./roles", "/etc/shared/roles")]
+#[case::doubled("a//b/../c", "/etc/x/a/c")]
+#[case::absolute("/abs/./r/", "/abs/r")]
+fn a_roles_path_entry_is_absolute_and_folded(#[case] entry: &str, #[case] expected: &str) {
+    let c = cfg(&format!("[defaults]\nroles_path = {entry}\n"), "/etc/x");
+    assert_eq!(c.roles_path, [PathBuf::from(expected)]);
+}
+
 #[test]
 fn the_connection_keys_are_read_with_ansibles_boolean_spellings() {
     let c = cfg(
