@@ -32,6 +32,10 @@ fn a_size_past_the_limit_is_a_task_error_before_any_text_is_built() {
         "{{ 'a'.ljust(100000000, '𝄞') }}",
         "{{ '{:>200000000}{:>200000000}'.format('a', 'a') }}",
         "{{ 'aaaaaaaaaaaaaaaa'.translate({97: big}) }}",
+        // `encode`, `decode` and `hex` of a value whose result passes the limit.
+        "{{ (big ~ big ~ big ~ big).encode('utf-32') }}",
+        "{{ (big ~ big ~ big ~ big).encode('latin-1').decode('ascii', 'backslashreplace') }}",
+        "{{ (big ~ big ~ big ~ big ~ big).encode().hex() | length }}",
     ] {
         let err = templar().render(template, &v).unwrap_err();
         assert!(err.0.contains("256 MiB"), "{template}: {err}");

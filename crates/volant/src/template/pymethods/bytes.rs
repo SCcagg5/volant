@@ -16,6 +16,7 @@ use minijinja::{Error, Value};
 
 use super::args::{Call, index, raise, type_of};
 use super::codec;
+use super::limits::check;
 
 /// Set when a template first made a bytes value. A result is walked for bytes only after that,
 /// so a run that never calls `encode` pays nothing.
@@ -182,6 +183,16 @@ pub(super) fn encode(text: &str, call: &Call<'_>) -> Result<Value, Error> {
     let encoding = slots[0].map_or(Ok("utf-8"), |v| text_arg("encode", "encoding", v))?;
     let errors = slots[1].map_or(Ok("strict"), |v| text_arg("encode", "errors", v))?;
     let codec = codec::lookup(encoding)?;
+    // The longest result per byte of text: a character is 4 bytes in UTF-32, and the escape of a
+    // character that 4 bytes of text hold is at most 10 characters (`&#1114111;`).
+    let per_byte = match codec {
+        codec::Codec::Utf8 => 1,
+        codec::Codec::Utf16(..) => 2,
+        codec::Codec::Utf32(..) => 4,
+        _ if matches!(errors, "backslashreplace" | "xmlcharrefreplace") => 3,
+        _ => 1,
+    };
+    check(text.len() as u128 * per_byte + 4)?;
     Ok(Bytes::value(codec::encode(text, codec, errors)?))
 }
 
@@ -191,6 +202,9 @@ fn decode(me: &Bytes, call: &Call<'_>) -> Result<Value, Error> {
     let encoding = slots[0].map_or(Ok("utf-8"), |v| text_arg("decode", "encoding", v))?;
     let errors = slots[1].map_or(Ok("strict"), |v| text_arg("decode", "errors", v))?;
     let codec = codec::lookup(encoding)?;
+    // A byte that `backslashreplace` escapes becomes four characters.
+    let per_byte = if errors == "backslashreplace" { 4 } else { 1 };
+    check(me.0.len() as u128 * per_byte)?;
     codec::decode(&me.0, codec, errors).map(Value::from)
 }
 
@@ -218,6 +232,7 @@ fn hex(me: &Bytes, call: &Call<'_>) -> Result<Value, Error> {
         }
     };
     let group = slots[1].map_or(Ok(1), index)?;
+    check(me.0.len() as u128 * 3)?;
     let digits: Vec<String> = me.0.iter().map(|b| format!("{b:02x}")).collect();
     let (Some(sep), true) = (sep, group != 0 && !digits.is_empty()) else {
         return Ok(Value::from(digits.concat()));
