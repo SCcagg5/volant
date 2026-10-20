@@ -389,8 +389,8 @@ impl Templar {
                 ErrorKind::UndefinedError,
             )));
         }
-        super::bigint::to_json(&value)
-            .map_err(|e| TemplateError(format!("cannot convert template result: {e}")))
+        super::pymethods::bytes::to_json(&value)
+            .map_err(|e| TemplateError(super::pymethods::bytes::result_error(&e)))
     }
 
     /// A `when` clause. Ansible accepts `{{ }}` around it with a warning; the result must be a

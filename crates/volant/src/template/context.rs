@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use minijinja::value::{Enumerator, Object};
 use serde_json::{Map, Value};
 
+mod hostvars;
 mod read;
 
 use super::env::{chained_attr, fresh_const, mutable_attr, mutable_var};
@@ -19,7 +20,6 @@ use super::{
     MKLIST_KEY, MKMAP_KEY, QUERY_KEY, REM_KEY, REMT_KEY, TAINT_KEY, Tainted, TemplateError,
     VAR_KEY,
 };
-use crate::inventory::is_localhost;
 
 /// The name, in the variables an extended loop shares between its items, under which the list of
 /// all the items is kept once. It is no variable: a render never finds it by name, it reads it
@@ -76,6 +76,7 @@ impl Object for LoopView {
     }
 }
 
+pub(super) use hostvars::Hostvars;
 use read::Deferred;
 pub(super) use read::take_failure;
 
@@ -391,73 +392,6 @@ impl Object for Context {
             }
         }
         Enumerator::Values(keys)
-    }
-}
-
-/// `hostvars`: a map whose values are converted one host at a time. Iterating it still costs
-/// the whole inventory, which is what a `hostvars | dict2items` asks for; reading one host
-/// costs one host.
-#[derive(Debug)]
-pub(super) struct Hostvars {
-    pub(super) hosts: Arc<Map<String, Value>>,
-    /// The inventory-wide values, whose `groups` say which hosts the inventory lists. The map
-    /// answers for the three spellings of the controller whether they are listed or not, and an
-    /// iteration shows only the listed ones, as the reference's does.
-    listed: Option<Arc<Map<String, Value>>>,
-    /// Hosts holding at least one name that came from a managed host. Reading any name of such
-    /// a host taints the render, which is coarser than the reference's per-string tag.
-    untrusted_hosts: BTreeSet<String>,
-    /// Whether one of the host names came from a managed host: listing them taints the render.
-    keys_untrusted: bool,
-    tainted: Tainted,
-    deferred: Arc<Deferred>,
-    memo: Memo,
-}
-
-impl Object for Hostvars {
-    fn get_value(self: &Arc<Self>, key: &minijinja::Value) -> Option<minijinja::Value> {
-        let key = key.as_str()?;
-        // Before the memo, for the same reason as in `Context`.
-        if self.untrusted_hosts.contains(key) {
-            self.tainted.store(true, Ordering::Relaxed);
-        }
-        let found = self.memo.get(key, || {
-            self.hosts.get(key).map(|entry| {
-                let entry = read::with_playbook_python(crate::vars::settled(entry).into_owned());
-                self.deferred.mark_host(key, &entry);
-                super::bigint::to_template(&entry)
-            })
-        });
-        self.deferred.again_host(key);
-        found
-    }
-
-    fn enumerate(self: &Arc<Self>) -> Enumerator {
-        if self.keys_untrusted {
-            self.tainted.store(true, Ordering::Relaxed);
-        }
-        let unlisted: BTreeSet<&str> = match &self.listed {
-            Some(shared) if self.hosts.keys().any(|k| is_localhost(k)) => {
-                let all = shared
-                    .get("groups")
-                    .and_then(|groups| groups.get("all"))
-                    .and_then(Value::as_array);
-                let in_all = |name: &str| all.is_some_and(|a| a.iter().any(|h| h == name));
-                self.hosts
-                    .keys()
-                    .map(String::as_str)
-                    .filter(|k| is_localhost(k) && !in_all(k))
-                    .collect()
-            }
-            _ => BTreeSet::new(),
-        };
-        Enumerator::Values(
-            self.hosts
-                .keys()
-                .filter(|k| !unlisted.contains(k.as_str()))
-                .map(|k| minijinja::Value::from(k.as_str()))
-                .collect(),
-        )
     }
 }
 
