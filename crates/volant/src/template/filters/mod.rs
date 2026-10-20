@@ -10,6 +10,7 @@ use minijinja::{Environment, Error, ErrorKind, State, Value};
 mod collections;
 mod int;
 mod json;
+mod ordering;
 mod regex;
 mod text;
 
@@ -20,6 +21,7 @@ use json::{from_json, from_yaml, to_json, to_nice_json};
 use regex::{regex_escape, regex_findall, regex_replace, regex_search, regex_test};
 use text::{b64decode, b64encode, basename, comment, dirname, ipwrap, quote, split, to_uuid};
 
+use super::pymethods::format::to_str;
 use super::truthy;
 use super::{add_filter, add_test, add_text_filter};
 
@@ -137,9 +139,9 @@ pub fn register(
         add_filter(env, "attr", f::attr);
         add_filter(env, "first", f::first);
         add_filter(env, "last", f::last);
-        add_filter(env, "min", f::min);
-        add_filter(env, "max", f::max);
-        add_filter(env, "sort", f::sort);
+        add_filter(env, "min", ordering::min);
+        add_filter(env, "max", ordering::max);
+        add_filter(env, "sort", ordering::sort);
         add_filter(env, "list", f::list);
         add_text_filter(env, "string", string);
         add_filter(env, "batch", f::batch);
@@ -152,7 +154,7 @@ pub fn register(
         add_filter(env, "rejectattr", f::rejectattr);
         add_filter(env, "map", f::map);
         add_filter(env, "groupby", f::groupby);
-        add_filter(env, "unique", f::unique);
+        add_filter(env, "unique", ordering::unique);
         add_filter(env, "chain", f::chain);
         add_filter(env, "zip", f::zip);
         add_filter(env, "pprint", f::pprint);
@@ -184,8 +186,14 @@ pub fn register(
         add_test(env, "mapping", t::is_mapping);
         add_test(env, "startingwith", t::is_startingwith);
         add_test(env, "endingwith", t::is_endingwith);
-        add_test(env, "lower", t::is_lower);
-        add_test(env, "upper", t::is_upper);
+        // Jinja2 tests `str(value)`, so `['A'] is upper` is true; minijinja fails every value
+        // that is not a string.
+        add_test(env, "lower", |v: Value| {
+            t::is_lower(&Value::from(to_str(&v)))
+        });
+        add_test(env, "upper", |v: Value| {
+            t::is_upper(&Value::from(to_str(&v)))
+        });
         add_test(env, "sameas", t::is_sameas);
         for name in ["eq", "equalto", "=="] {
             add_test(env, name, t::is_eq);
@@ -252,6 +260,8 @@ pub fn register(
             "UndefinedMarker"
         } else if v.downcast_object_ref::<super::clock::DateTime>().is_some() {
             "datetime"
+        } else if v.is_tuple() {
+            "tuple"
         } else if super::pymethods::bytes::of(&v).is_some() {
             "bytes"
         } else {
@@ -407,6 +417,13 @@ mod tests;
 /// `string`, which prints a `range` or a `datetime` as Python does and leaves every other value
 /// to MiniJinja.
 fn string(state: &State, value: Value) -> Result<Value, Error> {
+    // Python's `str` of a float: `nan`, `inf`, `1e+16`.
+    if value.kind() == minijinja::value::ValueKind::Number && !value.is_integer() {
+        return Ok(Value::from(to_str(&value)));
+    }
+    if super::pymethods::format::holds_tuple(&value) {
+        return Ok(Value::from(super::pymethods::format::repr(&value)));
+    }
     if value.downcast_object_ref::<super::env::Range>().is_some()
         || value
             .downcast_object_ref::<super::clock::DateTime>()

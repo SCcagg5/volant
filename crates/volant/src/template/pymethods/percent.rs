@@ -9,8 +9,8 @@ use super::args::{raise, type_of};
 use super::format::{ascii, float, repr, to_str};
 use super::limits::check;
 
-/// `lhs % rhs`. `tuple` says that the right side was written as a tuple: Volant has no tuple
-/// type, so the compiler tells a `(a, b)` from a list that a variable holds.
+/// `lhs % rhs`. `tuple` says that the right side was written out as a tuple or a list; a tuple
+/// a variable holds is one as well.
 pub(crate) fn percent(lhs: &Value, rhs: &Value, tuple: bool) -> Result<Value, Error> {
     if super::super::holds_undefined(lhs) || super::super::holds_undefined(rhs) {
         return Err(Error::from(ErrorKind::UndefinedError));
@@ -43,7 +43,7 @@ pub(crate) fn format_filter(
     for name in &names {
         pairs.push((Value::from(name.as_str()), kwargs.get::<Value>(name)?));
     }
-    interpolate(&text, &pairs.into_iter().collect(), false).map(Value::from)
+    interpolate(&text, &Value::from_pairs(pairs), false).map(Value::from)
 }
 
 /// An integer or a float as the numeric operators read it: a bool counts as 0 or 1.
@@ -154,7 +154,7 @@ impl Args<'_> {
 
 fn interpolate(fmt: &str, rhs: &Value, tuple: bool) -> Result<String, Error> {
     let mapping = (rhs.kind() == ValueKind::Map).then_some(rhs);
-    let items = if tuple && rhs.kind() == ValueKind::Seq {
+    let items = if (tuple && rhs.kind() == ValueKind::Seq) || rhs.is_tuple() {
         rhs.try_iter()?.collect()
     } else {
         vec![rhs.clone()]

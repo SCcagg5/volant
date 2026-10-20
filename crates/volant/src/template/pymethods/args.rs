@@ -14,16 +14,19 @@ pub(super) fn raise(message: impl Into<String>) -> Error {
 }
 
 /// Python's name for the type of a value, as its error messages write it.
-pub(super) fn type_of(value: &Value) -> &'static str {
+pub(crate) fn type_of(value: &Value) -> &'static str {
+    if crate::template::bigint::is_big(value) {
+        return "int";
+    }
     match value.kind() {
         ValueKind::Undefined => "UndefinedType",
         ValueKind::None => "NoneType",
         ValueKind::Bool => "bool",
         ValueKind::Number if value.is_integer() => "int",
         ValueKind::Number => "float",
-        _ if crate::template::bigint::is_big(value) => "int",
         ValueKind::String => "str",
         ValueKind::Bytes => "bytes",
+        ValueKind::Seq if value.is_tuple() => "tuple",
         ValueKind::Seq => "list",
         ValueKind::Map => "dict",
         ValueKind::Iterable => "generator",

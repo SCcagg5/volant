@@ -10,7 +10,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use minijinja::value::{Object, ObjectRepr, Rest, ValueKind, from_args};
+use minijinja::value::{Object, ObjectRepr, Rest, ValueKind, ValueOrKwargs, from_args};
 use minijinja::{Error, ErrorKind, State, Value};
 
 use super::{any_undefined, type_name};
@@ -132,13 +132,13 @@ impl Object for DictType {
     /// Measured on ansible-core 2.19.12: a later pair wins over an earlier one with the same key,
     /// a keyword wins over the positional argument, `dict(none)` and `dict(5)` fail as non-iterable
     /// and a string is read character by character.
-    fn call(self: &Arc<Self>, _state: &State<'_, '_>, args: &[Value]) -> Result<Value, Error> {
+    fn call(self: &Arc<Self>, _state: &mut State<'_, '_>, args: &[Value]) -> Result<Value, Error> {
         build(args.to_vec(), MAX_PAIRS)
     }
 
     fn call_method(
         self: &Arc<Self>,
-        _state: &State<'_, '_>,
+        _state: &mut State<'_, '_>,
         method: &str,
         args: &[Value],
     ) -> Result<Value, Error> {
@@ -162,7 +162,7 @@ impl Object for FromKeys {
         f.write_str("<built-in method fromkeys of type object>")
     }
 
-    fn call(self: &Arc<Self>, _state: &State<'_, '_>, args: &[Value]) -> Result<Value, Error> {
+    fn call(self: &Arc<Self>, _state: &mut State<'_, '_>, args: &[Value]) -> Result<Value, Error> {
         from_keys(Rest(args.to_vec()))
     }
 }
@@ -255,7 +255,7 @@ pub(super) fn build(mut args: Vec<Value>, max_pairs: usize) -> Result<Value, Err
             entries.set(key, value)?;
         }
     }
-    Ok(entries.items.into_iter().collect())
+    Ok(Value::from_pairs(entries.items))
 }
 
 /// The two items of element number `at`.
@@ -316,7 +316,7 @@ impl Object for Cycler {
 
     fn call_method(
         self: &Arc<Self>,
-        _state: &State<'_, '_>,
+        _state: &mut State<'_, '_>,
         method: &str,
         args: &[Value],
     ) -> Result<Value, Error> {
@@ -351,7 +351,7 @@ pub(super) fn cycler(items: Rest<Value>) -> Result<Value, Error> {
 /// `undef(hint=none, name=none)`: a value that is undefined, so that reading it fails and
 /// `default` and `is defined` see it as missing. The hint is not kept: the failure it causes
 /// reads as any other undefined variable.
-pub(super) fn undef(_args: Rest<Value>) -> Value {
+pub(super) fn undef(_args: Rest<ValueOrKwargs>) -> Value {
     Value::UNDEFINED
 }
 

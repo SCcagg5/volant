@@ -15610,5 +15610,955 @@
       "template": "{{ undefined_var | int(base=2) }}"
     },
     "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': 'undefined_var' is undefined"
+  },
+  {
+    "case": {
+      "template": "{{ 7 // -2 }}"
+    },
+    "result": -4
+  },
+  {
+    "case": {
+      "template": "{{ -7 // 2 }}"
+    },
+    "result": -4
+  },
+  {
+    "case": {
+      "template": "{{ 7.5 // -2 }}"
+    },
+    "result": -4.0
+  },
+  {
+    "case": {
+      "template": "{{ 1 / 0 }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: division by zero"
+  },
+  {
+    "case": {
+      "template": "{{ 1 // 0 }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: integer division or modulo by zero"
+  },
+  {
+    "case": {
+      "template": "{{ 2.5 | round }}"
+    },
+    "result": 2.0
+  },
+  {
+    "case": {
+      "template": "{{ 3.5 | round }}"
+    },
+    "result": 4.0
+  },
+  {
+    "case": {
+      "template": "{{ 0.125 | round(2) }}"
+    },
+    "result": 0.12
+  },
+  {
+    "case": {
+      "template": "{{ true is number }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ [true, true] | sum }}"
+    },
+    "result": 2
+  },
+  {
+    "case": {
+      "template": "{{ \"don't\" | title }}"
+    },
+    "result": "Don't"
+  },
+  {
+    "case": {
+      "template": "{{ 'a-b c(d' | title }}"
+    },
+    "result": "A-B C(D"
+  },
+  {
+    "case": {
+      "template": "{{ -x.y }}",
+      "vars": {
+        "x": {
+          "y": 3
+        }
+      }
+    },
+    "result": -3
+  },
+  {
+    "case": {
+      "template": "{{ -1 | abs }}"
+    },
+    "result": 1
+  },
+  {
+    "case": {
+      "template": "{{ 1 and 'x' }}"
+    },
+    "result": "x"
+  },
+  {
+    "case": {
+      "template": "{{ 0 or 'y' }}"
+    },
+    "result": "y"
+  },
+  {
+    "case": {
+      "template": "{{ ['b', 'P', 'n'] | max }}"
+    },
+    "result": "P"
+  },
+  {
+    "case": {
+      "template": "{{ ['b', 'P', 'n'] | min }}"
+    },
+    "result": "b"
+  },
+  {
+    "case": {
+      "template": "{{ ['b', 'P', 'n'] | max(case_sensitive=true) }}"
+    },
+    "result": "n"
+  },
+  {
+    "case": {
+      "template": "{{ [{'a': 2}, {'a': 5}] | min(attribute='a') }}"
+    },
+    "result": {
+      "a": 2
+    }
+  },
+  {
+    "case": {
+      "template": "{{ 'FOO 1' is upper }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ '' is upper }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ 'foo 1' is lower }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ ['A'] is upper }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 1 is lower }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ (1, 2) }}"
+    },
+    "result": [
+      1,
+      2
+    ]
+  },
+  {
+    "case": {
+      "template": "x {{ (1, 2) }}"
+    },
+    "result": "x [1, 2]"
+  },
+  {
+    "case": {
+      "template": "{{ ('a',) }}"
+    },
+    "result": [
+      "a"
+    ]
+  },
+  {
+    "case": {
+      "template": "x {{ ('a',) }}"
+    },
+    "result": "x ['a']"
+  },
+  {
+    "case": {
+      "template": "{{ [(1, 2)] }}"
+    },
+    "result": [
+      [
+        1,
+        2
+      ]
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ (1, 2) | to_json }}"
+    },
+    "result": "[1, 2]"
+  },
+  {
+    "case": {
+      "template": "{{ {'k': (1, 2)} | to_json }}"
+    },
+    "result": "{\"k\": [1, 2]}"
+  },
+  {
+    "case": {
+      "template": "{{ (1, 2) | to_nice_json }}"
+    },
+    "result": "[\n    1,\n    2\n]"
+  },
+  {
+    "case": {
+      "template": "{{ '%s-%s' % (1, 2) }}"
+    },
+    "result": "1-2"
+  },
+  {
+    "case": {
+      "template": "{{ '%s' % ((1, 2),) }}"
+    },
+    "result": "(1, 2)"
+  },
+  {
+    "case": {
+      "template": "{{ ['%s'] | map('format', (1, 2)) | list }}"
+    },
+    "result": [
+      "(1, 2)"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ (1, 2) | type_debug }}"
+    },
+    "result": "tuple"
+  },
+  {
+    "case": {
+      "template": "{{ (1, 2).index(2) }}"
+    },
+    "result": 1
+  },
+  {
+    "case": {
+      "template": "{{ (1, 2).count(2) }}"
+    },
+    "result": 1
+  },
+  {
+    "case": {
+      "template": "{{ (1, 2) + [3] }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: can only concatenate tuple (not \"list\") to tuple"
+  },
+  {
+    "case": {
+      "template": "{{ (1, 2) + (3,) }}"
+    },
+    "result": [
+      1,
+      2,
+      3
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ (1, 2).append(3) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': object of type 'tuple' has no attribute 'append'"
+  },
+  {
+    "case": {
+      "template": "{{ (1, 2) == [1, 2] }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ (1, 2) ~ 'x' }}"
+    },
+    "result": "(1, 2)x"
+  },
+  {
+    "case": {
+      "template": "{{ (1, 2) | string }}"
+    },
+    "result": "(1, 2)"
+  },
+  {
+    "case": {
+      "template": "{{ ('a', 'b') | join(',') }}"
+    },
+    "result": "a,b"
+  },
+  {
+    "case": {
+      "template": "{{ (1, 2)[0] }}"
+    },
+    "result": 1
+  },
+  {
+    "case": {
+      "template": "{{ (3, 1) | sort }}"
+    },
+    "result": [
+      1,
+      3
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ (1, 2) in [(1, 2)] }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ [1, 2] in [(1, 2)] }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": ">{% set t = (1, 2) %}{{ t | length }} {{ t[1:] }} {{ t | list }}"
+    },
+    "result": ">2 [2] [1, 2]"
+  },
+  {
+    "case": {
+      "template": "{{ {'a': 1} | dictsort | first }}"
+    },
+    "result": [
+      "a",
+      1
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ ({'a': 1} | dictsort | first) | type_debug }}"
+    },
+    "result": "tuple"
+  },
+  {
+    "case": {
+      "template": "{{ ('-340282366920938463463374607431768211457' | int) < 0 }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ ('-340282366920938463463374607431768211457' | int) < -1 }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ ('-340282366920938463463374607431768211457' | int) > -1.5 }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ ('-340282366920938463463374607431768211457' | int) < ('340282366920938463463374607431768211457' | int) }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ ('-340282366920938463463374607431768211457' | int) >= ('-340282366920938463463374607431768211458' | int) }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ ('340282366920938463463374607431768211457' | int) > 1e300 }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ ('340282366920938463463374607431768211457' | int) <= 1e300 }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 0 < ('340282366920938463463374607431768211457' | int) <= 1e300 }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 1 < 2 < 3 }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 3 > 2 > 2 }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ 2 < 1 < 'a' }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ ('nan' | float) < 1 }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ 1 in [1.0] }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 1 not in [2] }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ ('340282366920938463463374607431768211457' | int) in [('340282366920938463463374607431768211457' | int)] }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ [('-340282366920938463463374607431768211457' | int), 0, -1, 1.5] | max }}"
+    },
+    "result": 1.5
+  },
+  {
+    "case": {
+      "template": "{{ [('-340282366920938463463374607431768211457' | int), 0, -1, 1.5] | min }}"
+    },
+    "result": -340282366920938463463374607431768211457
+  },
+  {
+    "case": {
+      "template": "{{ [0, ('-340282366920938463463374607431768211457' | int), -1, 1.5, ('340282366920938463463374607431768211457' | int), 1e300] | sort }}"
+    },
+    "result": [
+      -340282366920938463463374607431768211457,
+      -1,
+      0,
+      1.5,
+      340282366920938463463374607431768211457,
+      1e+300
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ [0, ('-340282366920938463463374607431768211457' | int), -1, 1.5] | sort(reverse=true) }}"
+    },
+    "result": [
+      1.5,
+      0,
+      -1,
+      -340282366920938463463374607431768211457
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ [0, ('-340282366920938463463374607431768211457' | int), 0, ('-340282366920938463463374607431768211457' | int)] | unique }}"
+    },
+    "result": [
+      0,
+      -340282366920938463463374607431768211457
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ [1, true, 1.0, 'A', 'a'] | unique }}"
+    },
+    "result": [
+      1,
+      "A"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ [1, true, 1.0, 'A', 'a'] | unique(case_sensitive=true) }}"
+    },
+    "result": [
+      1,
+      "A",
+      "a"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ [{'k': 'A'}, {'k': 'a'}, {'k': 'b'}] | unique(attribute='k') }}"
+    },
+    "result": [
+      {
+        "k": "A"
+      },
+      {
+        "k": "b"
+      }
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ ['a', 'A'] | max }}"
+    },
+    "result": "a"
+  },
+  {
+    "case": {
+      "template": "{{ ['a', 'A'] | min }}"
+    },
+    "result": "a"
+  },
+  {
+    "case": {
+      "template": "{{ [1, 1.0] | max }}"
+    },
+    "result": 1
+  },
+  {
+    "case": {
+      "template": "{{ ['a', 1] | max }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The filter plugin 'ansible.builtin.max' failed: '>' not supported between instances of 'int' and 'str'"
+  },
+  {
+    "case": {
+      "template": "{{ ['a', 1] | min }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The filter plugin 'ansible.builtin.min' failed: '<' not supported between instances of 'int' and 'str'"
+  },
+  {
+    "case": {
+      "template": "{{ ['b', 'A', 'a'] | sort }}"
+    },
+    "result": [
+      "A",
+      "a",
+      "b"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ ['b', 'A', 'a'] | sort(case_sensitive=true) }}"
+    },
+    "result": [
+      "A",
+      "a",
+      "b"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ [3, 1, 2] | sort(true) }}"
+    },
+    "result": [
+      3,
+      2,
+      1
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ ['a', 1] | sort }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The filter plugin 'ansible.builtin.sort' failed: '<' not supported between instances of 'int' and 'str'"
+  },
+  {
+    "case": {
+      "template": "{{ [none, 1] | sort }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The filter plugin 'ansible.builtin.sort' failed: '<' not supported between instances of 'int' and 'NoneType'"
+  },
+  {
+    "case": {
+      "template": "{{ [{'a': 2, 'b': 1}, {'a': 1, 'b': 2}, {'a': 1, 'b': 1}] | sort(attribute='a,b') }}"
+    },
+    "result": [
+      {
+        "a": 1,
+        "b": 1
+      },
+      {
+        "a": 1,
+        "b": 2
+      },
+      {
+        "a": 2,
+        "b": 1
+      }
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ [{'a': 2}, {'a': 1}] | sort(attribute='a', reverse=true) }}"
+    },
+    "result": [
+      {
+        "a": 2
+      },
+      {
+        "a": 1
+      }
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ [{'a': 'B'}, {'a': 'a'}] | max(attribute='a') }}"
+    },
+    "result": {
+      "a": "B"
+    }
+  },
+  {
+    "case": {
+      "template": "{{ [[2, 1], [1, 2]] | sort(attribute='1') }}"
+    },
+    "result": [
+      [
+        2,
+        1
+      ],
+      [
+        1,
+        2
+      ]
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ [3, 1] | sort(foo=1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The filter plugin 'ansible.builtin.sort' failed: do_sort() got an unexpected keyword argument 'foo'"
+  },
+  {
+    "case": {
+      "template": "{{ [1, 2] | max(foo=1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The filter plugin 'ansible.builtin.max' failed: do_max() got an unexpected keyword argument 'foo'"
+  },
+  {
+    "case": {
+      "template": "{{ [1, 2] | unique(foo=1) }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The filter plugin 'ansible.builtin.unique' failed: unique() got an unexpected keyword argument 'foo'"
+  },
+  {
+    "case": {
+      "template": "{{ {'b': 1, 'a': 2} | sort }}"
+    },
+    "result": [
+      "a",
+      "b"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ 'cba' | sort }}"
+    },
+    "result": [
+      "a",
+      "b",
+      "c"
+    ]
+  },
+  {
+    "case": {
+      "template": "{{ [1, 2] | max(true, 'x') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': object of type 'int' has no attribute 'x'"
+  },
+  {
+    "case": {
+      "template": ">{% set l = [0, ('-340282366920938463463374607431768211457' | int), -1, 1.5] %}{% set _ = l.sort() %}{{ l }}"
+    },
+    "result": ">[-340282366920938463463374607431768211457, -1, 0, 1.5]"
+  },
+  {
+    "case": {
+      "template": "{{ s < 1 }}",
+      "vars": {
+        "s": "a"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: '<' not supported between instances of '_AnsibleTaggedStr' and 'int'"
+  },
+  {
+    "case": {
+      "template": "{{ n < 1 }}",
+      "vars": {
+        "n": null
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: '<' not supported between instances of 'NoneType' and 'int'"
+  },
+  {
+    "case": {
+      "template": "{{ l < (1,) }}",
+      "vars": {
+        "l": [
+          1
+        ]
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: '<' not supported between instances of '_AnsibleLazyTemplateList' and 'tuple'"
+  },
+  {
+    "case": {
+      "template": "{{ 1 < 2 < s }}",
+      "vars": {
+        "s": "a"
+      }
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': Error rendering template: '<' not supported between instances of 'int' and '_AnsibleTaggedStr'"
+  },
+  {
+    "case": {
+      "template": "{{ [] | max | default(5) }}"
+    },
+    "result": 5
+  },
+  {
+    "case": {
+      "template": "{{ [3, ('nan' | float), 1, 2] | sort | map('string') | join(',') }}"
+    },
+    "result": "3,nan,1,2"
+  },
+  {
+    "case": {
+      "template": "{{ [('nan' | float), 3, 1, 2] | sort | map('string') | join(',') }}"
+    },
+    "result": "1,nan,2,3"
+  },
+  {
+    "case": {
+      "template": "{{ [2, 1, ('nan' | float), 0, -1] | sort | map('string') | join(',') }}"
+    },
+    "result": "-1,1,nan,0,2"
+  },
+  {
+    "case": {
+      "template": "{{ [2, 1, ('nan' | float), 0, -1] | sort(reverse=true) | map('string') | join(',') }}"
+    },
+    "result": "2,1,nan,0,-1"
+  },
+  {
+    "case": {
+      "template": "{{ [1, 1.0, ('nan' | float), 1, 0] | sort | map('string') | join(',') }}"
+    },
+    "result": "0,1,1.0,nan,1"
+  },
+  {
+    "case": {
+      "template": "{{ [{'a': ('nan' | float)}, {'a': 2}, {'a': 1}] | sort(attribute='a') | map(attribute='a') | map('string') | join(',') }}"
+    },
+    "result": "1,nan,2"
+  },
+  {
+    "case": {
+      "template": "{{ [1, ('nan' | float), 0] | max | string }}"
+    },
+    "result": "1"
+  },
+  {
+    "case": {
+      "template": "{{ [('nan' | float), 1, 0] | max | string }}"
+    },
+    "result": "nan"
+  },
+  {
+    "case": {
+      "template": "{{ [('nan' | float), 1, 0] | min | string }}"
+    },
+    "result": "nan"
+  },
+  {
+    "case": {
+      "template": "{{ [1, 0, ('nan' | float)] | min | string }}"
+    },
+    "result": "0"
+  },
+  {
+    "case": {
+      "template": "{{ [('nan' | float), 1, ('nan' | float), 1.0] | unique | map('string') | join(',') }}"
+    },
+    "result": "nan,1,nan"
+  },
+  {
+    "case": {
+      "template": "{{ ('nan' | float) < 1 }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ ('nan' | float) >= ('nan' | float) }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ ('nan' | float) == ('nan' | float) }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ ('nan' | float) != ('nan' | float) }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ 1 < ('nan' | float) < 2 }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": ">{% set l = [3, ('nan' | float), 1, 2, ('nan' | float), 0] %}{% set _ = l.sort() %}{{ l | map('string') | join(',') }}"
+    },
+    "result": ">3,nan,1,2,nan,0"
+  },
+  {
+    "case": {
+      "template": ">{% set l = [3, ('nan' | float), 1, 2, ('nan' | float), 0] %}{% set _ = l.sort(reverse=True) %}{{ l | map('string') | join(',') }}"
+    },
+    "result": ">3,nan,2,1,nan,0"
+  },
+  {
+    "case": {
+      "template": "{{ ('200000000000000000000000000000000000000' | int) > 0 }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ ('200000000000000000000000000000000000000' | int) < -1 }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ ('200000000000000000000000000000000000000' | int) < 2e38 }}"
+    },
+    "result": false
+  },
+  {
+    "case": {
+      "template": "{{ ('200000000000000000000000000000000000000' | int) > 1.7e38 }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ ('200000000000000000000000000000000000000' | int) < 3.4e38 }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ ('200000000000000000000000000000000000000' | int) < ('300000000000000000000000000000000000000' | int) }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ ('200000000000000000000000000000000000000' | int) < ('340282366920938463463374607431768211457' | int) }}"
+    },
+    "result": true
+  },
+  {
+    "case": {
+      "template": "{{ [('200000000000000000000000000000000000000' | int), 5, -3, 2.5e38, 1.5e38] | sort | map('string') | join(',') }}"
+    },
+    "result": "-3,5,1.5e+38,200000000000000000000000000000000000000,2.5e+38"
+  },
+  {
+    "case": {
+      "template": "{{ [('200000000000000000000000000000000000000' | int), 5, -3, 1.5e38] | max | string }}"
+    },
+    "result": "200000000000000000000000000000000000000"
+  },
+  {
+    "case": {
+      "template": "{{ [5, ('200000000000000000000000000000000000000' | int), 2.5e38] | max | string }}"
+    },
+    "result": "2.5e+38"
+  },
+  {
+    "case": {
+      "template": "{{ [('200000000000000000000000000000000000000' | int), -3] | min | string }}"
+    },
+    "result": "-3"
+  },
+  {
+    "case": {
+      "template": "{{ 'x' ~ ('nan' | float) }}"
+    },
+    "result": "xnan"
+  },
+  {
+    "case": {
+      "template": "{{ 'x' ~ ('1e16' | float) }}"
+    },
+    "result": "x1e+16"
+  },
+  {
+    "case": {
+      "template": "{{ 'x' ~ 1.5 }}"
+    },
+    "result": "x1.5"
+  },
+  {
+    "case": {
+      "template": "{{ 2.0 ~ 'x' }}"
+    },
+    "result": "2.0x"
+  },
+  {
+    "case": {
+      "template": "{{ 'x' ~ ('inf' | float) }}"
+    },
+    "result": "xinf"
+  },
+  {
+    "case": {
+      "template": "{{ [{'k': 1}, {}] | unique(attribute='k') }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The filter plugin 'ansible.builtin.unique' failed: Jinja2's unique filter failed and we cannot fall back to Ansible's version as it does not support the parameters supplied: object of type 'dict' has no attribute 'k'"
+  },
+  {
+    "case": {
+      "template": "{{ [{'k': 1}, {'j': 2}] | unique(attribute='k') | length }}"
+    },
+    "error": "Task failed: Finalization of task args for 'ansible.builtin.debug' failed: Error while resolving value for 'msg': The filter plugin 'ansible.builtin.unique' failed: Jinja2's unique filter failed and we cannot fall back to Ansible's version as it does not support the parameters supplied: object of type 'dict' has no attribute 'k'"
   }
 ]

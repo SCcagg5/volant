@@ -340,7 +340,7 @@ fn settle(value: &Value) -> Result<Value, String> {
                 let item = value.get_item(&key).map_err(|e| e.to_string())?;
                 pairs.push((key, settle(&item)?));
             }
-            Ok(pairs.into_iter().collect())
+            Ok(Value::from_pairs(pairs))
         }
     }
 }

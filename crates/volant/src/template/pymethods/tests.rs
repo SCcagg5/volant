@@ -51,7 +51,7 @@ fn only_a_literal_that_json_carries_back_is_routed() {
     assert!(is_literal(&crate::template::bigint::to_template(
         &json!([1, "a", null, [true], {"k": 1.5}])
     )));
-    let int_key = Value::from_iter([(Value::from(1), Value::from("a"))]);
+    let int_key = Value::from_pairs([(Value::from(1), Value::from("a"))]);
     assert!(!is_literal(&int_key));
 }
 

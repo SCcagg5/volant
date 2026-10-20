@@ -94,7 +94,7 @@ pub(in crate::template) fn fromkeys(args: &[Value]) -> Result<Value, Error> {
     Ok(if is_mutable(&value) {
         MutDict::from_entries(entries.into_iter().collect())
     } else {
-        entries.into_iter().collect()
+        Value::from_pairs(entries)
     })
 }
 

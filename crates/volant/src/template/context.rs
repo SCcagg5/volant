@@ -314,6 +314,7 @@ impl Object for Context {
             ALLITEMS_KEY,
         ]
         .contains(&key)
+            || super::order::is_key(key)
         {
             return None;
         }
