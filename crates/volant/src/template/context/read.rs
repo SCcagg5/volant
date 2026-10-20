@@ -290,6 +290,18 @@ impl Context {
 /// The magic variable that names the interpreter running the controller's Python code.
 pub(super) const PLAYBOOK_PYTHON: &str = "ansible_playbook_python";
 
+/// A host's entry in `hostvars` with the magic variable set: it beats the host's own value of the
+/// name, here as in a task, and every host has it. The lookup is made once per process.
+pub(super) fn with_playbook_python(mut entry: Value) -> Value {
+    if let Some(map) = entry.as_object_mut() {
+        match crate::runtime::resolve::controller_python() {
+            Some(python) => map.insert(PLAYBOOK_PYTHON.to_string(), python.into()),
+            None => map.remove(PLAYBOOK_PYTHON),
+        };
+    }
+    entry
+}
+
 /// `ansible_playbook_python`, the reference's `sys.executable`: the controller's own Python.
 /// Looking it up can start a Python probe, so it is answered here, when a template reads it,
 /// and never stored with the other magic variables. Undefined when no interpreter resolves.
