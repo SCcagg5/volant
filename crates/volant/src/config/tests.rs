@@ -172,9 +172,8 @@ fn the_volant_section_can_turn_connection_sharing_off() {
     }
 }
 
-/// The reference reads `show_task_path_on_failure` as a callback option: `y`, `t` and `1` count
-/// as true in any case, every other word as false, and a variable that is set wins over the file
-/// even when it is empty.
+/// `show_task_path_on_failure` is a callback option: `y`, `t` and `1` are true in any case, every
+/// other word is false, and a variable that is set wins over the file, empty or not.
 #[test]
 fn the_failure_path_switch_reads_the_spellings_of_the_reference() {
     assert!(!Config::default().show_task_path_on_failure);
