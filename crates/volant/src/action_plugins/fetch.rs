@@ -172,7 +172,7 @@ impl Fetch {
                 format!("{root}/{}/{source}", self.host),
                 self.root.join(&self.host),
             )
-        } else if self.dest.ends_with('/') {
+        } else if names_a_directory(&self.dest) {
             let base = self.src.rsplit('/').next().unwrap_or_default();
             (format!("{root}/{base}"), self.root.clone())
         } else {
@@ -201,7 +201,7 @@ impl Fetch {
             anchor.is_some(),
         )?;
         if self.flat && path.is_dir() {
-            return Err(if self.dest.ends_with('/') {
+            return Err(if names_a_directory(&self.dest) {
                 format!(
                     "calculated dest '{}' is an existing directory, use another path that does not point to an existing directory",
                     path.display()
@@ -215,7 +215,7 @@ impl Fetch {
 
     /// Where the walk for links starts: `dest`, or its parent when `dest` is the file itself.
     fn walk_root(&self) -> &Path {
-        if self.flat && !self.dest.ends_with('/') {
+        if self.flat && !names_a_directory(&self.dest) {
             self.root.parent().unwrap_or(&self.root)
         } else {
             &self.root
@@ -437,6 +437,11 @@ impl Plugin for Fetch {
             State::Slurp => Step::Done(last.map_or_else(|| lost("slurp"), |r| self.slurped(r))),
         }
     }
+}
+
+/// Whether `dest` ends with a separator, which says it is a directory: `/`, and `\` on Windows.
+fn names_a_directory(dest: &str) -> bool {
+    dest.ends_with('/') || (cfg!(windows) && dest.ends_with('\\'))
 }
 
 #[cfg(test)]

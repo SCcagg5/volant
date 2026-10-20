@@ -16,7 +16,9 @@ use serde_json::{Map, Value};
 use volant_protocol::TaskResult;
 use volant_protocol::encoding::sha1_hex;
 
-use super::files::{ansible_bool, blob_of, check_host_named, fits, not_found, search_paths};
+use super::files::{
+    ansible_bool, blob_of, check_host_named, fits, names_a_place, not_found, search_paths,
+};
 use super::{Context, Plugin, Step, Sub, lost};
 use crate::executor::as_bool_value;
 
@@ -78,7 +80,7 @@ pub(super) fn unwritten(ctx: &Context<'_>) -> bool {
     let searched = search_paths(ctx.origin, ctx.playbook_dir, "files", src);
     match searched.iter().find(|p| p.exists()) {
         Some(found) => found.is_dir(),
-        None => std::path::Path::new(src).is_absolute(),
+        None => names_a_place(std::path::Path::new(src)),
     }
 }
 

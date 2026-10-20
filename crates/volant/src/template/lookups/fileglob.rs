@@ -8,6 +8,7 @@ use minijinja::{Error, State, Value};
 
 use super::first_found::found_path;
 use super::{search_path, text_of};
+use crate::action_plugins::files::names_a_place;
 
 /// `lookup('fileglob', pattern...)`, `plugins/lookup/fileglob.py`, read on the dev machine
 /// (ansible-core 2.19.12): a pattern with no directory of its own is globbed under `files/` of
@@ -46,10 +47,15 @@ pub(super) fn fileglob(
     Ok(out.into_iter().map(Value::from).collect())
 }
 
-/// The glob part of a pattern: everything after its last `/`, or the whole pattern when it names
-/// no directory.
+/// Whether `c` ends a directory name in a pattern: `/`, and `\` on Windows.
+fn is_separator(c: char) -> bool {
+    c == '/' || (cfg!(windows) && c == '\\')
+}
+
+/// The glob part of a pattern: everything after its last `/` (or `\` on Windows), or the whole
+/// pattern when it names no directory.
 pub(super) fn fileglob_file(pattern: &str) -> &str {
-    pattern.rsplit('/').next().unwrap_or(pattern)
+    pattern.rsplit(is_separator).next().unwrap_or(pattern)
 }
 
 /// The directories a pattern is globbed in, in the order they are tried. A pattern with no `/`
@@ -58,13 +64,17 @@ pub(super) fn fileglob_file(pattern: &str) -> &str {
 /// directory is absolute (the `airgap` role's own patterns, `{{ airgap_dir }}/*.tar.gz` rendered
 /// to an absolute path), each search entry's own copy of it otherwise.
 pub(super) fn fileglob_dirs(pattern: &str, search: &[PathBuf]) -> Vec<PathBuf> {
-    match pattern.rsplit_once('/') {
+    match pattern.rsplit_once(is_separator) {
         None => search
             .iter()
             .flat_map(|dir| [dir.join("files"), dir.clone()])
             .collect(),
         Some(("", _)) => vec![PathBuf::from("/")],
-        Some((dir, _)) if Path::new(dir).is_absolute() => vec![PathBuf::from(dir)],
+        // `C:` alone is the working directory of that drive, and the pattern means its root.
+        Some((dir, _)) if cfg!(windows) && dir.ends_with(':') => {
+            vec![PathBuf::from(format!("{dir}\\"))]
+        }
+        Some((dir, _)) if names_a_place(Path::new(dir)) => vec![PathBuf::from(dir)],
         Some((dir, _)) => search
             .iter()
             .flat_map(|entry| [entry.join("files").join(dir), entry.join(dir)])

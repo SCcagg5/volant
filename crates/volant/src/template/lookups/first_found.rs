@@ -64,13 +64,14 @@ pub(super) const WITH_SUBDIR: &str = "volant::first_found_subdir";
 /// entry's own `<name>`. An absolute name is itself whatever it is joined to.
 pub(super) fn relative_stack(search: &[PathBuf], subdir: Option<&str>, name: &str) -> Vec<PathBuf> {
     let mut out = Vec::new();
+    let joined = crate::action_plugins::files::native_separators(name);
     for dir in search {
         if let Some(sub) = subdir
             && name.split('/').next() != Some(sub)
         {
-            out.push(dir.join(sub).join(name));
+            out.push(dir.join(sub).join(&*joined));
         }
-        out.push(dir.join(name));
+        out.push(dir.join(&*joined));
     }
     out
 }
@@ -139,9 +140,16 @@ pub(super) fn candidates_of(
     Ok(())
 }
 
-/// Each file under each path (split on `,`, `:` and `;`), or the files alone without a path.
+/// Each file under each path (split on `,`, `:` and `;`, and not on `:` on Windows), or the files
+/// alone without a path.
 pub(super) fn push_candidates(files: Vec<String>, paths: &Value, out: &mut Vec<String>) {
-    let paths = split_on(paths, &[',', ':', ';']);
+    // A colon is part of a Windows path, as in `C:\x`.
+    let separators: &[char] = if cfg!(windows) {
+        &[',', ';']
+    } else {
+        &[',', ':', ';']
+    };
+    let paths = split_on(paths, separators);
     if paths.is_empty() {
         out.extend(files);
         return;

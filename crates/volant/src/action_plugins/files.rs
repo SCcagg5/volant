@@ -16,6 +16,25 @@ use crate::config::HostNamedPaths;
 /// deflated to fewer.
 pub(crate) const MAX_FILE_LEN: usize = MAX_FRAME_LEN;
 
+/// `name` as this platform separates the parts of a path: a playbook writes `/`, and a path
+/// shown to the operator on Windows has `\` all through.
+pub(crate) fn native_separators(name: &str) -> std::borrow::Cow<'_, str> {
+    if cfg!(windows) && name.contains('/') {
+        name.replace('/', "\\").into()
+    } else {
+        name.into()
+    }
+}
+
+/// Whether `path` names a place by itself, with no directory to start from. On Unix that is an
+/// absolute path. On Windows `\x` has a root and no drive, and `C:x` has a drive and no root:
+/// `join` takes either as it stands, so neither is relative.
+pub(crate) fn names_a_place(path: &Path) -> bool {
+    path.is_absolute()
+        || path.has_root()
+        || matches!(path.components().next(), Some(Component::Prefix(_)))
+}
+
 /// Where the reference looks for a task's local file, in its order.
 ///
 /// Measured on ansible-core 2.19.12 from its "Searched in" list: `<role>/<subdir>/`, `<role>/`,
@@ -31,17 +50,18 @@ pub(crate) fn search_paths(
     subdir: &str,
     name: &str,
 ) -> Vec<PathBuf> {
-    let named = Path::new(name);
-    if named.is_absolute() {
+    let under = name.split('/').next() != Some(subdir);
+    let name = native_separators(name);
+    let named = Path::new(&*name);
+    if names_a_place(named) {
         return vec![named.to_path_buf()];
     }
-    let under = name.split('/').next() != Some(subdir);
     let mut out = Vec::new();
     for base in origin.search_dirs().chain([playbook_dir]) {
         if under {
-            out.push(base.join(subdir).join(name));
+            out.push(base.join(subdir).join(named));
         }
-        out.push(base.join(name));
+        out.push(base.join(named));
     }
     out
 }
@@ -142,7 +162,7 @@ fn inside_task_directories(origin: &Origin, playbook_dir: &Path, subdir: &str, n
         .flat_map(|base| [base.join("files"), base.join("templates")])
         .collect();
     let under = |path: &Path| roots.iter().any(|root| path.starts_with(root));
-    if named.is_absolute() {
+    if names_a_place(named) {
         return !name.contains('$') && under(named);
     }
     search_paths(origin, playbook_dir, subdir, name)
