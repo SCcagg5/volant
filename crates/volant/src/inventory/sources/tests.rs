@@ -107,7 +107,8 @@ h1
         .notes
         .iter()
         .filter_map(|n| match n {
-            Note::Verbose(3, text) => Some(text.replace(&shown, "<dir>")),
+            // The messages are written with `/`; a Windows path has `\`.
+            Note::Verbose(3, text) => Some(text.replace(&shown, "<dir>").replace('\\', "/")),
             _ => None,
         })
         .collect();

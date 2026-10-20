@@ -40,11 +40,23 @@ fn module_path_goes_in_front_in_the_reference_order(
     #[case] flags: &[&str],
     #[case] expected: &[&str],
 ) {
-    let args =
-        PlaybookArgs::try_parse_from(["volant"].iter().chain(flags).chain(&["site.yml"])).unwrap();
+    // A list is separated by `;` on Windows, and a rooted path gets its drive there.
+    let sep = crate::locations::LIST_SEPARATOR.to_string();
+    let flags: Vec<String> = flags.iter().map(|f| f.replace(':', &sep)).collect();
+    let args = PlaybookArgs::try_parse_from(
+        ["volant".to_string()]
+            .iter()
+            .chain(&flags)
+            .chain(&["site.yml".to_string()]),
+    )
+    .unwrap();
     let dirs: Vec<String> = module_path_dirs(&args)
         .iter()
         .map(|d| d.display().to_string())
+        .collect();
+    let expected: Vec<String> = expected
+        .iter()
+        .map(|d| std::path::absolute(d).unwrap().display().to_string())
         .collect();
     assert_eq!(dirs, expected);
 }

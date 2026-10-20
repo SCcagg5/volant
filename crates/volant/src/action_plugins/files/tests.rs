@@ -4,14 +4,16 @@ use super::*;
 /// The order the reference searches in, with a role and without one.
 #[test]
 fn a_file_is_searched_where_the_reference_searches() {
+    use crate::testing::{absent, native};
     let role = Origin {
-        file_dir: PathBuf::from("/pb/roles/r/tasks"),
-        role_dir: Some(PathBuf::from("/pb/roles/r")),
+        file_dir: absent("/pb/roles/r/tasks"),
+        role_dir: Some(absent("/pb/roles/r")),
         parent_roles: Vec::new(),
         depth: 0,
         inherited: None,
     };
-    let pb = Path::new("/pb");
+    let pb = absent("/pb");
+    let pb = pb.as_path();
     assert_eq!(
         search_paths(&role, pb, "files", "a.txt"),
         [
@@ -22,23 +24,27 @@ fn a_file_is_searched_where_the_reference_searches() {
             "/pb/files/a.txt",
             "/pb/a.txt",
         ]
-        .map(PathBuf::from)
+        .map(absent)
     );
     let play = Origin {
-        file_dir: PathBuf::from("/pb"),
+        file_dir: absent("/pb"),
         ..Origin::default()
     };
     assert_eq!(
         search_paths(&play, pb, "files", "files/a.txt"),
-        ["/pb/files/a.txt", "/pb/files/a.txt"].map(PathBuf::from)
+        ["/pb/files/a.txt", "/pb/files/a.txt"].map(absent)
     );
     assert_eq!(
         search_paths(&play, pb, "files", "/etc/a.txt"),
-        [PathBuf::from("/etc/a.txt")]
+        [PathBuf::from(native("/etc/a.txt"))]
     );
     assert_eq!(
         not_found("a.txt", &search_paths(&play, pb, "files", "a.txt")),
-        "Could not find or access 'a.txt'\nSearched in:\n\t/pb/files/a.txt\n\t/pb/a.txt\n\t/pb/files/a.txt\n\t/pb/a.txt on the Ansible Controller."
+        format!(
+            "Could not find or access 'a.txt'\nSearched in:\n\t{0}\n\t{1}\n\t{0}\n\t{1} on the Ansible Controller.",
+            absent("/pb/files/a.txt").display(),
+            absent("/pb/a.txt").display()
+        )
     );
 }
 

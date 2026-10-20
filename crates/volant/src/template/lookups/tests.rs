@@ -222,8 +222,15 @@ impl Dir {
         self
     }
 
+    /// The pattern for `glob` in this directory. On Windows each `\` is doubled: in the text of a
+    /// template it is an escape.
     fn pattern(&self, glob: &str) -> String {
-        format!("{}/{glob}", self.path.display())
+        let dir = self.path.display().to_string();
+        if cfg!(windows) {
+            format!("{}\\\\{glob}", dir.replace('\\', "\\\\"))
+        } else {
+            format!("{dir}/{glob}")
+        }
     }
 
     /// The full paths of `names`, in the order the directory listing gives them: the order
@@ -345,7 +352,8 @@ fn fileglob_prefers_files_over_the_entry_itself() {
             .unwrap(),
         json!(
             role.role()
-                .join("files/only-in-files.conf")
+                .join("files")
+                .join("only-in-files.conf")
                 .display()
                 .to_string()
         )
@@ -358,7 +366,13 @@ fn fileglob_prefers_files_over_the_entry_itself() {
     assert_eq!(
         t.render("{{ lookup('fileglob', 'both.conf') }}", &vars)
             .unwrap(),
-        json!(role.role().join("files/both.conf").display().to_string())
+        json!(
+            role.role()
+                .join("files")
+                .join("both.conf")
+                .display()
+                .to_string()
+        )
     );
 }
 
@@ -403,7 +417,13 @@ fn fileglob_answers_under_its_ansible_builtin_alias_too() {
             &role.vars()
         )
         .unwrap(),
-        json!(role.role().join("files/x.conf").display().to_string())
+        json!(
+            role.role()
+                .join("files")
+                .join("x.conf")
+                .display()
+                .to_string()
+        )
     );
 }
 
@@ -416,7 +436,12 @@ fn first_found_tries_each_name_against_the_search_path_only() {
         .write("role/templates/snip.j2", "x");
     let t = templar(&role.dir);
     let vars = role.vars();
-    let found = role.role().join("files/second.txt").display().to_string();
+    let found = role
+        .role()
+        .join("files")
+        .join("second.txt")
+        .display()
+        .to_string();
     let r = |text: &str| t.render(text, &vars);
     let not_found = |text: &str| {
         let err = r(text).unwrap_err().0;
@@ -448,7 +473,9 @@ fn first_found_tries_each_name_against_the_search_path_only() {
     // An absolute name is taken as it stands, and `,` `;` split a name list.
     assert_eq!(
         r(&format!(
-            "{{{{ lookup('first_found', 'nope.txt;{found}') }}}}"
+            "{{{{ lookup('first_found', 'nope.txt;{}') }}}}",
+            // A `\` in the text of a template is an escape.
+            found.replace('\\', "\\\\")
         ))
         .unwrap(),
         json!(found)
@@ -463,7 +490,12 @@ fn first_found_joins_the_paths_keyword_and_a_mapping_resets_the_options() {
     role.write("role/files/second.txt", "2");
     let t = templar(&role.dir);
     let vars = role.vars();
-    let found = role.role().join("files/second.txt").display().to_string();
+    let found = role
+        .role()
+        .join("files")
+        .join("second.txt")
+        .display()
+        .to_string();
     assert_eq!(
         t.render(
             "{{ lookup('first_found', 'second.txt', paths=['files']) }}",
@@ -550,7 +582,12 @@ fn a_template_lookup_sets_the_template_variables() {
         "{{ ansible_managed | comment }}\n{{ template_path }} {{ template_fullpath }}\n",
     );
     let t = templar(&role.dir);
-    let full = role.role().join("templates/m.j2").display().to_string();
+    let full = role
+        .role()
+        .join("templates")
+        .join("m.j2")
+        .display()
+        .to_string();
     assert_eq!(
         t.render("{{ lookup('template', 'm.j2') }}", &role.vars())
             .unwrap(),

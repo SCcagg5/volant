@@ -195,7 +195,11 @@ fn a_host_value_reaches_the_rendered_file_as_text() {
     );
     assert!(!marker.exists(), "the host's lookup ran on the controller");
 
-    std::fs::write(dir.join("templates/author.j2"), format!("{payload}\n")).unwrap();
+    std::fs::write(
+        dir.join("templates").join("author.j2"),
+        format!("{payload}\n"),
+    )
+    .unwrap();
     let mut plugin = start_plain(&dir, json!({"src": "author.j2", "dest": "/tmp/motd"}));
     sent(plugin.as_mut());
     assert!(marker.exists(), "the author's own lookup runs");
@@ -207,7 +211,10 @@ fn a_host_value_reaches_the_rendered_file_as_text() {
 fn a_template_a_host_named_is_never_read() {
     let dir = with_template("secret.j2", "secret\n");
     let untrusted: BTreeSet<String> = ["src".to_string()].into();
-    for named in [dir.join("templates/secret.j2"), dir.join("no-such.j2")] {
+    for named in [
+        dir.join("templates").join("secret.j2"),
+        dir.join("no-such.j2"),
+    ] {
         let args = json!({"src": named.display().to_string(), "dest": "/tmp/x"});
         let mut plugin = start_in(&dir, args, &untrusted, &HostVars::default());
         assert_eq!(
@@ -325,7 +332,7 @@ const OPTS: &str = "top\n  {% if true %}\n  in\n  {% endif %}\npath={{ template_
 #[test]
 fn the_options_and_variables_are_the_reference_s() {
     let dir = with_template("opts.j2", OPTS);
-    let full = dir.join("templates/opts.j2").display().to_string();
+    let full = dir.join("templates").join("opts.j2").display().to_string();
     let tail = |dest: &str| format!("path=opts.j2 dest={dest}\nfull={full}\n");
     for (extra, want) in [
         (json!({}), format!("top\n    in\n  {}", tail("/tmp/o"))),
@@ -417,7 +424,7 @@ fn ansible_managed_is_set_only_when_absent() {
 fn copy_gets_the_template_s_name_and_none_of_its_options() {
     use std::os::unix::fs::PermissionsExt;
     let dir = with_template("opts.j2", "x\n");
-    let path = dir.join("templates/opts.j2");
+    let path = dir.join("templates").join("opts.j2");
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
     let args = json!({"src": "opts.j2", "dest": "/tmp/o", "mode": "preserve", "owner": "root",
         "trim_blocks": true, "lstrip_blocks": false, "newline_sequence": "\\n",
@@ -437,13 +444,13 @@ fn copy_gets_the_template_s_name_and_none_of_its_options() {
 #[expect(clippy::too_many_lines)]
 fn what_cannot_be_rendered_is_refused_before_the_host_is_asked() {
     let dir = with_template("t.j2", "x\n");
-    std::fs::write(dir.join("templates/undefined.j2"), "{{ nope }}\n").unwrap();
+    std::fs::write(dir.join("templates").join("undefined.j2"), "{{ nope }}\n").unwrap();
     std::fs::write(
-        dir.join("templates/include.j2"),
+        dir.join("templates").join("include.j2"),
         "{% include 'other.j2' %}\n",
     )
     .unwrap();
-    std::fs::write(dir.join("templates/latin.j2"), b"x\xe9\n").unwrap();
+    std::fs::write(dir.join("templates").join("latin.j2"), b"x\xe9\n").unwrap();
     let searched = search_paths(
         &crate::compile::Origin {
             file_dir: dir.to_path_buf(),
@@ -476,7 +483,7 @@ fn what_cannot_be_rendered_is_refused_before_the_host_is_asked() {
             json!({"src": "latin.j2", "dest": "/x"}),
             format!(
                 "could not read src={} as utf-8",
-                dir.join("templates/latin.j2").display()
+                dir.join("templates").join("latin.j2").display()
             ),
         ),
     ];

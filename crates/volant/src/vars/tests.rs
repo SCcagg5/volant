@@ -37,10 +37,10 @@ fn tree() -> tempfile::TempDir {
 }
 
 fn store(dir: &Path) -> (Inventory, VarStore) {
-    let inv = Inventory::load(&dir.join("inventory/hosts.ini")).unwrap();
+    let inv = Inventory::load(&dir.join("inventory").join("hosts.ini")).unwrap();
     let store = VarStore::new(
         &inv,
-        Some(&dir.join("inventory/hosts.ini")),
+        Some(&dir.join("inventory").join("hosts.ini")),
         &dir.join("play"),
         Map::new(),
     )
@@ -90,11 +90,11 @@ fn directory_and_run_layers_stack_in_the_reference_order() {
     {
         let tmp = tree();
         let dir = tmp.path();
-        let inv = Inventory::load(&dir.join("inventory/hosts.ini")).unwrap();
+        let inv = Inventory::load(&dir.join("inventory").join("hosts.ini")).unwrap();
         let extra: Map<String, Value> = json!({"layer": "extra"}).as_object().unwrap().clone();
         let mut store = VarStore::new(
             &inv,
-            Some(&dir.join("inventory/hosts.ini")),
+            Some(&dir.join("inventory").join("hosts.ini")),
             &dir.join("play"),
             extra,
         )
@@ -350,7 +350,12 @@ fn the_magic_variables_follow_the_batch_and_the_play() {
         );
         assert_eq!(
             v["inventory_file"],
-            json!(dir.join("inventory/hosts.ini").display().to_string())
+            json!(
+                dir.join("inventory")
+                    .join("hosts.ini")
+                    .display()
+                    .to_string()
+            )
         );
         assert_eq!(v["omit"], json!(omit_token()));
         assert_eq!(v["ansible_check_mode"], json!(false));
@@ -434,10 +439,10 @@ fn hostvars_answers_for_every_spelling_of_the_controller(
         "inventory/hosts.ini",
         &format!("[web]\nweb1\n{listed}"),
     );
-    let inv = Inventory::load(&dir.join("inventory/hosts.ini")).unwrap();
+    let inv = Inventory::load(&dir.join("inventory").join("hosts.ini")).unwrap();
     let mut store = VarStore::new(
         &inv,
-        Some(&dir.join("inventory/hosts.ini")),
+        Some(&dir.join("inventory").join("hosts.ini")),
         &dir.join("play"),
         Map::new(),
     )
@@ -474,10 +479,10 @@ fn the_implicit_hosts_interpreter_is_looked_up_when_its_entry_is_read(
     if let Some(text) = host_file {
         write(dir, "inventory/host_vars/localhost.yml", text);
     }
-    let inv = Inventory::load(&dir.join("inventory/hosts.ini")).unwrap();
+    let inv = Inventory::load(&dir.join("inventory").join("hosts.ini")).unwrap();
     let mut store = VarStore::new(
         &inv,
-        Some(&dir.join("inventory/hosts.ini")),
+        Some(&dir.join("inventory").join("hosts.ini")),
         &dir.join("play"),
         Map::new(),
     )
@@ -512,7 +517,7 @@ fn the_controller_s_text_is_data_under_every_spelling(
         "inventory/hosts.ini",
         &format!("[web]\nweb1\n{listed}"),
     );
-    let inv = Inventory::load(&dir.join("inventory/hosts.ini")).unwrap();
+    let inv = Inventory::load(&dir.join("inventory").join("hosts.ini")).unwrap();
     let mut store = VarStore::new(&inv, None, &dir.join("play"), Map::new()).unwrap();
     store.set_untrusted_fact(ran_as, "r", json!({"stdout": "text"}));
     let held = store.untrusted_hosts();
@@ -532,7 +537,7 @@ fn a_spelling_of_the_controller_follows_its_host() {
     let tmp = scratch();
     let dir = tmp.path();
     write(dir, "inventory/hosts.ini", "[web]\nweb1\nlocalhost\n");
-    let inv = Inventory::load(&dir.join("inventory/hosts.ini")).unwrap();
+    let inv = Inventory::load(&dir.join("inventory").join("hosts.ini")).unwrap();
     let mut store = VarStore::new(&inv, None, &dir.join("play"), Map::new()).unwrap();
     assert!(store.hostvars_shared("web1")["::1"]["marker"].is_null());
     store.set_fact("localhost", "marker", json!("set"));
@@ -1025,10 +1030,10 @@ fn extra_vars_and_vars_files_are_read_or_refused_by_name() {
         let tmp = tree();
         let dir = tmp.path();
         write(dir, "play/group_vars/all.yml", "a: [1,\n");
-        let inv = Inventory::load(&dir.join("inventory/hosts.ini")).unwrap();
+        let inv = Inventory::load(&dir.join("inventory").join("hosts.ini")).unwrap();
         let err = VarStore::new(
             &inv,
-            Some(&dir.join("inventory/hosts.ini")),
+            Some(&dir.join("inventory").join("hosts.ini")),
             &dir.join("play"),
             Map::new(),
         )
@@ -1410,10 +1415,10 @@ fn the_implicit_localhost_runs_under_the_controller_python(
     for (rel, text) in files {
         write(dir, &format!("inventory/{rel}"), text);
     }
-    let inv = Inventory::load(&dir.join("inventory/hosts.ini")).unwrap();
+    let inv = Inventory::load(&dir.join("inventory").join("hosts.ini")).unwrap();
     let mut store = VarStore::new(
         &inv,
-        Some(&dir.join("inventory/hosts.ini")),
+        Some(&dir.join("inventory").join("hosts.ini")),
         &dir.join("play"),
         Map::new(),
     )
@@ -1439,14 +1444,14 @@ fn the_implicit_localhost_runs_under_the_controller_python(
 fn an_extra_var_beats_the_controller_python_of_the_implicit_localhost() {
     let tmp = tree();
     let dir = tmp.path();
-    let inv = Inventory::load(&dir.join("inventory/hosts.ini")).unwrap();
+    let inv = Inventory::load(&dir.join("inventory").join("hosts.ini")).unwrap();
     let extra = json!({"ansible_python_interpreter": "/e/python"})
         .as_object()
         .unwrap()
         .clone();
     let mut store = VarStore::new(
         &inv,
-        Some(&dir.join("inventory/hosts.ini")),
+        Some(&dir.join("inventory").join("hosts.ini")),
         &dir.join("play"),
         extra,
     )

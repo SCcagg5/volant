@@ -177,7 +177,12 @@ fn a_dest_a_host_named_is_written_inside_the_directories() {
     let (subs, result) = fetch_named(&dest, &dirs);
     assert_eq!(modules(&subs), ["stat", "slurp"], "{result}");
     assert_eq!(result["changed"], json!(true), "{result}");
-    let written = allowed.join("new/dir/probe-hostname/etc/one.txt");
+    let written = allowed
+        .join("new")
+        .join("dir")
+        .join("probe-hostname")
+        .join("etc")
+        .join("one.txt");
     assert_eq!(std::fs::read(written).unwrap(), b"x");
 }
 
@@ -321,10 +326,15 @@ fn a_src_that_climbs_out_of_dest_is_refused_and_nothing_is_written() {
     let dir = dir_guard.path().to_path_buf();
     let marker = dir.join("esc.txt");
     let dest = dir.join("fetched");
+    // The marker below the root, written with `/`: the path a host would name to climb to it.
+    let below_root: PathBuf = marker
+        .components()
+        .skip_while(|c| matches!(c, Component::Prefix(_) | Component::RootDir))
+        .collect();
     let climb = format!(
         "{}{}",
         "../".repeat(dest.components().count() + 8),
-        marker.display().to_string().trim_start_matches('/')
+        below_root.display().to_string().replace('\\', "/")
     );
     for escalated in [false, true] {
         let mut plugin = start_with(
@@ -430,7 +440,7 @@ fn a_symlink_inside_dest_never_redirects_the_write() {
     symlink(&outside, dest.join("probe-hostname")).unwrap();
     let deeper = dir.join("deeper");
     std::fs::create_dir_all(deeper.join("probe-hostname")).unwrap();
-    symlink(&outside, deeper.join("probe-hostname/etc")).unwrap();
+    symlink(&outside, deeper.join("probe-hostname").join("etc")).unwrap();
     let flat = dir.join("flat");
     std::fs::create_dir_all(&flat).unwrap();
     symlink(outside.join("target.txt"), flat.join("one.txt")).unwrap();
@@ -442,7 +452,7 @@ fn a_symlink_inside_dest_never_redirects_the_write() {
         ),
         (
             json!({"src": "/etc/one.txt", "dest": deeper.display().to_string()}),
-            deeper.join("probe-hostname/etc"),
+            deeper.join("probe-hostname").join("etc"),
         ),
         (
             json!({"src": "/etc/one.txt", "dest": format!("{}/", flat.display()), "flat": true}),
@@ -485,7 +495,12 @@ fn a_file_is_written_under_its_host_and_left_alone_once_there() {
     let data = b"{{ 1 + 1 }}\n";
     let sum = sha1_hex(data);
     let args = json!({"src": "/tmp/v/d/one.txt", "dest": dest.display().to_string()});
-    let file = dest.join("probe-hostname/tmp/v/d/one.txt");
+    let file = dest
+        .join("probe-hostname")
+        .join("tmp")
+        .join("v")
+        .join("d")
+        .join("one.txt");
 
     let mut plugin = start_plain(args.clone());
     let (subs, result) = drive(plugin.as_mut(), data, "/tmp/v/d/one.txt");
@@ -545,9 +560,12 @@ fn flat_writes_dest_or_the_name_inside_it() {
     let (_, result) = drive(plugin.as_mut(), b"one", "/tmp/v/d/one.txt");
     assert_eq!(
         result["dest"],
-        json!(dir.join("into/one.txt").display().to_string())
+        json!(dir.join("into").join("one.txt").display().to_string())
     );
-    assert_eq!(std::fs::read(dir.join("into/one.txt")).unwrap(), b"one");
+    assert_eq!(
+        std::fs::read(dir.join("into").join("one.txt")).unwrap(),
+        b"one"
+    );
 
     let mut plugin = start_plain(
         json!({"src": "/tmp/v/d/one.txt", "dest": dir.join("into").display().to_string(),
@@ -563,17 +581,17 @@ fn flat_writes_dest_or_the_name_inside_it() {
     assert!(dir.join("into").is_dir());
 
     // With the `/`, a name inside it that is itself a directory, in the reference's words.
-    std::fs::create_dir_all(dir.join("into/sub.d")).unwrap();
+    std::fs::create_dir_all(dir.join("into").join("sub.d")).unwrap();
     let mut plugin = start_plain(json!({"src": "/etc/sub.d", "dest": into, "flat": true}));
     let (_, result) = drive(plugin.as_mut(), b"three", "/etc/sub.d");
     assert_eq!(
         result["msg"],
         json!(format!(
             "calculated dest '{}' is an existing directory, use another path that does not point to an existing directory",
-            dir.join("into/sub.d").display()
+            dir.join("into").join("sub.d").display()
         ))
     );
-    assert!(dir.join("into/sub.d").is_dir());
+    assert!(dir.join("into").join("sub.d").is_dir());
 }
 
 /// A source that is not there follows `fail_on_missing`, and a directory is refused.
@@ -665,7 +683,7 @@ fn a_checksum_mismatch_writes_nothing() {
     let dir_guard = scratch();
     let dir = dir_guard.path().to_path_buf();
     let dest = dir.join("fetched");
-    let file = dest.join("probe-hostname/one.txt");
+    let file = dest.join("probe-hostname").join("one.txt");
     for validate in [true, false] {
         let mut plugin = start_plain(json!({"src": "/one.txt",
             "dest": dest.display().to_string(), "validate_checksum": validate}));
@@ -697,7 +715,7 @@ fn a_failed_write_leaves_no_temporary_file() {
     let dir_guard = scratch();
     let dir = dir_guard.path().to_path_buf();
     let dest = dir.join("fetched");
-    let file = dest.join("probe-hostname/one.txt");
+    let file = dest.join("probe-hostname").join("one.txt");
     std::fs::create_dir_all(&file).unwrap();
     let mut plugin = start_plain(json!({"src": "/one.txt", "dest": dest.display().to_string()}));
     let (_, result) = drive(plugin.as_mut(), b"x", "/one.txt");
@@ -835,13 +853,20 @@ fn missing_or_mistyped_arguments_are_refused() {
 /// up.
 #[test]
 fn a_path_is_normalised_without_the_file_system() {
-    assert_eq!(normalise(Path::new("/a/./b//../c")), Path::new("/a/c"));
-    assert_eq!(normalise(Path::new("/a/../../../x")), Path::new("/x"));
-    assert_eq!(normalise(Path::new("a/../../x")), Path::new("../x"));
-    let pb = Path::new("/pb");
-    assert_eq!(absolute("out", pb), Path::new("/pb/out"));
-    assert_eq!(absolute("/abs", pb), Path::new("/abs"));
-    let home = PathBuf::from(std::env::var_os("HOME").expect("HOME is set"));
-    assert_eq!(absolute("~/.kube/config", pb), home.join(".kube/config"));
-    assert_eq!(absolute("~", pb), home);
+    use crate::testing::{absent, native};
+    assert_eq!(normalise(&absent("/a/./b//../c")), absent("/a/c"));
+    assert_eq!(normalise(&absent("/a/../../../x")), absent("/x"));
+    assert_eq!(
+        normalise(Path::new(&native("a/../../x"))),
+        Path::new(&native("../x"))
+    );
+    let pb = absent("/pb");
+    assert_eq!(absolute("out", &pb), absent("/pb/out"));
+    assert_eq!(absolute("/abs", &pb), absent("/abs"));
+    let home = crate::locations::home().expect("the home directory is set");
+    assert_eq!(
+        absolute("~/.kube/config", &pb),
+        home.join(".kube").join("config")
+    );
+    assert_eq!(absolute("~", &pb), home);
 }

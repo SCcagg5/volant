@@ -18,12 +18,48 @@ pub(crate) fn scratch() -> tempfile::TempDir {
     tempfile::tempdir().expect("a scratch directory")
 }
 
-/// `text` written at `rel` under `dir`, parents created.
+/// `text` written at `rel` under `dir`, parents created. `rel` is written with `/` and joined
+/// with the separator of the platform.
 pub(crate) fn write(dir: &Path, rel: &str, text: &str) -> PathBuf {
-    let path = dir.join(rel);
+    let path = dir.join(native(rel));
     std::fs::create_dir_all(path.parent().expect("a parent")).expect("the parent directory");
     std::fs::write(&path, text).expect("the fixture file");
     path
+}
+
+/// `text` as this platform writes a path: the `/` of a path typed in a test is `\` on Windows.
+pub(crate) fn native(text: &str) -> String {
+    if cfg!(windows) {
+        text.replace('/', "\\")
+    } else {
+        text.to_string()
+    }
+}
+
+/// `text` with each `\dir\..` folded away on Windows, which writes a path it made absolute
+/// without the `..` it was given. Unix keeps them, and so does this on Unix.
+pub(crate) fn folded(text: &str) -> String {
+    let mut text = text.to_string();
+    if cfg!(windows) {
+        let fold = regex::Regex::new(r"\\[^\\']+\\\.\.").expect("a pattern");
+        loop {
+            let next = fold.replace(&text, "").into_owned();
+            if next == text {
+                break;
+            }
+            text = next;
+        }
+    }
+    text
+}
+
+/// An absolute path on this platform that no test makes: `/srv/a` is `C:\srv\a` on Windows.
+pub(crate) fn absent(unix: &str) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(format!("C:{}", native(unix)))
+    } else {
+        PathBuf::from(unix)
+    }
 }
 
 pub(crate) fn templar() -> Templar {

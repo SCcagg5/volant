@@ -515,9 +515,11 @@ fn an_undefined_loop_waits_for_the_when() {
 /// A role's task carries its role path and search path, and a host's facts never choose them.
 #[test]
 fn the_role_path_and_search_path_are_the_engine_s_own() {
+    use crate::testing::absent;
+    let at = |path: &str| absent(path).display().to_string();
     {
-        let play = PathBuf::from("/srv/play");
-        let role = play.join("roles/probe");
+        let play = absent("/srv/play");
+        let role = play.join("roles").join("probe");
         let store = store_at(&play);
         store.lock().unwrap().set_untrusted_fact(
             "h1",
@@ -535,13 +537,13 @@ fn the_role_path_and_search_path_are_the_engine_s_own() {
             },
         );
         let vars = &prepared(&in_role, &store).unwrap()[0].vars;
-        assert_eq!(vars.map["role_path"], json!("/srv/play/roles/probe"));
+        assert_eq!(vars.map["role_path"], json!(at("/srv/play/roles/probe")));
         assert_eq!(
             vars.map["ansible_search_path"],
             json!([
-                "/srv/play/roles/probe",
-                "/srv/play/roles/probe/tasks",
-                "/srv/play"
+                at("/srv/play/roles/probe"),
+                at("/srv/play/roles/probe/tasks"),
+                at("/srv/play")
             ])
         );
         assert!(!vars.untrusted.contains("ansible_search_path"));
@@ -558,12 +560,12 @@ fn the_role_path_and_search_path_are_the_engine_s_own() {
             },
         );
         let vars = &prepared(&in_play, &store).unwrap()[0].vars;
-        assert_eq!(vars.map["ansible_search_path"], json!(["/srv/play"]));
+        assert_eq!(vars.map["ansible_search_path"], json!([at("/srv/play")]));
         assert!(!vars.map.contains_key("role_path"));
     }
     {
-        let play = PathBuf::from("/srv/play");
-        let role = play.join("roles/probe");
+        let play = absent("/srv/play");
+        let role = play.join("roles").join("probe");
         let store = store_at(&play);
         store.lock().unwrap().gather_facts(
             "h1",
@@ -582,19 +584,22 @@ fn the_role_path_and_search_path_are_the_engine_s_own() {
             },
         );
         let vars = &prepared(&in_role, &store).unwrap()[0].vars;
-        assert_eq!(vars.get("role_path"), Some(&json!("/srv/play/roles/probe")));
+        assert_eq!(
+            vars.get("role_path"),
+            Some(&json!(at("/srv/play/roles/probe")))
+        );
         assert_eq!(
             vars.get("ansible_search_path"),
             Some(&json!([
-                "/srv/play/roles/probe",
-                "/srv/play/roles/probe/tasks",
-                "/srv/play"
+                at("/srv/play/roles/probe"),
+                at("/srv/play/roles/probe/tasks"),
+                at("/srv/play")
             ]))
         );
         let templar = Templar::new(play.clone());
         assert_eq!(
             templar.render("{{ role_path }}", vars).unwrap(),
-            json!("/srv/play/roles/probe"),
+            json!(at("/srv/play/roles/probe")),
             "a template reads the engine's value too"
         );
         assert!(!vars.untrusted.contains("role_path"));
@@ -606,9 +611,10 @@ fn the_role_path_and_search_path_are_the_engine_s_own() {
 fn a_tasks_own_vars_resolve_with_the_role_s_search_path_already_in_place() {
     let play_guard = scratch();
     let play = play_guard.path().to_path_buf();
-    let role = play.join("roles/probe");
+    let role = play.join("roles").join("probe");
     std::fs::create_dir_all(role.join("templates")).expect("role dir");
-    std::fs::write(role.join("templates/t.j2"), "{{ '{{ 1 + 1 }}' }}").expect("template file");
+    std::fs::write(role.join("templates").join("t.j2"), "{{ '{{ 1 + 1 }}' }}")
+        .expect("template file");
 
     let store = store_at(&play);
     let mut t = task("command");
@@ -1034,10 +1040,16 @@ fn with_first_found_walks_the_file_it_found_and_nothing_under_skip() {
     assert_eq!(step.task.loop_with.as_deref(), Some("first_found"));
 
     assert_eq!(bound(&step, &store).unwrap(), []);
-    let plain = write(dir.path(), "k3s", "x").display().to_string();
-    assert_eq!(bound(&step, &store).unwrap(), [(json!(plain), false)]);
-    let arch = write(dir.path(), "k3s-arm64", "x").display().to_string();
-    assert_eq!(bound(&step, &store).unwrap(), [(json!(arch), false)]);
+    let plain = write(dir.path(), "k3s", "x");
+    assert_eq!(
+        bound(&step, &store).unwrap(),
+        [(json!(plain.display().to_string()), false)]
+    );
+    let arch = write(dir.path(), "k3s-arm64", "x");
+    assert_eq!(
+        bound(&step, &store).unwrap(),
+        [(json!(arch.display().to_string()), false)]
+    );
 
     std::fs::remove_file(&arch).expect("the file goes");
     std::fs::remove_file(&plain).expect("the file goes");
@@ -1094,7 +1106,7 @@ fn with_fileglob_walks_every_match_and_one_match_is_a_list_of_one() {
 #[test]
 fn an_include_over_with_first_found_skips_undefined_terms_and_keeps_the_host_s_choice_as_data() {
     let dir = scratch();
-    let role = dir.path().join("roles/raspberrypi");
+    let role = dir.path().join("roles").join("raspberrypi");
     let default = write(dir.path(), "roles/raspberrypi/tasks/setup/default.yml", "x")
         .display()
         .to_string();
@@ -1136,7 +1148,7 @@ fn an_include_over_with_first_found_skips_undefined_terms_and_keeps_the_host_s_c
 #[test]
 fn with_first_found_searches_the_directory_its_action_names() {
     let dir = scratch();
-    let role = dir.path().join("roles/probe");
+    let role = dir.path().join("roles").join("probe");
     let in_role = || Origin {
         file_dir: role.join("tasks"),
         role_dir: Some(role.clone()),

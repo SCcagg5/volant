@@ -328,7 +328,14 @@ fn check_from(sub: &str, from: &str, want: Result<&str, &str>) {
         }
         Err(refusal) => {
             let err = loaded.expect_err("the name must be refused");
-            assert_eq!(format!("{err:#}"), refusal.replace("{root}", &root));
+            let got = format!("{err:#}");
+            if refusal.contains("{root}") {
+                // Windows folds the `..` of a path it makes absolute, and writes it with `\`.
+                let want = crate::testing::native(refusal).replace("{root}", &root);
+                assert_eq!(crate::testing::folded(&got), crate::testing::folded(&want));
+            } else {
+                assert_eq!(got, refusal);
+            }
         }
     }
 }

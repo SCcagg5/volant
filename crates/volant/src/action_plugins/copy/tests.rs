@@ -338,7 +338,7 @@ fn force_false_leaves_an_existing_file_alone() {
     assert_eq!(
         result,
         json!({"changed": false, "dest": "/tmp/v/hello.txt",
-               "src": dir.join("files/hello.txt").display().to_string()})
+               "src": dir.join("files").join("hello.txt").display().to_string()})
     );
 }
 
@@ -462,9 +462,9 @@ fn what_cannot_be_copied_is_refused_before_the_host_is_asked() {
                 not_found(
                     "nope.txt",
                     &[
-                        dir.join("files/nope.txt"),
+                        dir.join("files").join("nope.txt"),
                         dir.join("nope.txt"),
-                        dir.join("files/nope.txt"),
+                        dir.join("files").join("nope.txt"),
                         dir.join("nope.txt"),
                     ]
                 )

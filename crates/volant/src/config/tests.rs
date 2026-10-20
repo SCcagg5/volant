@@ -633,8 +633,49 @@ fn volant_host_named_paths_in_the_environment_sets_the_mode() {
     );
 }
 
-/// `[volant] host_named_dest_dirs` is a colon-separated list of absolute directories, empty when
-/// absent, and refuses any other entry with the key, the value and the entry.
+/// A list of directories written for Unix, in the form of this platform. On Windows
+/// `/srv/a:/srv/b` is `C:\srv\a;C:\srv\b`, and an entry that does not start with `/` stays as
+/// it is.
+fn dirs_of(list: &str) -> String {
+    if !cfg!(windows) {
+        return list.to_string();
+    }
+    list.split(':')
+        .map(|entry| match entry.trim() {
+            rooted if rooted.starts_with('/') => format!("C:{}", rooted.replace('/', "\\")),
+            other => other.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
+/// The `host_named_dest_dirs` lines of `text` through [`dirs_of`].
+fn ini_of(text: &str) -> String {
+    text.lines()
+        .map(|line| match line.strip_prefix("host_named_dest_dirs =") {
+            Some(list) => format!("host_named_dest_dirs = {}\n", dirs_of(list)),
+            None => format!("{line}\n"),
+        })
+        .collect()
+}
+
+/// An error text about directories, with the list word and the quoted paths of this platform.
+fn says_of(says: &str) -> String {
+    if !cfg!(windows) {
+        return says.to_string();
+    }
+    let rooted = regex::Regex::new(r"'(/[^']*)'").expect("a pattern");
+    rooted
+        .replace_all(
+            &says.replace("colon-", "semicolon-"),
+            |found: &regex::Captures<'_>| format!("'{}'", dirs_of(&found[1])),
+        )
+        .into_owned()
+}
+
+/// `[volant] host_named_dest_dirs` is a colon-separated list of absolute directories (semicolon-
+/// separated on Windows), empty when absent, and refuses any other entry with the key, the value
+/// and the entry.
 #[rstest::rstest]
 #[case::absent("[defaults]\nforks = 3\n", Ok(vec![]))]
 #[case::one("[volant]\nhost_named_dest_dirs = /srv/fetch\n", Ok(vec!["/srv/fetch"]))]
@@ -670,16 +711,19 @@ fn the_volant_section_names_the_directories_a_host_named_dest_may_use(
     #[case] text: &str,
     #[case] expected: Result<Vec<&str>, &str>,
 ) {
-    match (parse(text, Path::new("/base"), "ansible.cfg"), expected) {
+    match (
+        parse(&ini_of(text), Path::new("/base"), "ansible.cfg"),
+        expected,
+    ) {
         (Ok(config), Ok(dirs)) => {
-            let want: Vec<PathBuf> = dirs.into_iter().map(PathBuf::from).collect();
+            let want: Vec<PathBuf> = dirs.into_iter().map(|d| dirs_of(d).into()).collect();
             assert_eq!(config.host_named_dest_dirs, want);
         }
         (Err(err), Err(says)) => {
             assert_eq!(crate::stats::error_code(&err), 5, "{err:#}");
             let said = format!("{err:#}");
             assert!(said.contains("Config 'VOLANT_HOST_NAMED_DEST_DIRS' from 'ansible.cfg'"));
-            assert!(said.contains(says), "{said}");
+            assert!(said.contains(&says_of(says)), "{said}");
         }
         (got, expected) => panic!(
             "got {:?}, expected {expected:?}",
@@ -693,18 +737,22 @@ fn the_volant_section_names_the_directories_a_host_named_dest_may_use(
 fn volant_host_named_dest_dirs_in_the_environment_sets_the_list() {
     unsafe {
         std::env::set_var("ANSIBLE_CONFIG", "/nonexistent/volant/ansible.cfg");
-        std::env::set_var("VOLANT_HOST_NAMED_DEST_DIRS", "/srv/a:/srv/b");
+        std::env::set_var("VOLANT_HOST_NAMED_DEST_DIRS", dirs_of("/srv/a:/srv/b"));
     }
     assert_eq!(
         Config::load().unwrap().host_named_dest_dirs,
-        [PathBuf::from("/srv/a"), PathBuf::from("/srv/b")]
+        [
+            PathBuf::from(dirs_of("/srv/a")),
+            PathBuf::from(dirs_of("/srv/b"))
+        ]
     );
     unsafe { std::env::set_var("VOLANT_HOST_NAMED_DEST_DIRS", "rel") };
     let err = Config::load().unwrap_err();
     assert!(
-        format!("{err:#}").contains(
-            "Config 'VOLANT_HOST_NAMED_DEST_DIRS' from 'env: VOLANT_HOST_NAMED_DEST_DIRS' has an invalid value: 'rel'; expected a colon-separated list of absolute directories (entry 'rel' is not an absolute path)"
-        ),
+        format!("{err:#}").contains(&format!(
+            "Config 'VOLANT_HOST_NAMED_DEST_DIRS' from 'env: VOLANT_HOST_NAMED_DEST_DIRS' has an invalid value: 'rel'; expected a {}-separated list of absolute directories (entry 'rel' is not an absolute path)",
+            if cfg!(windows) { "semicolon" } else { "colon" }
+        )),
         "{err:#}"
     );
     unsafe { std::env::remove_var("VOLANT_HOST_NAMED_DEST_DIRS") };

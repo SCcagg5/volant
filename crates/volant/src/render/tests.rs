@@ -53,8 +53,11 @@ fn the_playbook_and_task_path_lines_show_at_vv(#[case] level: u8, #[case] shown:
     });
     let lines: Vec<&str> = out.lines().filter(|l| !l.is_empty()).collect();
     assert_eq!(lines.len(), shown.len(), "{out}");
+    // Windows makes `/abs/p.yml` absolute with a drive.
+    let abs = std::path::absolute("/abs/p.yml").unwrap();
     for (line, start) in lines.iter().zip(shown) {
-        assert!(line.starts_with(start), "{line}");
+        let start = start.replace("/abs/p.yml", &abs.display().to_string());
+        assert!(line.starts_with(&start), "{line}");
     }
 }
 
