@@ -57,6 +57,23 @@ jobs:
       # Includes `reference.rs`: the template, inventory and scenario goldens, which need no host.
       - run: cargo nextest run --workspace --no-tests=fail
 
+  # The controller builds for Windows (x86_64 and arm64): this keeps a Unix-only call, or a lint
+  # that only fires there, out of `main`. It runs no tests; the test suite is not portable yet.
+  windows:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
+      - run: cargo clippy --workspace --all-targets --all-features
+      - run: cargo build --workspace
+
   # A refactor or perf pull request changes no behaviour: no golden or snapshot moves, and the
   # list of tests is the one the merge base has, so a test is neither dropped nor renamed.
   refactor-guard:
