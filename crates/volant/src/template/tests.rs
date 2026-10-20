@@ -1709,7 +1709,7 @@ fn number(text: &str) -> Value {
 }
 
 /// Integers wider than 64 bits keep every digit through a template, as Python's do; arithmetic
-/// works up to 128 bits and a wider operand is refused by name.
+/// works up to 128 bits, a wider operand is refused by name, and an error names the type `int`.
 #[test]
 fn integers_of_any_width_keep_their_digits_through_templates() {
     let (u64_end, i128_end, past) = (
@@ -1724,6 +1724,7 @@ fn integers_of_any_width_keep_their_digits_through_templates() {
         ("c".to_string(), number(past)),
         ("d".to_string(), number(&format!("-{wide}"))),
         ("list".to_string(), number(&format!("[{past}, 1.5, 7]"))),
+        ("long".to_string(), json!("9".repeat(4301))),
     ])));
     let t = templar();
     for (text, want) in [
@@ -1766,11 +1767,24 @@ fn integers_of_any_width_keep_their_digits_through_templates() {
             json!(true),
         ),
         ("{{ (list | to_json | from_json)[0] == c }}", json!(true)),
+        ("{{ true | int }}", json!(1)),
+        ("{{ [c] | int(7) }}", json!(7)),
+        ("{{ long | int(7) }}", json!(7)),
+        ("{{ long[1:] | int | string | length }}", json!(4300)),
     ] {
         assert_eq!(t.render(text, &vars), Ok(want), "{text}");
     }
-    let err = t.render("{{ c + 1 }}", &vars).unwrap_err();
-    assert!(err.0.contains("wider than 128 bits"), "{err}");
+    for (text, want) in [
+        ("{{ c + 1 }}", "wider than 128 bits"),
+        (
+            "{{ lookup('first_found', c) }}",
+            "A string, dict or list is required, not 'int'",
+        ),
+        ("{{ lookup('varnames', c) }}", "<class 'int'>"),
+    ] {
+        let err = t.render(text, &vars).unwrap_err();
+        assert!(err.0.contains(want), "{text}: {err}");
+    }
 }
 
 const ISO: &str = r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{6})?$";
