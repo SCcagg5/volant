@@ -1518,6 +1518,10 @@ fn user_control_options_are_left_alone() {
 /// The same review focus, for the operator's ssh configuration file: `ssh -G` reads it the way
 /// the connection will.
 #[tokio::test]
+#[cfg_attr(
+    windows,
+    ignore = "OpenSSH for Windows has no connection sharing (#609)"
+)]
 async fn a_control_path_in_the_ssh_configuration_is_left_alone() {
     let guard = scratch();
     let dir = guard.path().to_path_buf();
@@ -1546,6 +1550,10 @@ async fn a_control_path_in_the_ssh_configuration_is_left_alone() {
 /// What `ssh` resolves from its configuration goes into the socket name, so a changed
 /// `HostName` never rides the old master.
 #[tokio::test]
+#[cfg_attr(
+    windows,
+    ignore = "OpenSSH for Windows has no connection sharing (#609)"
+)]
 async fn a_host_moved_in_the_ssh_configuration_gets_a_new_socket() {
     let guard = scratch();
     let dir = guard.path().to_path_buf();

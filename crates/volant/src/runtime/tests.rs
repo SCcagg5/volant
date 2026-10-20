@@ -43,6 +43,10 @@ fn the_libc_is_read_from_ldd_then_the_loader(
 
 /// The built-in manifest pins the six triples, each with ansible-core and the host's among them.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "the managed runtime lives in WSL on Windows, so the manifest has no Windows triple (#614)"
+)]
 fn the_pinned_manifest_covers_every_triple() {
     let manifest = Manifest::pinned().unwrap();
     for triple in [
@@ -199,6 +203,10 @@ fn a_failed_download_leaves_nothing() {
 #[case::install_only("python/bin/python3", false, None)]
 #[case::other_layout("bin/python3", false, Some("holds no python/bin/python3"))]
 #[case::stale_interpreter("bin/python3", true, Some("is not empty"))]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn extract_finds_the_interpreter(
     #[case] member: &str,
     #[case] stale: bool,
@@ -376,6 +384,10 @@ exit {code}
 /// A `json.py` or `ansible.py` in the working directory does not decide the probe's answer, which
 /// `python -c` alone would let it do by putting that directory first on the module path.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn a_file_in_the_working_directory_is_not_imported_by_the_probe() {
     let tmp = scratch();
     fs::write(tmp.path().join("json.py"), "raise SystemExit(7)\n").unwrap();
@@ -392,6 +404,10 @@ fn a_file_in_the_working_directory_is_not_imported_by_the_probe() {
 /// The runtime's commands, `python -m ansible.cli.galaxy` among them, do not import a module from
 /// the working directory in place of the real one.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn the_runtimes_commands_do_not_import_from_the_working_directory() {
     let tmp = scratch();
     fs::write(tmp.path().join("json.py"), "raise SystemExit(7)\n").unwrap();

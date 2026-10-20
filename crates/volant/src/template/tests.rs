@@ -860,6 +860,10 @@ fn echo_helper() -> anyhow::Result<crate::python::PythonBuilder> {
     "{{ 'a' is x.y(k=range) }}",
     Err("test 'x.y' was given a Jinja object, which cannot be sent to the Python helper")
 )]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn what_the_helper_answers_reaches_the_template(
     #[case] helper: fn() -> anyhow::Result<crate::python::PythonBuilder>,
     #[case] text: &str,
@@ -883,6 +887,10 @@ fn an_undefined_value_given_to_a_test_is_an_undefined_read() {
 /// ansible-core resolves a filter's name before it looks at the value: an undefined value
 /// given to a filter nobody has fails as unknown, not as undefined.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn an_undefined_value_given_to_a_missing_filter_fails_as_unknown() {
     let (t, _) = bridged_templar(empty_helper);
     assert_eq!(
@@ -957,6 +965,10 @@ fn a_name_the_engine_lacks_goes_to_the_python_helper(
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn a_helper_that_dies_fails_the_render_and_every_later_one() {
     let (t, _) = bridged_templar(dying_helper);
     let text = "{{ 'v' | community.general.dict_kv('k') }}";

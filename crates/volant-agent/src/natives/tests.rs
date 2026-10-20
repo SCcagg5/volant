@@ -6,6 +6,10 @@ use super::*;
 
 /// The protocol's list of candidates and the agent's table name the same modules.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "the natives that read a Linux host are not built for Windows"
+)]
 fn every_candidate_has_a_native_and_every_native_is_a_candidate() {
     for name in NATIVE_CANDIDATES {
         assert!(find(name).is_some(), "{name} has no native");

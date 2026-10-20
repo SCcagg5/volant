@@ -869,6 +869,10 @@ fn the_blob_is_named_by_the_hash_of_the_zip_not_of_its_base64() {
 /// The helper's own self-check runs under any `python3`: the union merge refuses a byte
 /// conflict and the wrapper reads its fields.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn the_helper_refuses_a_byte_conflict_in_the_union() {
     let out = Command::new("python3")
         .args(["-c", HELPER, "--self-check"])
@@ -884,6 +888,10 @@ fn the_helper_refuses_a_byte_conflict_in_the_union() {
 /// A `json.py` in the working directory does not replace the real module in the helper, which
 /// imports the standard library first (`python -c` puts that directory first on the path).
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn the_helper_does_not_import_a_file_from_the_working_directory() {
     let tmp = scratch();
     std::fs::write(tmp.path().join("json.py"), "raise SystemExit(7)\n").unwrap();
@@ -903,6 +911,10 @@ fn the_helper_does_not_import_a_file_from_the_working_directory() {
 
 /// A `print()` anywhere in the helper lands on stderr, and stdout carries the frame alone.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn a_print_in_the_helper_never_reaches_the_frames() {
     use std::io::Write as _;
     const DRIVER: &str = "import sys\nns = {'__name__': 'helper'}\nexec(sys.argv[1], ns)\nns['union'] = lambda modules: (print('noise from a plugin loader'), {'zip_b64': ''})[1]\nns['main']()\n";
@@ -937,6 +949,10 @@ fn a_print_in_the_helper_never_reaches_the_frames() {
 /// A request and its answer over the helper's own pipes, which is the only place the two sides
 /// of the frame header meet.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn the_helper_answers_one_frame_over_its_own_pipes() {
     let mut builder = PythonBuilder::under("python3").expect("python3 is on PATH");
     match builder.union(&["ping".to_string()]) {
@@ -1007,6 +1023,10 @@ fn canned_under(
 
 /// A valid entry starts no helper and a stale one is rebuilt once; a union without its sources is not kept.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn a_valid_cache_starts_nothing_and_a_union_without_sources_is_not_kept() {
     {
         let root_guard = scratch();
@@ -1059,6 +1079,10 @@ fn a_valid_cache_starts_nothing_and_a_union_without_sources_is_not_kept() {
 
 /// An unwritable cache and a file others could write are warned about and the run goes on.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn a_cache_that_cannot_be_trusted_warns_and_the_run_goes_on() {
     {
         let root_guard = scratch();
@@ -1125,6 +1149,10 @@ fn a_cache_that_cannot_be_trusted_warns_and_the_run_goes_on() {
 
 /// A kept answer says a name is an action plugin, as a fresh one would.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn a_cache_hit_still_knows_a_collection_action_plugin() {
     let root_guard = scratch();
     let root = root_guard.path().to_path_buf();
@@ -1158,6 +1186,10 @@ fn a_cache_hit_still_knows_a_collection_action_plugin() {
 
 /// An entry is filed under the interpreter that built it and the executable that answered.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn an_entry_is_filed_only_under_the_interpreter_and_executable_that_built_it() {
     {
         let root_guard = scratch();

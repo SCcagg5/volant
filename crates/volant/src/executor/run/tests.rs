@@ -4663,6 +4663,10 @@ async fn socket_of(transport: &Transport) -> Option<Box<Path>> {
 /// `Relinker::relink` stops the host's master and reconnects under the `reboot` task's own
 /// `connect_timeout`, naming one socket both times.
 #[tokio::test]
+#[cfg_attr(
+    windows,
+    ignore = "OpenSSH for Windows has no connection sharing (#609)"
+)]
 async fn a_reboot_with_its_own_connect_timeout_stops_and_reopens_one_socket() {
     let kept = shared_to_h1(Path::new("/run/user/1000/volant-cm"));
     let socket = socket_of(&kept)

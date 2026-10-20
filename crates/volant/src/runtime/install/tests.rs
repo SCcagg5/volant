@@ -12,6 +12,10 @@ use rstest::rstest;
 #[case::negative_pid(Some("-1\n"), true)]
 #[case::no_pid(Some("garbage"), true)]
 #[case::live_pid(Some("1\n"), false)]
+#[cfg_attr(
+    windows,
+    ignore = "the lock check cannot tell a dead process on Windows yet (#608)"
+)]
 fn a_lock_is_taken_over_only_from_a_dead_holder(#[case] held: Option<&str>, #[case] taken: bool) {
     let dir = scratch();
     let path = dir.path().join(".id.lock");

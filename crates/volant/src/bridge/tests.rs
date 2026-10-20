@@ -83,6 +83,10 @@ fn names(list: &[&str]) -> Vec<String> {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn the_module_defaults_requests_read_the_helper_s_answers() {
     let bridge = bridge_with("defaults", &Arc::new(AtomicUsize::new(0)));
     let found = bridge
@@ -108,6 +112,10 @@ fn the_module_defaults_requests_read_the_helper_s_answers() {
 #[rstest]
 #[case::echo("echo")]
 #[case::items_that_are_not_names("bad_items")]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn module_defaults_answers_out_of_shape_are_refused(#[case] mode: &'static str) {
     let bridge = bridge_with(mode, &Arc::new(AtomicUsize::new(0)));
     let groups = bridge
@@ -125,6 +133,10 @@ fn module_defaults_answers_out_of_shape_are_refused(#[case] mode: &'static str) 
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn module_defaults_are_asked_about_once_and_refused_by_name() {
     use crate::collection::Resolved;
     use crate::playbook::PlayTask;
@@ -159,6 +171,10 @@ fn module_defaults_are_asked_about_once_and_refused_by_name() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn a_healthy_helper_answers_and_starts_once() {
     let starts = Arc::new(AtomicUsize::new(0));
     let bridge = bridge_with("echo", &starts);
@@ -171,6 +187,10 @@ fn a_healthy_helper_answers_and_starts_once() {
 #[case::wrong_id("wrong_id", "answered request 2 to request 1")]
 #[case::oversized_frame("oversized", "exceeds the 67108864 byte limit")]
 #[case::not_utf8("latin1", "not UTF-8")]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn a_helper_that_breaks_the_protocol_ends_the_bridge(
     #[case] mode: &'static str,
     #[case] said: &str,
@@ -184,6 +204,10 @@ fn a_helper_that_breaks_the_protocol_ends_the_bridge(
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn a_helper_killed_between_two_calls_fails_every_later_call() {
     let starts = Arc::new(AtomicUsize::new(0));
     let bridge = bridge_with("die_second", &starts);
@@ -210,6 +234,10 @@ fn a_helper_that_cannot_start_names_why_on_every_call() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn a_request_over_the_cap_is_refused_without_ending_the_bridge() {
     let starts = Arc::new(AtomicUsize::new(0));
     let bridge = bridge_with("echo", &starts);
@@ -263,6 +291,10 @@ fn answers(ask: &Ask) -> Reply {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn an_action_s_asks_are_answered_in_turn_and_its_helper_kept() {
     let starts = Arc::new(AtomicUsize::new(0));
     let bridge = bridge_with("asks", &starts);
@@ -292,6 +324,10 @@ fn an_action_s_asks_are_answered_in_turn_and_its_helper_kept() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn an_answer_over_the_cap_reaches_the_plugin_as_an_error() {
     let bridge = bridge_with("asks", &Arc::new(AtomicUsize::new(0)));
     let (_, ended) = act(&bridge, later(), |_| {
@@ -308,6 +344,10 @@ fn an_answer_over_the_cap_reaches_the_plugin_as_an_error() {
 #[case::oversized_frame("oversized", "exceeds the 67108864 byte limit")]
 #[case::ask_out_of_shape("bad_ask", "the mode is not a file mode")]
 #[case::still_running_at_the_deadline("silent", "was still running at the task's deadline")]
+#[cfg_attr(
+    windows,
+    ignore = "starts `python3` as the helper, which runs in WSL on Windows (#612)"
+)]
 fn an_action_whose_helper_fails_ends_it_and_the_next_starts_another(
     #[case] mode: &'static str,
     #[case] said: &str,
