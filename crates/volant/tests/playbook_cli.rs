@@ -7632,7 +7632,7 @@ fn an_inventory_name_with_template_syntax_stays_text(
     let inventory = format!("all:\n  hosts:\n    h1:\n      ansible_connection: local\n{names}");
     std::fs::write(dir.join("inv.yml"), inventory).expect("an inventory");
     let play = format!(
-        "- hosts: h1\n  gather_facts: false\n  vars:\n    a: \"{{{{ groups | list }}}}\"\n    b: \"{{{{ a | map('upper') | list }}}}\"\n    c: \"{{{{ hostvars | list }}}}\"\n    d: \"{{{{ group_names }}}}\"\n  tasks:\n{refresh}    - debug:\n        msg: \"a={{{{ a | to_json }}}} c={{{{ c | to_json }}}} d={{{{ d | to_json }}}}\"\n"
+        "- hosts: h1\n  gather_facts: false\n  vars:\n    a: \"{{{{ groups | list }}}}\"\n    b: \"{{{{ a | map('upper') | list }}}}\"\n    c: \"{{{{ hostvars | list }}}}\"\n    d: \"{{{{ group_names }}}}\"\n  tasks:\n{refresh}    - debug:\n        msg: \"a={{{{ a | to_json }}}} b={{{{ b | to_json }}}} c={{{{ c | to_json }}}} d={{{{ d | to_json }}}}\"\n"
     );
     std::fs::write(dir.join("pb.yml"), play).expect("the playbook");
     let out = volant_within(
@@ -7655,6 +7655,49 @@ fn an_inventory_name_with_template_syntax_stays_text(
     assert!(
         stdout.contains(shown),
         "{shown} is not shown as text:\n{stdout}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A name a host sent, read through `groups` and then through a filter by other variables, is text:
+/// the chain gives its words and runs nothing. The names of the inventory around it resolve.
+#[test]
+fn a_host_name_read_through_a_filter_stays_text() {
+    let (dir, marker) = trust_dir("filter-name", "h1 ansible_connection=local\n");
+    let play = format!(
+        "- hosts: h1\n  gather_facts: false\n  vars:\n    gk: \"{{{{ groups.all | list }}}}\"\n    up: \"{{{{ gk | map('upper') | list }}}}\"\n    first: \"{{{{ gk | sort | first }}}}\"\n    last: \"{{{{ gk | sort | last }}}}\"\n  tasks:\n    - command: cat {}\n      register: r\n    - add_host: {{name: \"{{{{ r.stdout }}}}\", ansible_connection: local}}\n    - debug:\n        msg: \"first={{{{ first }}}} up={{{{ up | length }}}} last={{{{ last }}}}\"\n",
+        dir.join("payload.txt").display()
+    );
+    let out = run_trust_playbook(&dir, &play);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !marker.exists(),
+        "a host name ran on the controller:\n{stdout}"
+    );
+    let payload = std::fs::read_to_string(dir.join("payload.txt")).expect("the payload");
+    assert!(
+        stdout.contains(&format!("first=h1 up=2 last={payload}")),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A group named from a value a host printed (`group_by`) leaves the variables that read `groups`
+/// resolving to the right value, through one variable and through two with a filter after them.
+#[test]
+fn a_group_named_from_a_host_value_reads_through_variables() {
+    let (dir, _) = trust_dir(
+        "filter-group-by",
+        "h1 ansible_connection=local\nh2 ansible_connection=local\n",
+    );
+    let play = "- hosts: all\n  gather_facts: false\n  tasks:\n    - command: echo Debian\n      register: family\n    - group_by: {key: \"os_{{ family.stdout }}\"}\n- hosts: h1\n  gather_facts: false\n  vars:\n    os: \"{{ groups['os_Debian'] | sort }}\"\n    os1: \"{{ os | list }}\"\n    os2: \"{{ os1 | map('upper') | list }}\"\n    names: \"{{ groups | list | sort | map('upper') | list }}\"\n  tasks:\n    - debug:\n        msg: \"{{ os2 | join(',') }} {{ names | join(',') }} {{ hostvars[os1 | first].inventory_hostname }}\"\n";
+    let out = run_trust_playbook(&dir, play);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("H1,H2 ALL,OS_DEBIAN,UNGROUPED h1"),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
