@@ -19,9 +19,29 @@ Volant reads the same `ansible.cfg` as `ansible-playbook`, and stops at the firs
 
 Volant skips `./ansible.cfg` when the working directory is writable by other users (mode bit `o+w`), as `ansible-playbook` does. Another local user could have put the file there. The sticky bit and the owner of the directory change nothing. Volant prints `[WARNING]: Ansible is being run in a world writable directory (...), ignoring it as an ansible.cfg source.` on standard error and continues with the next file. A file named by `ANSIBLE_CONFIG` is read whatever the mode of the working directory.
 
+On Windows the search is `ANSIBLE_CONFIG`, `.\ansible.cfg`, `%USERPROFILE%\.ansible.cfg` and `%PROGRAMDATA%\ansible\ansible.cfg`. A directory has no "writable by other users" bit there, so Volant does not skip `.\ansible.cfg`. See [Windows locations](#windows-locations).
+
 For each setting, the environment variable beats the file, and the command-line option beats both. Keys Volant does not use are ignored, as Ansible ignores the ones it does not use.
 
 A file that exists but cannot be read is skipped, and the run continues with the defaults. Volant prints a warning first, which Ansible does not: a file you wrote that the process cannot open deserves a line, and a warning does not change the exit code.
+
+## Windows locations
+
+On Windows, Volant does not read `HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME` or `/etc/ansible`. ansible-core does not run on Windows, so these places are Volant's own rule.
+
+| What | Linux and macOS | Windows |
+|---|---|---|
+| Home of the user, and `~` | `HOME` | `USERPROFILE`, then `HOMEDRIVE` and `HOMEPATH` together |
+| Agent cache and union cache | `$XDG_CACHE_HOME/volant`, else `~/.cache/volant` | `%LOCALAPPDATA%\volant\cache` |
+| Data directory | `$XDG_DATA_HOME/volant`, else `~/.local/share/volant` | `%LOCALAPPDATA%\volant` |
+| System directory | `/etc/ansible` | `%PROGRAMDATA%\ansible` |
+| Default inventory | `/etc/ansible/hosts` | `%PROGRAMDATA%\ansible\hosts` |
+| Default `roles_path` | `~/.ansible/roles:/usr/share/ansible/roles:/etc/ansible/roles` | `%USERPROFILE%\.ansible\roles;%PROGRAMDATA%\ansible\roles` |
+| Default `collections_path` | `~/.ansible/collections:/usr/share/ansible/collections` | `%USERPROFILE%\.ansible\collections;%PROGRAMDATA%\ansible\collections` |
+
+A setting that holds a list of paths (`roles_path`, `collections_path`, `--module-path`, `host_named_dest_dirs`) is split on `;` on Windows, because `C:\x:D:\y` is not a list. A `LOCALAPPDATA` that is not an absolute path is ignored, and the controller then keeps no cache. `PROGRAMDATA` falls back to `C:\ProgramData`.
+
+A path that names a place on a managed host (`dest`, `creates`, `chdir`) is a host path and keeps `/`. A path that names a controller file (`src` of `copy` and `template`, `dest` of `fetch`, `fileglob`) is read as the operating system reads it. On Windows both `/` and `\` separate its parts. A path with a root and no drive, such as `/etc/hosts`, counts as a path to a place, not as relative to a role or to the playbook.
 
 ## [defaults]
 

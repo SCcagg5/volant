@@ -44,7 +44,7 @@ One binary. The release `volant` carries the agents it uploads to your hosts, so
 | `volant` | The controller, the command you run. |
 | `volant-playbook` | The same controller under a name that reads like `ansible-playbook`. |
 
-On first use, the controller writes its agents to `~/.cache/volant/agents/<version>/`, or under `$XDG_CACHE_HOME` when it is set: the agent for your own machine, used by `ansible_connection=local`, and the ones it uploads to x86_64 and arm64 Linux hosts. Later runs reuse them, and a copy that does not match the agent built into the controller is written again.
+On first use, the controller writes its agents to `~/.cache/volant/agents/<version>/`, or under `$XDG_CACHE_HOME` when it is set (on Windows, `%LOCALAPPDATA%\volant\cache\agents\<version>\`, see [Windows locations](/reference/configuration/#windows-locations)): the agent for your own machine, used by `ansible_connection=local`, and the ones it uploads to x86_64 and arm64 Linux hosts. Later runs reuse them, and a copy that does not match the agent built into the controller is written again.
 
 ## What the machines need
 
