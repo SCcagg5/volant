@@ -232,6 +232,18 @@ fn banners_recap_and_status_lines() {
     1, Outcome::Ok, json!({"changed": false, "stdout": "x"}), None, Dump::No, false,
     "ok: [h] => {\"changed\": false, \"stdout\": \"x\"}\n"
 )]
+#[case::invocation_stays_off_an_ok_line_at_v(
+    1, Outcome::Ok, json!({"changed": false, "invocation": {"module_args": {"path": "/tmp/x"}}, "path": "/tmp/x"}), None, Dump::No, false,
+    "ok: [h] => {\"changed\": false, \"path\": \"/tmp/x\"}\n"
+)]
+#[case::invocation_stays_off_a_changed_item_at_vv(
+    2, Outcome::Changed, json!({"changed": true, "invocation": {"module_args": {"path": "/tmp/x"}}, "path": "/tmp/x"}), Some("one"), Dump::No, false,
+    "changed: [h] => (item=one) => {\"changed\": true, \"path\": \"/tmp/x\"}\n"
+)]
+#[case::invocation_stays_on_an_ok_line_at_vvv(
+    3, Outcome::Ok, json!({"changed": false, "invocation": {"module_args": {"path": "/tmp/x"}}}), None, Dump::No, false,
+    "ok: [h] => {\n    \"changed\": false,\n    \"invocation\": {\n        \"module_args\": {\n            \"path\": \"/tmp/x\"\n        }\n    }\n}\n"
+)]
 #[case::verbose_ok_does_not_say_it_did_not_fail(
     1, Outcome::Ok, json!({"changed": false, "failed": false, "ping": "pong"}), None, Dump::No, false,
     "ok: [h] => {\"changed\": false, \"ping\": \"pong\"}\n"
