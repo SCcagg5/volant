@@ -36,11 +36,13 @@ fn controller_python(want: &str) -> Result<PathBuf, String> {
         if let Some(venv) = std::env::var_os("VIRTUAL_ENV") {
             candidates.push(std::path::Path::new(&venv).join("bin/python"));
         }
+        // A machine with no `sh` has no `ansible-playbook` to find this way.
         let probe = std::process::Command::new("sh")
             .args(["-c", "command -v ansible-playbook"])
-            .output()
-            .expect("command -v runs");
-        let named = String::from_utf8_lossy(&probe.stdout).trim().to_string();
+            .output();
+        let named = probe
+            .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+            .unwrap_or_default();
         if !named.is_empty()
             && let Ok(real) = std::fs::canonicalize(&named)
             && let Some(bin) = real.parent()

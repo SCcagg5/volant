@@ -72,6 +72,14 @@ fn every_golden_case_matches_the_reference() {
             bridged += 1;
             continue;
         }
+        // A `pipe` lookup runs `sh -c`, which a Windows machine has not (#610).
+        if cfg!(not(unix))
+            && case["template"]
+                .as_str()
+                .is_some_and(|t| t.contains("'pipe'"))
+        {
+            continue;
+        }
         let mut vars: Map<String, Value> = case
             .get("vars")
             .and_then(Value::as_object)
@@ -336,6 +344,23 @@ impl Case {
         }
     }
 
+    /// Whether the scenario runs tasks, which `connection: local` sends to the agent of the
+    /// controller's own platform. A Windows build has no agent that gives the results a Linux
+    /// host gives, and a run that only lists, or checks the syntax, starts none.
+    fn needs_a_linux_userland(&self) -> bool {
+        const LISTS: [&str; 4] = [
+            "--list-tasks",
+            "--list-hosts",
+            "--list-tags",
+            "--syntax-check",
+        ];
+        cfg!(not(unix))
+            && self
+                .runs
+                .iter()
+                .any(|run| !run.iter().any(|arg| LISTS.contains(&arg.as_str())))
+    }
+
     /// The needs this machine does not meet, and the reference python when the case needs it.
     fn unmet(&self, name: &str) -> (Vec<String>, Option<PathBuf>) {
         let mut unmet = Vec::new();
@@ -507,6 +532,11 @@ fn a_scenario_matches_the_reference(#[files("tests/scenarios/*/case.yml")] case:
     let docs = yaml::load(&text, &case.display().to_string()).expect("case.yml parses");
     let doc = yaml::to_json(&docs[0]).expect("case.yml is JSON-shaped");
     let spec = Case::parse(&name, &doc);
+    if spec.needs_a_linux_userland() {
+        // Declined where there is none, and run as before everywhere else.
+        eprintln!("skipped: {name} needs a Linux userland, and Windows has none yet (#611)");
+        return;
+    }
     let (unmet, python) = spec.unmet(&name);
     if !unmet.is_empty() {
         let why = format!("{name} needs {}", unmet.join(", "));
@@ -665,6 +695,11 @@ fn inventory_sources_match_the_reference() {
     let cases = expected["sources"].as_object().unwrap();
     assert!(!cases.is_empty(), "no recorded inventory source case");
     for (name, case) in cases {
+        // An inventory script has no execute bit to read on Windows (#610).
+        let script = |s: &Value| s.as_str().is_some_and(|s| s.ends_with(".sh"));
+        if cfg!(not(unix)) && case["sources"].as_array().unwrap().iter().any(script) {
+            continue;
+        }
         let sources: Vec<Source> = case["sources"]
             .as_array()
             .unwrap()
@@ -751,6 +786,12 @@ fn inventory_sources_match_the_reference() {
             );
         }
         let stderr = stderr.replace(&shown_root, "<golden-tmp>");
+        // The recording has `/` all through; a path made on Windows has `\`.
+        let stderr = if cfg!(windows) {
+            stderr.replace('\\', "/")
+        } else {
+            stderr
+        };
         let rc = loaded.error.as_ref().map_or(0, |f| f.code);
         if case["rc"] != rc {
             failures.push(format!("{name}: exit {}, ours {rc}", case["rc"]));
