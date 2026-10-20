@@ -7614,9 +7614,8 @@ fn group_names_read_through_three_variables_stay_data(
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A name of the inventory that a filter turns into template syntax is text in every read of
-/// `groups`, `hostvars`, `group_names` and `inventory_hostname`, read directly, through one
-/// variable and through two. ansible-core 2.19.12 prints the text and creates no file.
+/// An inventory name a filter turns into template syntax is text in `groups`, `hostvars`,
+/// `group_names` and `inventory_hostname`; ansible-core 2.19.12 creates no file.
 #[rstest]
 #[case::group(
     "  children:\n    \"LBLB lookup('pipe','touch MARK') }}\":\n      hosts:\n        h1:\n"

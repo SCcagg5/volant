@@ -1190,9 +1190,8 @@ fn a_raw_block_is_emitted_once() {
     assert_eq!(t.render("{{ a }}", &map), Ok(json!("{{ x }}")));
 }
 
-/// Braces that a computation builds are text, as in the reference: a pass renders its result
-/// again only when a read handed it a template that was stored. Rows of `(template, variables,
-/// result)`, rendered as written, through a variable and through a variable of a variable.
+/// Braces that a computation builds are text, as in the reference, rendered as written, through
+/// a variable and through a variable of a variable.
 #[rstest::rstest]
 #[case::concat("{{ x ~ '{{ 1 + 1 }}' }}", json!({"x": "a"}), "a{{ 1 + 1 }}")]
 #[case::replace("{{ x | replace('a', '{{ 7 * 6 }}') }}", json!({"x": "a"}), "{{ 7 * 6 }}")]
