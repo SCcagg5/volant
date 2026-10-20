@@ -124,7 +124,7 @@ impl Object for DictType {
     }
 
     fn get_value(self: &Arc<Self>, key: &Value) -> Option<Value> {
-        (key.as_str()? == "fromkeys").then(|| Value::from_function(from_keys))
+        (key.as_str()? == "fromkeys").then(|| Value::from_object(FromKeys))
     }
 
     /// `dict(...)`: nothing, a mapping, or any iterable of two-item elements, then keywords.
@@ -146,6 +146,36 @@ impl Object for DictType {
             return Err(Error::from(ErrorKind::UnknownMethod));
         }
         from_keys(Rest(args.to_vec()))
+    }
+}
+
+/// The bound method `dict.fromkeys`, which prints as Python prints a built-in method.
+#[derive(Debug)]
+struct FromKeys;
+
+impl Object for FromKeys {
+    fn repr(self: &Arc<Self>) -> ObjectRepr {
+        ObjectRepr::Plain
+    }
+
+    fn render(self: &Arc<Self>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("<built-in method fromkeys of type object>")
+    }
+
+    fn call(self: &Arc<Self>, _state: &State<'_, '_>, args: &[Value]) -> Result<Value, Error> {
+        from_keys(Rest(args.to_vec()))
+    }
+}
+
+/// The Python type name of a template value that is a type or a function, which no result can
+/// hold: ansible-core refuses to store one.
+pub(super) fn unstorable(value: &Value) -> Option<&'static str> {
+    if value.downcast_object_ref::<DictType>().is_some() {
+        Some("type")
+    } else if value.downcast_object_ref::<FromKeys>().is_some() {
+        Some("builtin_function_or_method")
+    } else {
+        None
     }
 }
 

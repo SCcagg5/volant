@@ -183,8 +183,14 @@ pub(super) fn encode(text: &str, call: &Call<'_>) -> Result<Value, Error> {
     let encoding = slots[0].map_or(Ok("utf-8"), |v| text_arg("encode", "encoding", v))?;
     let errors = slots[1].map_or(Ok("strict"), |v| text_arg("encode", "errors", v))?;
     let codec = codec::lookup(encoding)?;
-    // The longest result per byte of text: a character is 4 bytes in UTF-32, and the escape of a
-    // character that 4 bytes of text hold is at most 10 characters (`&#1114111;`).
+    check_encode(text.len(), codec, errors)?;
+    Ok(Bytes::value(codec::encode(text, codec, errors)?))
+}
+
+/// `Ok` when encoding `len` bytes of text stays within the size limit. The longest result per
+/// byte of text: a character is 4 bytes in UTF-32, and the escape of a character that 4 bytes of
+/// text hold is at most 10 characters (`&#1114111;`).
+pub(super) fn check_encode(len: usize, codec: codec::Codec, errors: &str) -> Result<(), Error> {
     let per_byte = match codec {
         codec::Codec::Utf8 => 1,
         codec::Codec::Utf16(..) => 2,
@@ -192,8 +198,19 @@ pub(super) fn encode(text: &str, call: &Call<'_>) -> Result<Value, Error> {
         _ if matches!(errors, "backslashreplace" | "xmlcharrefreplace") => 3,
         _ => 1,
     };
-    check(text.len() as u128 * per_byte + 4)?;
-    Ok(Bytes::value(codec::encode(text, codec, errors)?))
+    check(len as u128 * per_byte + 4).map(drop)
+}
+
+/// `Ok` when decoding `len` bytes stays within the size limit: a byte that `backslashreplace`
+/// escapes becomes four characters.
+pub(super) fn check_decode(len: usize, errors: &str) -> Result<(), Error> {
+    let per_byte = if errors == "backslashreplace" { 4 } else { 1 };
+    check(len as u128 * per_byte).map(drop)
+}
+
+/// `Ok` when the hex text of `len` bytes, with its separators, stays within the size limit.
+pub(super) fn check_hex(len: usize) -> Result<(), Error> {
+    check(len as u128 * 3).map(drop)
 }
 
 /// `bytes.decode(encoding='utf-8', errors='strict')`.
@@ -202,9 +219,7 @@ fn decode(me: &Bytes, call: &Call<'_>) -> Result<Value, Error> {
     let encoding = slots[0].map_or(Ok("utf-8"), |v| text_arg("decode", "encoding", v))?;
     let errors = slots[1].map_or(Ok("strict"), |v| text_arg("decode", "errors", v))?;
     let codec = codec::lookup(encoding)?;
-    // A byte that `backslashreplace` escapes becomes four characters.
-    let per_byte = if errors == "backslashreplace" { 4 } else { 1 };
-    check(me.0.len() as u128 * per_byte)?;
+    check_decode(me.0.len(), errors)?;
     codec::decode(&me.0, codec, errors).map(Value::from)
 }
 
@@ -232,7 +247,7 @@ fn hex(me: &Bytes, call: &Call<'_>) -> Result<Value, Error> {
         }
     };
     let group = slots[1].map_or(Ok(1), index)?;
-    check(me.0.len() as u128 * 3)?;
+    check_hex(me.0.len())?;
     let digits: Vec<String> = me.0.iter().map(|b| format!("{b:02x}")).collect();
     let (Some(sep), true) = (sep, group != 0 && !digits.is_empty()) else {
         return Ok(Value::from(digits.concat()));
@@ -273,8 +288,27 @@ pub(crate) fn holds(value: &Value) -> bool {
     }
 }
 
-/// `bigint::to_json`, with every bytes value in `value` read as its text first.
+/// How ansible-core opens the refusal to store a type or a function as a result.
+const UNSTORABLE: &str = "Error rendering template: ";
+
+/// The message of a result that cannot become JSON: the refusal to store a type is worded as
+/// ansible-core words it, any other failure as a conversion.
+pub(crate) fn result_error(error: &str) -> String {
+    if error.starts_with(UNSTORABLE) {
+        error.to_string()
+    } else {
+        format!("cannot convert template result: {error}")
+    }
+}
+
+/// `bigint::to_json`, with every bytes value in `value` read as its text first. A type or a
+/// function is no result: it fails as ansible-core's refusal to store one.
 pub(crate) fn to_json(value: &Value) -> Result<serde_json::Value, String> {
+    if let Some(kind) = super::super::globals::unstorable(value) {
+        return Err(format!(
+            "{UNSTORABLE}Type '{kind}' is unsupported for variable storage."
+        ));
+    }
     let json = if holds(value) {
         super::super::bigint::to_json(&settle(value)?)
     } else {

@@ -276,6 +276,29 @@ fn fromkeys_refuses_in_the_words_of_python() {
     assert!(render("{{ dict.fromkeys(nope) }}").is_err());
 }
 
+/// The type `dict` and its bound method print as Python prints them inside a text, and are no
+/// result: ansible-core refuses to store either, with these words.
+#[test]
+fn the_dict_type_and_its_method_are_no_result() {
+    for (template, kind) in [
+        ("{{ dict }}", "type"),
+        ("{{ dict.fromkeys }}", "builtin_function_or_method"),
+    ] {
+        let err = render(template).unwrap_err();
+        assert!(
+            err.contains(&format!(
+                "Error rendering template: Type '{kind}' is unsupported for variable storage."
+            )),
+            "{template}: {err}"
+        );
+    }
+    assert_eq!(render("a {{ dict }}").unwrap(), json!("a <class 'dict'>"));
+    assert_eq!(
+        render("a {{ dict.fromkeys }}").unwrap(),
+        json!("a <built-in method fromkeys of type object>")
+    );
+}
+
 /// `encode` and the bytes it makes refuse a call in CPython's words, and fail by name for what
 /// this engine does not run. The golden rows only record that the reference failed.
 #[test]
