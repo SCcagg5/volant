@@ -300,17 +300,20 @@ fn ansible_playbook_python_is_the_controller_python(
     );
 }
 
-/// A host that sets `ansible_playbook_python` does not change what `hostvars` says of it: the
-/// magic variable wins there too, as in ansible-core 2.19.12.
+/// `hostvars` gives every host the controller's Python, over a value the host sets, as in
+/// ansible-core 2.19.12; with no interpreter the name is undefined for all.
 #[rstest::rstest]
-#[case::replaced(Some("/ctl/python3"), json!("/ctl/python3"))]
-#[case::dropped_without_one(None, json!("none"))]
-fn hostvars_gives_the_controller_python_over_a_host_value(
+#[case::replaced(json!({"ansible_playbook_python": "/inv"}), Some("/ctl/python3"), json!("/ctl/python3"))]
+#[case::added(json!({}), Some("/ctl/python3"), json!("/ctl/python3"))]
+#[case::dropped_without_one(json!({"ansible_playbook_python": "/inv"}), None, json!("none"))]
+#[case::absent_without_one(json!({}), None, json!("none"))]
+fn hostvars_gives_the_controller_python_to_every_host(
+    #[case] host: Value,
     #[case] controller: Option<&str>,
     #[case] want: Value,
 ) {
     crate::runtime::resolve::set_test_python(controller);
-    let hosts = Arc::new(vars(json!({"h1": {"ansible_playbook_python": "/inv"}})));
+    let hosts = Arc::new(vars(json!({ "h1": host })));
     let own = Map::new();
     let vars = Vars {
         map: &own,

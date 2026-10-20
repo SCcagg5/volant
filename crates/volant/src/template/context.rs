@@ -419,11 +419,10 @@ impl Object for Hostvars {
         self.memo.get(key, || {
             self.hosts.get(key).map(|entry| {
                 let mut entry = crate::vars::settled(entry).into_owned();
-                // A magic variable beats the host's own value of the name, here as in a task.
-                // Only a host that sets the name pays for looking the interpreter up.
-                if let Some(map) = entry.as_object_mut()
-                    && map.contains_key(read::PLAYBOOK_PYTHON)
-                {
+                // A magic variable beats the host's own value of the name, here as in a task, and
+                // every host has it. The lookup is made once per process, and only when an entry
+                // is read.
+                if let Some(map) = entry.as_object_mut() {
                     match crate::runtime::resolve::controller_python() {
                         Some(python) => {
                             map.insert(read::PLAYBOOK_PYTHON.to_string(), python.into())
