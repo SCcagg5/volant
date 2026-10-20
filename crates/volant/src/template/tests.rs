@@ -452,7 +452,7 @@ fn extract_reads_hostvars_by_host_name_and_taints_like_a_bare_read() {
 }
 
 /// A host name from a managed host taints a listing of `hostvars`, and a nested template of
-/// another host still renders.
+/// another host still renders. A name that holds braces is text even when nothing tracks it.
 #[test]
 fn a_host_name_from_data_taints_the_hostvars_listing_only() {
     let t = templar();
@@ -471,7 +471,7 @@ fn a_host_name_from_data_taints_the_hostvars_listing_only() {
             json!("{{ 1 + 1 }}"),
         ),
         (true, "{{ hostvars.h2.x }}", json!(42)),
-        (false, "{{ hostvars | list | first }}", json!(2)),
+        (false, "{{ hostvars | list | first }}", json!("{{ 1 + 1 }}")),
     ] {
         let untrusted = BTreeSet::from([HOSTVARS_KEYS.to_string()]);
         let v = Vars {
@@ -1188,6 +1188,143 @@ fn a_raw_block_is_emitted_once() {
     // A variable that chains to a variable holding it is still read to its end.
     let map = vars(json!({"x": "val", "a": "{{ b }}", "b": "{% raw %}{{ x }}{% endraw %}"}));
     assert_eq!(t.render("{{ a }}", &map), Ok(json!("{{ x }}")));
+}
+
+/// Braces that a computation builds are text, as in the reference: a pass renders its result
+/// again only when a read handed it a template that was stored. Rows of `(template, variables,
+/// result)`, rendered as written, through a variable and through a variable of a variable.
+#[rstest::rstest]
+#[case::concat("{{ x ~ '{{ 1 + 1 }}' }}", json!({"x": "a"}), "a{{ 1 + 1 }}")]
+#[case::replace("{{ x | replace('a', '{{ 7 * 6 }}') }}", json!({"x": "a"}), "{{ 7 * 6 }}")]
+#[case::helm("{{ '{{ .Values.' ~ n ~ ' }}' }}", json!({"n": "web"}), "{{ .Values.web }}")]
+#[case::a_name_of_a_variable(
+    "{{ '{{ ' ~ n ~ '_port }}' }}",
+    json!({"n": "web", "web_port": 80}),
+    "{{ web_port }}"
+)]
+#[case::join("{{ ['{{', x, '}}'] | join(' ') }}", json!({"x": "7 * 6"}), "{{ 7 * 6 }}")]
+#[case::format("{{ '{{ %s }}' % x }}", json!({"x": "7 * 6"}), "{{ 7 * 6 }}")]
+fn braces_a_computation_builds_stay_text(
+    #[case] text: &str,
+    #[case] given: Value,
+    #[case] want: &str,
+) {
+    let t = templar();
+    assert_eq!(t.render(text, &vars(given.clone())), Ok(json!(want)));
+    let mut map = vars(given);
+    map.insert("v".into(), json!(text));
+    map.insert("w".into(), json!("{{ v }}"));
+    let mut data = BTreeSet::new();
+    for pass in 0..3 {
+        let (resolved, untrusted) = t.resolve_vars_tainted(Vars {
+            untrusted: Some(&data),
+            ..Vars::from(&map)
+        });
+        map = resolved;
+        data = untrusted;
+        assert_eq!(map["v"], json!(want), "resolution {pass}");
+        assert_eq!(
+            map["w"],
+            json!(want),
+            "read by another variable, resolution {pass}"
+        );
+        for read in ["{{ v }}", "{{ w }}"] {
+            let with = Vars {
+                untrusted: Some(&data),
+                ..Vars::from(&map)
+            };
+            assert_eq!(
+                t.render(read, with),
+                Ok(json!(want)),
+                "{read}, resolution {pass}"
+            );
+        }
+    }
+}
+
+/// Text that holds a stored template still renders when a read hands it out: a chain of
+/// variables, a mapping, a list, the variables of another host, a lookup of a variable by name.
+#[rstest::rstest]
+#[case::chain("{{ a }}", json!({"n": 7, "c": "{{ n }}", "b": "{{ c }}", "a": "{{ b }}"}), json!(7))]
+#[case::mapping("{{ d.k }}", json!({"n": 7, "d": {"k": "{{ n }}"}}), json!(7))]
+#[case::list("{{ l[0] }}-{{ l[1] }}", json!({"n": 7, "l": ["{{ n }}", "z"]}), json!("7-z"))]
+#[case::suffix("{{ a }}-sfx", json!({"n": 7, "a": "{{ n }}"}), json!("7-sfx"))]
+#[case::lookup("{{ lookup('vars', 'a') }}", json!({"n": 7, "a": "{{ n }}"}), json!(7))]
+#[case::a_name_built("{{ lookup('vars', n ~ '_port') }}", json!({"n": "web", "web_port": "{{ 40 + 40 }}"}), json!(80))]
+#[case::a_value_then_text("{{ a ~ '!' }}", json!({"n": 7, "a": "{{ n }}"}), json!("7!"))]
+fn a_stored_template_still_renders_when_read(
+    #[case] text: &str,
+    #[case] given: Value,
+    #[case] want: Value,
+) {
+    let t = templar();
+    assert_eq!(t.render(text, &vars(given.clone())), Ok(want.clone()));
+    let mut map = vars(given);
+    map.insert("v".into(), json!(text));
+    assert_eq!(t.render("{{ v }}", &map), Ok(want));
+}
+
+/// The variables of another host render when read, and braces built from them do not make more
+/// of them render: `hostvars` hands out the host's own stored template, and nothing else.
+#[test]
+fn the_variables_of_another_host_render_and_built_braces_stay_text() {
+    let t = templar();
+    let view = Arc::new(vars(json!({
+        "h2": {"x": "{{ 40 + 2 }}", "plain": "p"},
+        "h3": {"plain": "q"},
+    })));
+    let empty = Map::new();
+    let hosts = BTreeSet::new();
+    for (text, want) in [
+        ("{{ hostvars.h2.x }}", json!(42)),
+        ("{{ hostvars.h2.x }}-sfx", json!("42-sfx")),
+        (
+            "{{ hostvars.h3.plain ~ '{{ 1 + 1 }}' }}",
+            json!("q{{ 1 + 1 }}"),
+        ),
+        (
+            "{{ hostvars | list | map('upper') | list }}",
+            json!(["H2", "H3"]),
+        ),
+    ] {
+        let v = Vars {
+            hostvars: Some(&view),
+            untrusted: Some(&hosts),
+            ..Vars::from(&empty)
+        };
+        assert_eq!(t.render(text, v), Ok(want), "{text}");
+    }
+}
+
+/// A group name that a computation turns into template syntax is text, whatever put the name in
+/// the inventory: no rule about its source is needed, since the render read no stored template.
+#[test]
+fn a_group_name_turned_into_braces_by_a_filter_stays_text() {
+    let t = templar();
+    let shared = Arc::new(vars(json!({
+        "groups": {"all": ["h1"], "LBLB 1 + 1 }}": ["h1"]},
+        "group_names": ["LBLB 1 + 1 }}"],
+    })));
+    let empty = Map::new();
+    let hosts = BTreeSet::new();
+    for tracked in [None, Some(&hosts)] {
+        for text in [
+            "{{ groups | list | map('replace', 'LB', '{') | list | sort }}",
+            "{{ group_names | map('replace', 'LB', '{') | list }}",
+            "{{ (groups | list | sort | last) | replace('LB', '{') }}",
+        ] {
+            let v = Vars {
+                shared: Some(&shared),
+                untrusted: tracked,
+                ..Vars::from(&empty)
+            };
+            let got = t.render(text, v).unwrap();
+            assert!(
+                got.to_string().contains("{{ 1 + 1 }}") && !got.to_string().contains('2'),
+                "{text} -> {got}"
+            );
+        }
+    }
 }
 
 /// A raw block does not make text from a managed host evaluate: a name that holds text from a
