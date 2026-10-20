@@ -7707,3 +7707,48 @@ fn a_group_named_from_a_host_value_reads_through_variables() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A name a managed host printed, put in the inventory by `add_host` or `group_by` on six routes,
+/// stays text in `groups`, `group_names`, `hostvars`, `set_fact`, `lookup('vars')` and
+/// `inventory_hostname` of a later play, through variables and a filter. No file appears.
+#[rstest]
+#[case::host_name("    - add_host: {name: \"{{ r.stdout }}\", ansible_connection: local}\n")]
+#[case::host_name_in_a_loop(
+    "    - add_host: {name: \"{{ item }}\", ansible_connection: local}\n      loop: \"{{ r.stdout_lines }}\"\n"
+)]
+#[case::group_of_a_host(
+    "    - add_host: {name: extra, groups: [\"{{ r.stdout }}\"], ansible_connection: local}\n"
+)]
+#[case::group_by_key_in_a_fact(
+    "    - set_fact: {key: \"{{ r.stdout }}\"}\n    - group_by: {key: \"{{ key }}\"}\n"
+)]
+#[case::group_by_key_in_a_loop(
+    "    - group_by: {key: \"{{ item }}\"}\n      loop: \"{{ r.stdout_lines }}\"\n"
+)]
+#[case::group_by_parents("    - group_by: {key: ok, parents: [\"{{ r.stdout }}\"]}\n")]
+fn a_name_a_host_printed_stays_text_on_every_route(#[case] route: &str) {
+    if python::reference_python().is_none() {
+        return;
+    }
+    let (dir, marker) = trust_dir("printed-name", "h1 ansible_connection=local\n");
+    // A name without a space: `group_by` replaces a space in a group name with a dash.
+    let name = format!("{{{{lookup('pipe','touch${{IFS}}{}')}}}}", marker.display());
+    std::fs::write(dir.join("name.txt"), &name).expect("the name");
+    let play = format!(
+        "- hosts: h1\n  gather_facts: false\n  vars:\n    g1: \"{{{{ groups | list }}}}\"\n    g2: \"{{{{ g1 | map('trim') | list }}}}\"\n    ga: \"{{{{ groups.all | map('trim') | list }}}}\"\n    hv: \"{{{{ hostvars | list }}}}\"\n    gn: \"{{{{ group_names | list }}}}\"\n  tasks:\n    - command: cat {}\n      register: r\n{route}    - set_fact:\n        sf: \"{{{{ g2 | join(',') }}}} {{{{ ga | join(',') }}}} {{{{ hv | join(',') }}}} {{{{ gn | join(',') }}}}\"\n    - debug:\n        msg: \"G={{{{ g2 | to_json }}}} V={{{{ lookup('vars', 'g2') | to_json }}}} S={{{{ sf }}}}\"\n- hosts: all\n  gather_facts: false\n  tasks:\n    - debug: {{msg: \"H={{{{ inventory_hostname }}}}\"}}\n",
+        dir.join("name.txt").display()
+    );
+    let out = run_trust_playbook(&dir, &play);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !marker.exists(),
+        "a name a host printed ran on the controller:\n{play}\n{stdout}{stderr}"
+    );
+    assert!(stdout.contains("PLAY RECAP"), "{stdout}{stderr}");
+    assert!(
+        stdout.matches(&name).count() >= 3,
+        "the name is not shown as text:\n{stdout}{stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
