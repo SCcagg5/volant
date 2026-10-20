@@ -48,9 +48,10 @@ pub(super) fn to_int(value: Value, args: Rest<Value>, kwargs: Kwargs) -> Result<
 fn arguments(args: &[Value], kwargs: &Kwargs) -> Result<(Value, Option<Value>), Error> {
     let too_many = |msg: String| Error::new(ErrorKind::TooManyArguments, msg);
     if args.len() > 2 {
-        return Err(too_many(
-            "int() takes at most 2 positional arguments".into(),
-        ));
+        return Err(too_many(format!(
+            "do_int() takes from 1 to 3 positional arguments but {} were given",
+            args.len() + 1
+        )));
     }
     let mut slots: [Option<Value>; 2] = [None, None];
     for (slot, value) in slots.iter_mut().zip(args) {
@@ -59,10 +60,17 @@ fn arguments(args: &[Value], kwargs: &Kwargs) -> Result<(Value, Option<Value>), 
     for (slot, name) in slots.iter_mut().zip(["default", "base"]) {
         if kwargs.has(name) {
             if slot.is_some() {
-                return Err(too_many(format!("int() got multiple values for '{name}'")));
+                return Err(too_many(format!(
+                    "do_int() got multiple values for argument '{name}'"
+                )));
             }
             *slot = Some(kwargs.get::<Value>(name)?);
         }
+    }
+    if let Some(name) = kwargs.args().find(|n| !["default", "base"].contains(n)) {
+        return Err(too_many(format!(
+            "do_int() got an unexpected keyword argument '{name}'"
+        )));
     }
     kwargs.assert_all_used()?;
     let [default, base] = slots;
@@ -96,14 +104,9 @@ fn float_to_int(f: f64, default: Value) -> Value {
     integer(&format!("{whole:.0}")).unwrap_or(default)
 }
 
-/// What Python's `str.strip` removes.
-fn is_space(c: char) -> bool {
-    c.is_whitespace() || ('\x1c'..='\x1f').contains(&c)
-}
-
 /// `float(text)`: Rust's reading plus the underscores Python allows between two digits.
 fn parse_float(text: &str) -> Option<f64> {
-    let text = text.trim_matches(is_space);
+    let text = text.trim_matches(char::is_whitespace);
     let bytes = text.as_bytes();
     let spaced = |i: usize| {
         let digit = |at: Option<&u8>| at.is_some_and(u8::is_ascii_digit);
@@ -128,7 +131,7 @@ fn parse_int(text: &str, base: u32) -> Option<Value> {
     {
         return Some(Value::from(n));
     }
-    let text = text.trim_matches(is_space);
+    let text = text.trim_matches(char::is_whitespace);
     let (negative, rest) = match text.as_bytes().first()? {
         b'-' => (true, &text[1..]),
         b'+' => (false, &text[1..]),

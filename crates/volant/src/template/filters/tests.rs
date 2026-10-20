@@ -617,3 +617,34 @@ fn int_refuses_a_text_past_the_digit_limit() {
     );
     assert_eq!(text(&hex), "-1");
 }
+
+/// `int` strips the spaces Python's `int()` and `float()` strip, not the separators `\x1c` to
+/// `\x1f`, and words a bad call as `do_int()` does. Measured on ansible-core 2.19.12.
+#[test]
+fn int_strips_and_refuses_as_python_does() {
+    for (template, out) in [
+        ("{{ '\x0b12\x0c' | int }}", "12"),
+        ("{{ '\u{3000}12' | int }}", "12"),
+        ("{{ ' \x1c12\x1f' | int }}", "0"),
+        ("{{ '\x1c1.5' | int(default=4) }}", "4"),
+    ] {
+        assert_eq!(text(template), out, "{template}");
+    }
+    for (template, reason) in [
+        (
+            "{{ '1' | int(foo=1) }}",
+            "do_int() got an unexpected keyword argument 'foo'",
+        ),
+        (
+            "{{ '1' | int(1, 2, 3) }}",
+            "do_int() takes from 1 to 3 positional arguments but 4 were given",
+        ),
+        (
+            "{{ '1' | int(4, default=5) }}",
+            "do_int() got multiple values for argument 'default'",
+        ),
+    ] {
+        let err = render(template, serde_json::json!({})).unwrap_err();
+        assert!(err.contains(reason), "{template}: {err}");
+    }
+}
