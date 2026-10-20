@@ -124,6 +124,32 @@ fn result(v: serde_json::Value) -> TaskResult {
     TaskResult(v.as_object().unwrap().clone())
 }
 
+/// A module's own message leads the block, and the cause it names follows behind `caused by`, as
+/// ansible-core 2.19.12 prints a module that raised.
+#[test]
+fn a_raised_module_error_prints_its_message_and_cause() {
+    let failed = result(json!({
+        "failed": true,
+        "msg": "Task failed: Module failed: Not writable: [Errno 13] Denied",
+        (CHAIN_KEY): [
+            {"msg": "Task failed: Module failed: Not writable.", "lead": true},
+            {"msg": "[Errno 13] Denied"},
+        ],
+    }));
+    let block = ErrorBlock::of(&failed, None, false);
+    let out = capture(|r| r.error(&block));
+    assert_eq!(
+        out,
+        "[ERROR]: Task failed: Module failed: Not writable: [Errno 13] Denied\n\n\
+         Task failed: Module failed: Not writable.\n\n<<< caused by >>>\n\n[Errno 13] Denied\n\n"
+    );
+    let censored = ErrorBlock::of(&failed, None, true);
+    assert!(
+        censored.lead.is_none() && censored.causes.is_empty(),
+        "{censored:?}"
+    );
+}
+
 /// Strips ANSI CSI sequences (`ESC [ ... letter`), the shape anstyle emits, so a
 /// coloured capture can be compared against the plain one on visible text alone.
 fn strip_ansi(s: &str) -> String {

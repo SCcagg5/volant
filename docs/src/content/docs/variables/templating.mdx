@@ -199,6 +199,8 @@ The `template` module and `lookup('template')` share one render, and it differs 
 
 Text that a `raw` block writes, or a string such as `'{{'`, is literal: it is not rendered again as an argument, in a variable, in a `set_fact` value or in a loop item. A variable that holds a `raw` block is read to its end first, so `a: "{{ b }}"` with `b: "{% raw %}{{ x }}{% endraw %}"` gives `{{ x }}`.
 
+Braces that an expression builds are literal too. With `x: a`, `{{ x ~ '{{ 1 + 1 }}' }}` gives `a{{ 1 + 1 }}`, `{{ x | replace('a', '{{ 7 * 6 }}') }}` gives `{{ 7 * 6 }}`, and `{{ '{{ ' ~ n ~ '_port }}' }}` gives `{{ web_port }}` whatever `web_port` holds. A variable that holds a template is rendered when it is read, so a chain such as `a: "{{ b }}"` with `b: "{{ c }}"` gives the value of `c`. A result is rendered again only when a read gave it a template that was not rendered yet: `hostvars['other']['name']` for a variable that holds one, or a variable left as written by the rule above. A text that joins such a read to braces it builds is then rendered as a whole.
+
 It takes the options the `template` module reads:
 
 | Option | Default | Effect |

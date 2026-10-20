@@ -7673,6 +7673,44 @@ fn group_names_read_through_three_variables_stay_data(
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// An inventory name a filter turns into template syntax is text in `groups`, `hostvars`,
+/// `group_names` and `inventory_hostname`; ansible-core 2.19.12 creates no file.
+#[rstest]
+#[case::group(
+    "  children:\n    \"LBLB lookup('pipe','touch MARK') }}\":\n      hosts:\n        h1:\n"
+)]
+#[case::host("    \"LBLB lookup('pipe','touch MARK') }}\":\n      ansible_connection: local\n")]
+fn an_inventory_name_a_filter_turns_into_braces_stays_text(#[case] names: &str) {
+    let (dir, marker) = trust_dir("built-names", "");
+    let names = names.replace("MARK", &marker.display().to_string());
+    let inventory = format!("all:\n  hosts:\n    h1:\n      ansible_connection: local\n{names}");
+    std::fs::write(dir.join("inv.yml"), inventory).expect("an inventory");
+    let play = "- hosts: all\n  gather_facts: false\n  vars:\n    one: \"{{ groups | map('replace', 'LB', '{') | list }}\"\n    all: \"{{ groups | list }}\"\n    two: \"{{ all | map('replace', 'LB', '{') | list }}\"\n    hosts: \"{{ hostvars | list | map('replace', 'LB', '{') | list }}\"\n  tasks:\n    - debug:\n        msg: \"direct={{ groups | list | map('replace', 'LB', '{') | list }} one={{ one }} two={{ two }} hosts={{ hosts }} names={{ group_names | map('replace', 'LB', '{') | list }} self={{ inventory_hostname | replace('LB', '{') }}\"\n";
+    std::fs::write(dir.join("pb.yml"), play).expect("the playbook");
+    let out = volant_within(
+        &[
+            "playbook",
+            "-i",
+            dir.join("inv.yml").to_str().expect("a path"),
+            dir.join("pb.yml").to_str().expect("a path"),
+        ],
+        std::time::Duration::from_secs(60),
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stdout}{stderr}");
+    assert!(
+        !marker.exists(),
+        "a name of the inventory ran on the controller:\n{stdout}{stderr}"
+    );
+    let shown = format!("{{{{ lookup('pipe','touch {}') }}}}", marker.display());
+    assert!(
+        stdout.matches(&shown).count() >= 3,
+        "the name is not shown as text:\n{stdout}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Inventory names holding template syntax are text in `groups`, `hostvars` and `group_names`,
 /// through variables and after a refresh; ansible-core 2.19.12 prints them and creates no file.
 #[rstest]

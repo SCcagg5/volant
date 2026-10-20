@@ -5518,6 +5518,78 @@
   },
   {
     "case": {
+      "template": "{{ x ~ '{{ 1 + 1 }}' }}",
+      "vars": {
+        "x": "a"
+      }
+    },
+    "result": "a{{ 1 + 1 }}"
+  },
+  {
+    "case": {
+      "template": "{{ x | replace('a', '{{ 7 * 6 }}') }}",
+      "vars": {
+        "x": "a"
+      }
+    },
+    "result": "{{ 7 * 6 }}"
+  },
+  {
+    "case": {
+      "template": "{{ '{{ .Values.' ~ n ~ ' }}' }}",
+      "vars": {
+        "n": "web"
+      }
+    },
+    "result": "{{ .Values.web }}"
+  },
+  {
+    "case": {
+      "template": "{{ '{{ ' ~ n ~ '_port }}' }}",
+      "vars": {
+        "n": "web",
+        "web_port": 80
+      }
+    },
+    "result": "{{ web_port }}"
+  },
+  {
+    "case": {
+      "template": "{{ y }}",
+      "vars": {
+        "x": "a",
+        "y": "{{ x ~ '{{ 1 + 1 }}' }}"
+      }
+    },
+    "result": "a{{ 1 + 1 }}"
+  },
+  {
+    "case": {
+      "template": "{{ z }}",
+      "vars": {
+        "x": "a",
+        "y": "{{ x ~ '{{ 1 + 1 }}' }}",
+        "z": "{{ y }}"
+      }
+    },
+    "result": "a{{ 1 + 1 }}"
+  },
+  {
+    "case": {
+      "template": "{{ a }}-{{ d.k }}",
+      "vars": {
+        "n": 7,
+        "c": "{{ n }}",
+        "a": "{{ c }}",
+        "d": {
+          "k": "{{ n }}"
+        }
+      }
+    },
+    "result": "7-7"
+  },
+  {
+    "case": {
       "template": "{{ 'a,b,c'.split(',') }}"
     },
     "result": [
