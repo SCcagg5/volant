@@ -7614,9 +7614,8 @@ fn group_names_read_through_three_variables_stay_data(
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A host name and a group name that hold template syntax in the inventory are text in every read
-/// of `groups`, `hostvars` and `group_names`, through variables and after a refresh of the
-/// inventory. ansible-core 2.19.12 prints the name as it is and creates no file.
+/// Inventory names holding template syntax are text in `groups`, `hostvars` and `group_names`,
+/// through variables and after a refresh; ansible-core 2.19.12 prints them and creates no file.
 #[rstest]
 #[case::group(
     "  children:\n    \"{{ lookup('pipe','touch MARK') }}\":\n      hosts:\n        h1:\n"
