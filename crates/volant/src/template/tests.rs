@@ -276,9 +276,8 @@ fn hostvars_hides_the_unlisted_controller_from_iteration(
     assert_eq!(t.render(source, vars).unwrap(), want, "{source}");
 }
 
-/// `ansible_playbook_python` is the controller's Python, beats a variable of the same name, and
-/// is undefined when no interpreter resolves, as ansible-core 2.19.12 defines it as a magic
-/// variable.
+/// `ansible_playbook_python` is the controller's Python, beats a variable of the same name and
+/// is undefined when no interpreter resolves, as in ansible-core 2.19.12.
 #[rstest::rstest]
 #[case::read_by_name(Some("/ctl/python3"), json!({}), "{{ ansible_playbook_python }}", json!("/ctl/python3"))]
 #[case::in_text(Some("/ctl/python3"), json!({}), "{{ ansible_playbook_python }} -m x", json!("/ctl/python3 -m x"))]
@@ -299,6 +298,31 @@ fn ansible_playbook_python_is_the_controller_python(
         want,
         "{source}"
     );
+}
+
+/// A host that sets `ansible_playbook_python` does not change what `hostvars` says of it: the
+/// magic variable wins there too, as in ansible-core 2.19.12.
+#[rstest::rstest]
+#[case::replaced(Some("/ctl/python3"), json!("/ctl/python3"))]
+#[case::dropped_without_one(None, json!("none"))]
+fn hostvars_gives_the_controller_python_over_a_host_value(
+    #[case] controller: Option<&str>,
+    #[case] want: Value,
+) {
+    crate::runtime::resolve::set_test_python(controller);
+    let hosts = Arc::new(vars(json!({"h1": {"ansible_playbook_python": "/inv"}})));
+    let own = Map::new();
+    let vars = Vars {
+        map: &own,
+        hostvars: Some(&hosts),
+        shared: None,
+        facts: None,
+        untrusted: None,
+        untrusted_hosts: None,
+        base: None,
+    };
+    let source = "{{ hostvars['h1'].ansible_playbook_python | default('none') }}";
+    assert_eq!(templar().render(source, vars).unwrap(), want);
 }
 
 /// Reading `ansible_playbook_python` with no interpreter to name fails as any undefined name.

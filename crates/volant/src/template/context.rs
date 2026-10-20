@@ -417,9 +417,22 @@ impl Object for Hostvars {
             self.tainted.store(true, Ordering::Relaxed);
         }
         self.memo.get(key, || {
-            self.hosts
-                .get(key)
-                .map(|entry| super::bigint::to_template(&crate::vars::settled(entry)))
+            self.hosts.get(key).map(|entry| {
+                let mut entry = crate::vars::settled(entry).into_owned();
+                // A magic variable beats the host's own value of the name, here as in a task.
+                // Only a host that sets the name pays for looking the interpreter up.
+                if let Some(map) = entry.as_object_mut()
+                    && map.contains_key(read::PLAYBOOK_PYTHON)
+                {
+                    match crate::runtime::resolve::controller_python() {
+                        Some(python) => {
+                            map.insert(read::PLAYBOOK_PYTHON.to_string(), python.into())
+                        }
+                        None => map.remove(read::PLAYBOOK_PYTHON),
+                    };
+                }
+                super::bigint::to_template(&entry)
+            })
         })
     }
 

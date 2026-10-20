@@ -209,7 +209,7 @@ impl Context {
 }
 
 /// The magic variable that names the interpreter running the controller's Python code.
-const PLAYBOOK_PYTHON: &str = "ansible_playbook_python";
+pub(super) const PLAYBOOK_PYTHON: &str = "ansible_playbook_python";
 
 /// `ansible_playbook_python`, the reference's `sys.executable`: the controller's own Python.
 /// Looking it up can start a Python probe, so it is answered here, when a template reads it,

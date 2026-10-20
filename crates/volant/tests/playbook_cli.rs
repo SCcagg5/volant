@@ -5896,9 +5896,8 @@ fn the_implicit_localhost_runs_under_the_controller_python() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// `ansible_playbook_python` names the controller's interpreter, so an inventory can point a host's
-/// own `ansible_python_interpreter` at it. An interpreter naming a variable with no value fails
-/// the task naming that variable, and a task that sends no module still runs.
+/// `ansible_playbook_python` names the controller's interpreter for a host's own interpreter; one
+/// naming a variable with no value fails the task by that name, and `raw` still runs.
 #[test]
 fn ansible_playbook_python_names_the_controller_python() {
     let Some(python) = python::reference_python().map(|p| p.display().to_string()) else {
