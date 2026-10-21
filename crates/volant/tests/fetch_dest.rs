@@ -195,9 +195,8 @@ fn a_dest_a_host_named_is_written_only_inside_the_directories() {
     assert!(!fx.root.join("allowed-evil").exists(), "{stdout}");
 }
 
-/// Without a directory list and with `host_named_paths` at `allow`, a host-named `dest` is
-/// written, as ansible-core writes it. A list that is empty, `contained` and `refuse` refuse it
-/// and name the setting, from the file and from the environment, and the marker file is not there.
+/// A host-named `dest` is written by default, as ansible-core writes it; an empty list,
+/// `contained` and `refuse`, from the file or the environment, refuse it and name the setting.
 #[rstest]
 #[case::default("", &[], true)]
 #[case::allow("[volant]\nhost_named_paths = allow\n", &[], true)]

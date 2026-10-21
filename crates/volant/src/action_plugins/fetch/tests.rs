@@ -124,9 +124,8 @@ fn modules(subs: &[Sub]) -> Vec<&str> {
     subs.iter().map(|s| s.module).collect()
 }
 
-/// A `dest` whose render read a managed host is written as the reference writes it, with the
-/// host's name below it; once the protection is on, it is refused before the host is asked
-/// anything and nothing is created under it.
+/// A `dest` a managed host named is written as the reference writes it; with the protection on,
+/// it is refused before the host is asked anything and nothing is created under it.
 #[rstest::rstest]
 #[case::default(HostNamedPaths::Allow, None, true)]
 #[case::empty_list(HostNamedPaths::Allow, Some(Vec::new()), false)]
@@ -305,16 +304,22 @@ fn a_dest_a_host_named_goes_through_no_path_another_user_controls(
     }
 }
 
-/// A link put where `dest` stands after the plugin was built, before it writes, is seen: the
-/// containment is decided again on the path the write will use.
+/// A link planted after the plugin was built is seen before the write: by the containment
+/// check with the protection on, by the walk below `dest` without it.
 #[cfg(unix)]
-#[test]
-fn a_link_planted_after_the_first_check_is_seen_before_the_write() {
+#[rstest::rstest]
+#[case::protected(true, "slot", "resolves to")]
+#[case::default(false, "slot/probe-hostname", "goes through the symbolic link")]
+fn a_link_planted_after_the_first_check_is_seen_before_the_write(
+    #[case] protected: bool,
+    #[case] planted: &str,
+    #[case] says: &str,
+) {
     use std::os::unix::fs::PermissionsExt as _;
     let dir_guard = scratch();
     let dir = dir_guard.path().canonicalize().unwrap();
     let (allowed, outside) = (dir.join("allowed"), dir.join("outside"));
-    std::fs::create_dir_all(allowed.join("slot")).unwrap();
+    std::fs::create_dir_all(allowed.join("slot/probe-hostname")).unwrap();
     std::fs::create_dir_all(&outside).unwrap();
     std::fs::set_permissions(&allowed, std::fs::Permissions::from_mode(0o755)).unwrap();
     let untrusted: BTreeSet<String> = ["dest".to_string()].into();
@@ -328,16 +333,13 @@ fn a_link_planted_after_the_first_check_is_seen_before_the_write() {
         &item_vars,
         false,
         HostNamedPaths::Allow,
-        Some(&dirs),
+        protected.then_some(&dirs[..]),
     );
-    std::fs::remove_dir(allowed.join("slot")).unwrap();
-    std::os::unix::fs::symlink(&outside, allowed.join("slot")).unwrap();
+    std::fs::remove_dir_all(allowed.join(planted)).unwrap();
+    std::os::unix::fs::symlink(&outside, allowed.join(planted)).unwrap();
     let (_, result) = drive(plugin.as_mut(), b"x", "/etc/one.txt");
     assert_eq!(result["failed"], json!(true), "{result}");
-    assert!(
-        result["msg"].as_str().unwrap().contains("resolves to"),
-        "{result}"
-    );
+    assert!(result["msg"].as_str().unwrap().contains(says), "{result}");
     assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
 }
 
@@ -481,9 +483,14 @@ fn a_symlink_inside_dest_never_redirects_the_write() {
             flat.join("one.txt"),
         ),
     ] {
-        for escalated in [false, true] {
-            let mut plugin =
-                start_with(args.clone(), &BTreeSet::new(), "probe-hostname", escalated);
+        // A `dest` a host named is walked the same way when no protection is on.
+        let named: BTreeSet<String> = ["dest".to_string()].into();
+        for (escalated, untrusted) in [
+            (false, BTreeSet::new()),
+            (true, BTreeSet::new()),
+            (false, named),
+        ] {
+            let mut plugin = start_with(args.clone(), &untrusted, "probe-hostname", escalated);
             let (_, result) = drive(plugin.as_mut(), b"planted", "/etc/one.txt");
             assert_eq!(result["failed"], json!(true), "{args}: {result}");
             let msg = result["msg"].as_str().unwrap();
@@ -810,9 +817,8 @@ fn a_file_fetched_again_keeps_its_mode() {
     assert_eq!(mode & 0o7777, 0o600);
 }
 
-/// An `inventory_hostname` a managed host set - a loop variable of that name over a registered
-/// list - names the directory of the fetch without `flat`, as the reference does; once the
-/// protection is on, it is refused, as a host-named `dest` is.
+/// A loop variable `inventory_hostname` a managed host set names the directory of the fetch
+/// without `flat`, as the reference does; with the protection on, it is refused.
 #[rstest::rstest]
 #[case::default(HostNamedPaths::Allow, None, true)]
 #[case::empty_list(HostNamedPaths::Allow, Some(Vec::new()), false)]
