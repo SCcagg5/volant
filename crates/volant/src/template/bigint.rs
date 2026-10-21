@@ -7,7 +7,7 @@
 //! wide, so one becomes a [`BigInt`] that prints as the same digits and goes back to JSON as a
 //! number. Arithmetic on it fails; arithmetic up to 128 bits is native.
 //!
-//! `Value::from_serialize` cannot read a `serde_json::Number` in this mode: the number
+//! `Value::from(Serde(..))` cannot read a `serde_json::Number` in this mode: the number
 //! serializes as a one-field struct. [`to_template`] and [`to_json`] replace it for every
 //! JSON value, and for every template value, that crosses the boundary.
 
@@ -172,10 +172,10 @@ pub(crate) fn to_template(value: &serde_json::Value) -> Value {
         Json::Number(n) => number(n),
         Json::String(s) => Value::from(s.as_str()),
         Json::Array(items) => items.iter().map(to_template).collect(),
-        Json::Object(map) => map
-            .iter()
-            .map(|(key, item)| (Value::from(key.as_str()), to_template(item)))
-            .collect(),
+        Json::Object(map) => Value::from_pairs(
+            map.iter()
+                .map(|(key, item)| (Value::from(key.as_str()), to_template(item))),
+        ),
     }
 }
 

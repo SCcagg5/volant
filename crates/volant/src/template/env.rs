@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use minijinja::functions::Function;
-use minijinja::value::{FunctionArgs, FunctionResult, Rest, ValueKind};
+use minijinja::value::{FunctionArgs, FunctionResult, Rest, ValueKind, ValueOrKwargs};
 use minijinja::{Environment, ErrorKind, State, UndefinedBehavior};
 use serde_json::Value;
 
@@ -46,6 +46,15 @@ pub(super) fn environment(base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) -> En
         if value.is_none() {
             return Ok(());
         }
+        // Bytes print as the text they hold, as ansible-core joins them into the text.
+        if let Some(bytes) = super::pymethods::bytes::of(value) {
+            let text = bytes
+                .text()
+                .map_err(|e| minijinja::Error::new(ErrorKind::InvalidOperation, e))?;
+            return out.write_str(text).map_err(|_| {
+                minijinja::Error::new(ErrorKind::WriteFailure, "failed to write output")
+            });
+        }
         match container_repr(value) {
             Some(text) => out.write_str(&text).map_err(|_| {
                 minijinja::Error::new(ErrorKind::WriteFailure, "failed to write output")
@@ -54,9 +63,10 @@ pub(super) fn environment(base_dir: PathBuf, bridge: Option<&Arc<Bridge>>) -> En
         }
     });
     filters::register(&mut env, base_dir, bridge);
+    super::order::register(&mut env);
     env.add_function(CONCAT_KEY, concat);
     env.add_function("range", range);
-    env.add_function("dict", globals::dict);
+    env.add_global("dict", minijinja::Value::from_object(globals::DictType));
     env.add_function("cycler", globals::cycler);
     env.add_function("joiner", minijinja_contrib::globals::joiner);
     env.add_function("undef", globals::undef);
@@ -94,6 +104,9 @@ pub(super) fn container_repr(value: &minijinja::Value) -> Option<String> {
     }
     if let Some(range) = value.downcast_object_ref::<Range>() {
         return Some(range.to_string());
+    }
+    if super::pymethods::bytes::holds(value) {
+        return Some(super::pymethods::format::repr(value));
     }
     if !matches!(
         value.kind(),
@@ -272,7 +285,7 @@ where
     Args: for<'a> FunctionArgs<'a>,
 {
     let f = undefined_through(name, f);
-    let filter = move |state: &State, args: Rest<minijinja::Value>| {
+    let filter = move |state: &mut State, args: Rest<ValueOrKwargs>| {
         if args.iter().any(|v| !v.is_undefined() && holds_undefined(v)) {
             return Err(minijinja::Error::from(ErrorKind::UndefinedError));
         }
@@ -292,7 +305,7 @@ where
 pub(crate) fn undefined_through<F, Rv, Args>(
     name: &str,
     f: F,
-) -> impl Fn(&State, Rest<minijinja::Value>) -> Result<minijinja::Value, minijinja::Error>
+) -> impl Fn(&mut State, Rest<ValueOrKwargs>) -> Result<minijinja::Value, minijinja::Error>
 + Clone
 + Send
 + Sync
@@ -308,7 +321,8 @@ where
         "ternary" => 1,
         _ => usize::MAX,
     };
-    move |state: &State, args: Rest<minijinja::Value>| {
+    move |state: &mut State, args: Rest<ValueOrKwargs>| {
+        let args = args.into_values();
         if any_undefined(&args[..checked.min(args.len())]) {
             return Ok(minijinja::Value::UNDEFINED);
         }
@@ -361,7 +375,8 @@ where
 {
     let f = minijinja::Value::from_function(f);
     let sees_undefined = ["defined", "undefined"].contains(&name);
-    let test = move |state: &State, args: Rest<minijinja::Value>| {
+    let test = move |state: &mut State, args: Rest<ValueOrKwargs>| {
+        let args = args.into_values();
         if !sees_undefined && any_undefined(&args) {
             return Err(minijinja::Error::from(ErrorKind::UndefinedError));
         }

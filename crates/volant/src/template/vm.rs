@@ -7,8 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use minijinja::machinery::{
-    CodeGenerator, CompiledTemplate, Instruction, Instructions, TemplateConfig, Vm,
-    WhitespaceConfig, make_string_output, parse_expr,
+    CodeGenerator, CompiledTemplate, Instruction, TemplateConfig, eval, make_string_output,
+    parse_expr,
 };
 use minijinja::syntax::SyntaxConfig;
 use minijinja::{AutoEscape, ErrorKind};
@@ -20,13 +20,15 @@ pub(super) use expression::single_expression;
 
 use super::bridged;
 use super::context::set_literal;
-use super::env::{attr_call, const_call, container_repr, holds_undefined, var_call};
-use super::pymethods::mutable::MUTATORS;
+use super::env::{container_repr, holds_undefined};
+use super::pymethods::format::{holds_tuple, repr, to_str};
 use super::templar::Templar;
-use super::{
-    CONCAT_KEY, CONST_KEY, ITEM_KEY, MITEM_KEY, MKLIST_KEY, MKMAP_KEY, QUERY_KEY, REM_KEY,
-    REMT_KEY, TemplateError, UNDEFINED, VAULT_NAME,
-};
+use super::{TemplateError, UNDEFINED};
+
+mod rewrite;
+
+use rewrite::mutates;
+pub(super) use rewrite::route_calls;
 
 /// Replaces every `!unsafe` wrapper inside `value` by its text, and every `!vault` wrapper that
 /// decrypts by what it holds; whether there was one. A vault wrapper that does not decrypt stays
@@ -68,7 +70,6 @@ pub(super) struct TemplateReads {
 pub(super) fn template_reads(source: &str) -> Option<TemplateReads> {
     let config = TemplateConfig {
         syntax_config: SyntaxConfig::default(),
-        ws_config: WhitespaceConfig::default(),
         default_auto_escape: Arc::new(|_| AutoEscape::None),
     };
     let compiled = no_panic(|| CompiledTemplate::new("<reads>", source, &config)).ok()?;
@@ -106,92 +107,21 @@ pub(super) fn concat(
     if holds_undefined(&left) || holds_undefined(&right) {
         return Err(minijinja::Error::from(ErrorKind::UndefinedError));
     }
-    let shown = |v: &minijinja::Value| container_repr(v).unwrap_or_else(|| v.to_string());
+    let shown = |v: &minijinja::Value| {
+        if holds_tuple(v) {
+            return repr(v);
+        }
+        // Python's `str` of a float: `nan`, `1e+16`.
+        if v.kind() == minijinja::value::ValueKind::Number && !v.is_integer() {
+            return to_str(v);
+        }
+        container_repr(v).unwrap_or_else(|| v.to_string())
+    };
     Ok(minijinja::Value::from(format!(
         "{}{}",
         shown(&left),
         shown(&right)
     )))
-}
-
-/// Replaces each `~` in compiled code by a call to [`concat()`], and each call to `query` or `q`
-/// by a call to [`QUERY_KEY`]. minijinja evaluates `~` in its VM with no hook, and its syntax tree
-/// cannot be rewritten in place, so the swap happens on the bytecode: the concatenation
-/// instruction and a two-argument call take the same two operands off the stack in the same
-/// order, and a call keeps its own, so every jump target stays where it was.
-///
-/// `mutating` is true when the template calls a method that changes a list or mapping in place
-/// (see [`mutates`]). Each variable, attribute and item it reads then goes through a function that
-/// hands back the mutable form of a plain list or mapping.
-///
-/// Says whether the code opens a capture (`{% set x %}...{% endset %}`, `{% filter %}`), whose
-/// `{{ }}` print into a buffer, not into the output.
-pub(super) fn route_calls(instructions: &mut Instructions<'_>, mutating: bool) -> bool {
-    let mut captures = false;
-    // A macro or a `set` that takes the name `q` or `query` shadows the lookup shorthand.
-    let mut shadowed = Vec::new();
-    let mut at = 0;
-    while let Some(op) = instructions.get(at) {
-        if let Instruction::BuildMacro(name, ..) | Instruction::StoreLocal(name) = op {
-            shadowed.push(name.to_string());
-        }
-        captures |= matches!(op, Instruction::BeginCapture(..));
-        at += 1;
-    }
-    let mut idx = 0;
-    loop {
-        let named = match (instructions.get(idx), instructions.get(idx + 1)) {
-            (Some(Instruction::Lookup(name)), Some(Instruction::PerformTest(test, ..)))
-                if bridged::short(test) == "vault_encrypted" =>
-            {
-                Some(format!("{VAULT_NAME}{name}"))
-            }
-            _ => None,
-        };
-        let tuple_before = idx > 0 && writes_a_tuple(instructions.get(idx - 1));
-        let Some(op) = instructions.get_mut(idx) else {
-            break;
-        };
-        if let Some(named) = named {
-            *op = Instruction::LoadConst(minijinja::Value::from(named));
-        }
-        match op {
-            Instruction::StringConcat => *op = Instruction::CallFunction(CONCAT_KEY, Some(2)),
-            Instruction::Rem => {
-                let key = if tuple_before { REMT_KEY } else { REM_KEY };
-                *op = Instruction::CallFunction(key, Some(2));
-            }
-            Instruction::GetItem => {
-                let key = if mutating { MITEM_KEY } else { ITEM_KEY };
-                *op = Instruction::CallFunction(key, Some(2));
-            }
-            Instruction::GetAttr(name) => {
-                *op = Instruction::CallFunction(attr_call(name, mutating), Some(1));
-            }
-            Instruction::BuildList(Some(n)) if mutating && u16::try_from(*n).is_ok() => {
-                *op = Instruction::CallFunction(MKLIST_KEY, u16::try_from(*n).ok());
-            }
-            Instruction::BuildMap(n) if mutating && u16::try_from(*n * 2).is_ok() => {
-                *op = Instruction::CallFunction(MKMAP_KEY, u16::try_from(*n * 2).ok());
-            }
-            Instruction::LoadConst(value) if mutating => {
-                if let Some(name) = const_call(value) {
-                    *op = Instruction::CallFunction(name, Some(0));
-                }
-            }
-            Instruction::Lookup(name) if mutating => {
-                *op = Instruction::CallFunction(var_call(name), Some(0));
-            }
-            Instruction::CallFunction(name, args)
-                if matches!(*name, "query" | "q") && !shadowed.iter().any(|n| n == name) =>
-            {
-                *op = Instruction::CallFunction(QUERY_KEY, *args);
-            }
-            _ => {}
-        }
-        idx += 1;
-    }
-    captures
 }
 
 /// What a render wrote through `{{ }}`, which is all a string render needs to know to tell whether
@@ -285,40 +215,8 @@ pub(super) fn note_emit(out: &minijinja::Output<'_>, value: &minijinja::Value) {
     });
 }
 
-/// Whether an instruction pushes a list written out in the template, `(a, b)` or `['a', 'b']`: what
-/// stands on the right of `%` as a tuple does. A list that a variable holds, or a call answers, is
-/// one argument, as it is in Python.
-fn writes_a_tuple(op: Option<&Instruction<'_>>) -> bool {
-    match op {
-        Some(Instruction::BuildList(Some(_))) => true,
-        Some(Instruction::LoadConst(value)) => value.kind() == minijinja::value::ValueKind::Seq,
-        // The same two, after the rewrite of a template that changes lists in place.
-        Some(Instruction::CallFunction(name, _)) => {
-            *name == MKLIST_KEY
-                || name
-                    .strip_prefix(CONST_KEY)
-                    .is_some_and(|json| json.starts_with('['))
-        }
-        _ => false,
-    }
-}
-
-/// Whether compiled code calls a method that changes a list or mapping in place.
-pub(super) fn mutates(instructions: &Instructions<'_>) -> bool {
-    let mut at = 0;
-    while let Some(op) = instructions.get(at) {
-        if let Instruction::CallMethod(name, _) = op
-            && MUTATORS.contains(name)
-        {
-            return true;
-        }
-        at += 1;
-    }
-    false
-}
-
 /// `env.render_named_str`, with `~` routed through [`concat()`]. Compiled once per call, as
-/// `render_named_str` does, with the whitespace and syntax settings given. The only place that
+/// `render_named_str` does, with the syntax settings given (whitespace included). The only place that
 /// decides auto-escape. The environment is the templar's, with the filters and tests the
 /// compiled code calls that only the Python helper has ([`Templar::env_for`]).
 pub(super) fn render_str(
@@ -326,10 +224,9 @@ pub(super) fn render_str(
     name: &str,
     source: &str,
     ctx: &minijinja::Value,
-    ws_config: WhitespaceConfig,
     syntax_config: SyntaxConfig,
 ) -> Result<String, minijinja::Error> {
-    render_counted(templar, name, source, ctx, ws_config, syntax_config).map(|(text, _)| text)
+    render_counted(templar, name, source, ctx, syntax_config).map(|(text, _)| text)
 }
 
 /// [`render_str`], and what the render printed through `{{ }}`.
@@ -338,12 +235,10 @@ pub(super) fn render_counted(
     name: &str,
     source: &str,
     ctx: &minijinja::Value,
-    ws_config: WhitespaceConfig,
     syntax_config: SyntaxConfig,
 ) -> Result<(String, Emitted), minijinja::Error> {
     let config = TemplateConfig {
         syntax_config,
-        ws_config,
         // Never by file name: measured on ansible-core 2.19.12, `index.html.j2` holding
         // `{{ "<b>" }}` writes `<b>`.
         default_auto_escape: Arc::new(|_| AutoEscape::None),
@@ -363,7 +258,8 @@ pub(super) fn render_counted(
         captures,
         ..Emitted::default()
     });
-    let run = Vm::new(&env).eval(
+    let run = eval(
+        &env,
         &compiled.instructions,
         ctx.clone(),
         &compiled.blocks,
@@ -404,7 +300,8 @@ pub(super) fn eval_expr(
     let _ = route_calls(&mut instructions, mutating);
     let env = templar.env_for([&instructions]);
     let mut out = String::new();
-    let (value, _) = Vm::new(&env).eval(
+    let (value, _) = eval(
+        &env,
         &instructions,
         ctx.clone(),
         &BTreeMap::new(),
@@ -441,8 +338,9 @@ pub(super) fn convert_error(err: minijinja::Error) -> TemplateError {
 /// Notes that a pass left text that must stay as it is, when the result still holds a template
 /// marker and the marker is the text's own:
 ///
-/// - the pass read no variable, so no variable's template can be in the result: the text wrote
-///   the marker itself, with a `raw` block or in a string such as `'{{'`;
+/// - no read of the pass handed out a template that was not rendered, so no stored template can
+///   be in the result: the text wrote the marker itself, with a `raw` block or in a string such as
+///   `'{{'`, or built it from names and text that hold none (`'{{ ' ~ name ~ ' }}'`, `replace`);
 /// - or `source` has a `raw` block. `source` is the author's text on the `first` pass. On a
 ///   later pass it is a variable's value, and a result that still has a `raw` block is a chain
 ///   not read to its end.
@@ -454,14 +352,14 @@ pub(super) fn keep_literal(
     result: &Value,
     ctx: &minijinja::Value,
     first: bool,
-    read_none: bool,
+    none_deferred: bool,
 ) {
     if !holds_template(result) {
         return;
     }
     let raw =
         opens_raw(source) && (first || !matches!(result, Value::String(text) if opens_raw(text)));
-    if read_none || raw {
+    if none_deferred || raw {
         set_literal(ctx, true);
     }
 }

@@ -3,10 +3,14 @@
 //! `'{:>5}'.format(x)`. minijinja has no such methods of its own, so the environment's
 //! unknown-method hook answers them. A name no table below holds fails by its name.
 
-use minijinja::value::ValueKind;
+use std::sync::Arc;
+
+use minijinja::value::{Tuple, ValueKind};
 use minijinja::{Environment, Error, ErrorKind, State, Value};
 
 mod args;
+pub(crate) mod bytes;
+mod codec;
 mod dicts;
 mod digits;
 pub(crate) mod format;
@@ -18,7 +22,9 @@ mod search;
 mod text;
 mod translate;
 
-use args::{Call, raise, type_of};
+pub(super) use args::type_of;
+use args::{Call, raise};
+pub(in crate::template) use dicts::fromkeys;
 use mutable::{Dict, MutDict, MutList, is_dict, is_list};
 pub(super) use percent::{format_filter, percent};
 
@@ -40,7 +46,7 @@ pub(super) fn register(env: &mut Environment<'static>) {
     });
 }
 
-fn call(state: &State, value: &Value, method: &str, args: &[Value]) -> Result<Value, Error> {
+fn call(state: &mut State, value: &Value, method: &str, args: &[Value]) -> Result<Value, Error> {
     if value.kind() == ValueKind::String
         && let Some(s) = value.as_str()
     {
@@ -55,6 +61,27 @@ fn call(state: &State, value: &Value, method: &str, args: &[Value]) -> Result<Va
                 "object of type 'str' has no attribute '{method}'"
             )));
         }
+    }
+    if let Some(held) = bytes::of(value) {
+        if super::any_undefined(args) {
+            return Err(Error::from(ErrorKind::UndefinedError));
+        }
+        return bytes::call(held, method, args)
+            .unwrap_or_else(|| Err(Error::from(ErrorKind::UnknownMethod)));
+    }
+    if let Some(tuple) = value.downcast_object_ref::<Tuple>() {
+        if super::any_undefined(args) {
+            return Err(Error::from(ErrorKind::UndefinedError));
+        }
+        if matches!(method, "index" | "count")
+            && let Some(answer) =
+                lists::call(&MutList::temp(Arc::new(tuple.to_vec())), method, args)
+        {
+            return answer;
+        }
+        return Err(raise(format!(
+            "object of type 'tuple' has no attribute '{method}'"
+        )));
     }
     if matches!(value.kind(), ValueKind::Seq | ValueKind::Iterable)
         && !is_list(value)
@@ -203,6 +230,7 @@ fn string(s: &str, name: &str, args: &[Value]) -> Option<Result<Value, Error>> {
             .one(name)
             .and_then(|table| translate::translate(s, table)),
         "maketrans" => translate::maketrans(&call),
+        "encode" => bytes::encode(s, &call),
         _ => return None,
     })
 }

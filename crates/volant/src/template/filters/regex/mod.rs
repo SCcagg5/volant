@@ -40,6 +40,9 @@ fn unfold_pattern(s: &str) -> String {
 
 /// `to_text(value, nonstring='simplerepr')`: text as it is, anything else as Python prints it.
 fn to_text(value: &Value) -> String {
+    if let Some(bytes) = super::super::pymethods::bytes::of(value) {
+        return String::from_utf8_lossy(&bytes.0).into_owned();
+    }
     value.as_str().map_or_else(
         || python_repr(&crate::template::bigint::to_json(value).unwrap_or(serde_json::Value::Null)),
         str::to_string,
@@ -49,7 +52,7 @@ fn to_text(value: &Value) -> String {
 /// The arguments of a Python function, positional first and then by name. `names` are the
 /// parameters after the value, in order. A parameter given twice or not at all named, or too
 /// many positional arguments, is an error when `strict`.
-fn bind(
+pub(super) fn bind(
     filter: &str,
     names: &[&str],
     positional: &[Value],
